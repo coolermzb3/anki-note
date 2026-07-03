@@ -5,6 +5,8 @@ export interface SelectNextNoteOptions {
   reviews: ReviewRecord[];
   lastTargetNoteId?: TargetNoteId;
   newCardRate?: number;
+  focusedTraining?: boolean;
+  focusedTrainingRate?: number;
   rng?: () => number;
 }
 
@@ -52,6 +54,25 @@ export function getNoteWeight(note: TargetNote, reviews: ReviewRecord[]): number
   return 1 + newCardReward + slowPenalty + errorPenalty;
 }
 
+export function getFocusedTrainingNotes(notes: TargetNote[], reviews: ReviewRecord[]): TargetNote[] {
+  if (notes.length <= 3) {
+    return notes;
+  }
+
+  const weighted = notes
+    .map((note) => ({ note, weight: getNoteWeight(note, reviews) }))
+    .sort((a, b) => b.weight - a.weight || a.note.id.localeCompare(b.note.id));
+  const highest = weighted[0]?.weight ?? 0;
+  const lowest = weighted[weighted.length - 1]?.weight ?? 0;
+  if (highest === lowest) {
+    return notes;
+  }
+
+  const targetCount = Math.max(3, Math.ceil(notes.length / 2));
+  const threshold = weighted[targetCount - 1]?.weight ?? lowest;
+  return weighted.filter((entry) => entry.weight >= threshold).map((entry) => entry.note);
+}
+
 function withoutImmediateRepeat(notes: TargetNote[], lastTargetNoteId?: TargetNoteId): TargetNote[] {
   if (notes.length <= 1 || !lastTargetNoteId) {
     return notes;
@@ -65,13 +86,17 @@ export function selectNextNote({
   reviews,
   lastTargetNoteId,
   newCardRate = 0.25,
+  focusedTraining = false,
+  focusedTrainingRate = 0.8,
   rng = Math.random,
 }: SelectNextNoteOptions): TargetNote {
   if (notes.length === 0) {
     throw new Error("Cannot select a note without enabled groups.");
   }
 
-  const eligible = withoutImmediateRepeat(notes, lastTargetNoteId);
+  const sourceNotes =
+    focusedTraining && rng() < focusedTrainingRate ? getFocusedTrainingNotes(notes, reviews) : notes;
+  const eligible = withoutImmediateRepeat(sourceNotes, lastTargetNoteId);
   if (eligible.length === 1) {
     return eligible[0];
   }

@@ -110,12 +110,14 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
       fixedCount: 20,
       fixedDurationSeconds: 180,
       autoPlayTarget: true,
+      focusedTraining: false,
       inactivityThresholdSeconds: 30,
       correctDelayMs: 400,
     }),
     dataSetId: manifest.dataSetId,
     createdAt: manifest.createdAt,
     firstReviewAt: manifest.firstReviewAt,
+    focusedTraining: existingSettings?.focusedTraining ?? false,
   };
   return { manifest, settings, sessions, reviews };
 }

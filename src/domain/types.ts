@@ -65,6 +65,7 @@ export interface PracticeSessionRecord {
   enabledGroupIds: PracticeGroupId[];
   fixedCount?: number;
   fixedDurationSeconds?: number;
+  focusedTraining?: boolean;
   startedAt: string;
   endedAt?: string;
   endReason?: SessionEndReason;
@@ -83,6 +84,7 @@ export interface AppSettings {
   fixedCount: number;
   fixedDurationSeconds: number;
   autoPlayTarget: boolean;
+  focusedTraining: boolean;
   inactivityThresholdSeconds: number;
   correctDelayMs: number;
 }

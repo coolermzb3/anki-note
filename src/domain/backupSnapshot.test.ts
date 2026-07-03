@@ -14,6 +14,7 @@ const settings: AppSettings = {
   fixedCount: 20,
   fixedDurationSeconds: 180,
   autoPlayTarget: true,
+  focusedTraining: false,
   inactivityThresholdSeconds: 30,
   correctDelayMs: 400,
 };

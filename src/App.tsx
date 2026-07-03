@@ -67,7 +67,7 @@ export function App(): JSX.Element {
             onSettingsSaved={(settings) => setData((current) => (current ? { ...current, settings } : current))}
           />
         ) : null}
-        {view === "stats" ? <StatsView reviews={data.reviews} /> : null}
+        {view === "stats" ? <StatsView reviews={data.reviews} sessions={data.sessions} /> : null}
         {view === "settings" ? (
           <SettingsView
             backupState={data.backupState}

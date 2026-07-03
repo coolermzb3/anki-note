@@ -1,5 +1,5 @@
 import { ALL_NOTES } from "./notes";
-import type { NoteName, PracticeGroupId, ReviewRecord, TargetNoteId } from "./types";
+import type { NoteName, PracticeGroupId, PracticeSessionRecord, ReviewRecord, TargetNoteId } from "./types";
 
 export interface DailyStat {
   date: string;
@@ -19,6 +19,16 @@ export interface NoteStat {
   errorRate: number;
   commonConfusion?: NoteName;
   weaknessScore: number;
+}
+
+export interface PracticeSessionStat {
+  sessionId: string;
+  startedAt: string;
+  endedAt?: string;
+  completedReviews: number;
+  p10Ms?: number;
+  medianMs?: number;
+  p90Ms?: number;
 }
 
 export function isQualifiedReview(review: ReviewRecord, includeInterrupted = false): boolean {
@@ -88,6 +98,49 @@ export function buildDailyStats(reviews: ReviewRecord[], includeInterrupted = fa
         heatLevel: completedReviews === 0 ? 0 : completedReviews >= highThreshold ? 2 : 1,
       };
     });
+}
+
+function earliestReviewStartedAt(reviews: ReviewRecord[]): string {
+  return reviews.reduce(
+    (earliest, review) => (new Date(review.startedAt).getTime() < new Date(earliest).getTime() ? review.startedAt : earliest),
+    reviews[0].startedAt,
+  );
+}
+
+function latestReviewEndedAt(reviews: ReviewRecord[]): string {
+  return reviews.reduce(
+    (latest, review) => (new Date(review.endedAt).getTime() > new Date(latest).getTime() ? review.endedAt : latest),
+    reviews[0].endedAt,
+  );
+}
+
+export function buildPracticeSessionStats(
+  reviews: ReviewRecord[],
+  sessions: PracticeSessionRecord[] = [],
+  includeInterrupted = false,
+): PracticeSessionStat[] {
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const reviewsBySession = new Map<string, ReviewRecord[]>();
+
+  for (const review of reviews.filter((review) => isQualifiedReview(review, includeInterrupted))) {
+    reviewsBySession.set(review.sessionId, [...(reviewsBySession.get(review.sessionId) ?? []), review]);
+  }
+
+  return [...reviewsBySession.entries()]
+    .map(([sessionId, sessionReviews]) => {
+      const session = sessionsById.get(sessionId);
+      const times = sessionReviews.map((review) => review.activeMs);
+      return {
+        sessionId,
+        startedAt: session?.startedAt ?? earliestReviewStartedAt(sessionReviews),
+        endedAt: session?.endedAt ?? latestReviewEndedAt(sessionReviews),
+        completedReviews: sessionReviews.length,
+        p10Ms: percentile(times, 0.1),
+        medianMs: percentile(times, 0.5),
+        p90Ms: percentile(times, 0.9),
+      };
+    })
+    .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime() || a.sessionId.localeCompare(b.sessionId));
 }
 
 export function buildNoteStats(

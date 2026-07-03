@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playPianoNote, playTargetNote, unlockAudio } from "../audio/piano";
 import { db, saveReview } from "../data/db";
 import { writeBackupNow } from "../data/backup";
-import { ANSWER_BUTTONS, getNotesForGroups, PRACTICE_GROUPS } from "../domain/notes";
+import { ANSWER_BUTTONS, getNotesForGroups, PRACTICE_GROUPS_LOW_TO_HIGH } from "../domain/notes";
 import { selectNextNote } from "../domain/scheduler";
 import { buildNoteStats, formatMs, percentile } from "../domain/stats";
 import type {
@@ -60,6 +60,14 @@ function formatDuration(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function durationSecondsToInputMinutes(seconds: number): string {
+  return Number((seconds / 60).toFixed(2)).toString();
+}
+
+function inputMinutesToDurationSeconds(value: string): number {
+  return Math.max(60, Math.round(Number(value) * 60));
+}
+
 export function PracticeView({
   settings,
   reviews,
@@ -73,6 +81,8 @@ export function PracticeView({
   const [enabledGroupIds, setEnabledGroupIds] = useState<PracticeGroupId[]>(settings.enabledGroupIds);
   const [fixedCount, setFixedCount] = useState(settings.fixedCount);
   const [fixedDurationSeconds, setFixedDurationSeconds] = useState(settings.fixedDurationSeconds);
+  const [autoPlayTarget, setAutoPlayTarget] = useState(settings.autoPlayTarget);
+  const [focusedTraining, setFocusedTraining] = useState(settings.focusedTraining ?? false);
   const [session, setSession] = useState<PracticeSessionRecord | null>(null);
   const [currentNote, setCurrentNote] = useState<TargetNote | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
@@ -102,6 +112,8 @@ export function PracticeView({
       setEnabledGroupIds(settings.enabledGroupIds);
       setFixedCount(settings.fixedCount);
       setFixedDurationSeconds(settings.fixedDurationSeconds);
+      setAutoPlayTarget(settings.autoPlayTarget);
+      setFocusedTraining(settings.focusedTraining ?? false);
     }
   }, [phase, settings]);
 
@@ -179,11 +191,22 @@ export function PracticeView({
       defaultMode: mode,
       fixedCount,
       fixedDurationSeconds,
+      autoPlayTarget,
+      focusedTraining,
     };
     await db.settings.put(nextSettings);
     onSettingsSaved(nextSettings);
     return nextSettings;
-  }, [enabledGroupIds, fixedCount, fixedDurationSeconds, mode, onSettingsSaved, settings]);
+  }, [
+    autoPlayTarget,
+    enabledGroupIds,
+    fixedCount,
+    fixedDurationSeconds,
+    focusedTraining,
+    mode,
+    onSettingsSaved,
+    settings,
+  ]);
 
   const maybeBackupDuringOpenEnded = useCallback(
     async (nextCompletedCount: number): Promise<void> => {
@@ -219,23 +242,25 @@ export function PracticeView({
       };
       setCurrentNote(note);
       setFeedback(null);
-      if (settings.autoPlayTarget) {
+      if (autoPlayTarget) {
         void playTargetNote(note).catch(() => undefined);
       }
     },
-    [settings.autoPlayTarget],
+    [autoPlayTarget],
   );
 
   const selectAndStartNext = useCallback(
     (extraReviews: ReviewRecord[] = []): void => {
+      const nextReviews = [...reviews, ...sessionReviewsRef.current, ...extraReviews];
       const note = selectNextNote({
         notes: enabledNotes,
-        reviews: [...reviews, ...sessionReviewsRef.current, ...extraReviews],
+        reviews: nextReviews,
+        focusedTraining,
         lastTargetNoteId: lastTargetNoteIdRef.current,
       });
       startPrompt(note);
     },
-    [enabledNotes, reviews, startPrompt],
+    [enabledNotes, focusedTraining, reviews, startPrompt],
   );
 
   const finishCurrentReview = useCallback(
@@ -325,6 +350,7 @@ export function PracticeView({
       enabledGroupIds,
       fixedCount: mode === "fixed-count" ? fixedCount : undefined,
       fixedDurationSeconds: mode === "fixed-duration" ? fixedDurationSeconds : undefined,
+      focusedTraining,
       startedAt,
       completedCount: 0,
       interruptedCount: 0,
@@ -343,12 +369,24 @@ export function PracticeView({
     setWrongAnswerCount(0);
     setSummary(null);
     setPhase("running");
+    const nextEnabledNotes = getNotesForGroups(nextSettings.enabledGroupIds);
     const firstNote = selectNextNote({
-      notes: getNotesForGroups(nextSettings.enabledGroupIds),
+      notes: nextEnabledNotes,
       reviews,
+      focusedTraining: nextSettings.focusedTraining,
     });
     startPrompt(firstNote);
-  }, [enabledGroupIds, enabledNotes.length, fixedCount, fixedDurationSeconds, mode, persistConfig, reviews, startPrompt]);
+  }, [
+    enabledGroupIds,
+    enabledNotes.length,
+    fixedCount,
+    fixedDurationSeconds,
+    focusedTraining,
+    mode,
+    persistConfig,
+    reviews,
+    startPrompt,
+  ]);
 
   const replayTarget = useCallback(async (): Promise<void> => {
     const prompt = promptRef.current;
@@ -491,7 +529,7 @@ export function PracticeView({
     settings.inactivityThresholdSeconds,
   ]);
 
-  const setupDisabled = enabledGroupIds.length === 0;
+  const setupDisabled = enabledNotes.length === 0;
   const remainingMs = mode === "fixed-duration" ? fixedDurationSeconds * 1000 - getSessionActiveMs() : 0;
   const sessionQualifiedTimes = (summary?.reviews ?? [])
     .filter((review) => review.answeredCorrectly && !review.interrupted)
@@ -515,7 +553,7 @@ export function PracticeView({
             <div className="control-block">
               <span className="control-label">启用组</span>
               <div className="group-grid">
-                {PRACTICE_GROUPS.map((group) => {
+                {PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => {
                   const checked = enabledGroupIds.includes(group.id);
                   return (
                     <label className={checked ? "choice choice-active" : "choice"} key={group.id}>
@@ -574,7 +612,7 @@ export function PracticeView({
               <div className="control-block">
                 <span className="control-label">时长</span>
                 <div className="number-row">
-                  {[60, 180, 300, 600].map((seconds) => (
+                  {[60, 120, 180, 300].map((seconds) => (
                     <button
                       className={fixedDurationSeconds === seconds ? "active" : ""}
                       key={seconds}
@@ -584,16 +622,43 @@ export function PracticeView({
                     </button>
                   ))}
                   <input
-                    min={10}
-                    max={3600}
-                    step={10}
+                    min={1}
+                    max={120}
+                    step={0.5}
                     type="number"
-                    value={fixedDurationSeconds}
-                    onChange={(event) => setFixedDurationSeconds(Math.max(10, Number(event.target.value)))}
+                    value={durationSecondsToInputMinutes(fixedDurationSeconds)}
+                    onChange={(event) => setFixedDurationSeconds(inputMinutesToDurationSeconds(event.target.value))}
                   />
                 </div>
               </div>
             ) : null}
+
+            <div className="control-block">
+              <span className="control-label">训练策略</span>
+              <label className={focusedTraining ? "choice choice-active" : "choice"}>
+                <input
+                  checked={focusedTraining}
+                  type="checkbox"
+                  onChange={(event) => setFocusedTraining(event.target.checked)}
+                />
+                <span>加强专项训练</span>
+              </label>
+            </div>
+
+            <div className="setting-row setup-setting-row">
+              <div>
+                <strong>自动播放目标音</strong>
+                <span>卡片出现时播放一次</span>
+              </div>
+              <label className="toggle">
+                <input
+                  checked={autoPlayTarget}
+                  type="checkbox"
+                  onChange={(event) => setAutoPlayTarget(event.target.checked)}
+                />
+                <span />
+              </label>
+            </div>
 
             <div className="action-row">
               <button className="primary" disabled={setupDisabled} onClick={() => void startSession()}>

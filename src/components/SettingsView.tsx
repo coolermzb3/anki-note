@@ -52,21 +52,6 @@ export function SettingsView({
       <div className="panel settings-panel">
         <div className="setting-row">
           <div>
-            <strong>自动播放目标音</strong>
-            <span>卡片出现时播放一次</span>
-          </div>
-          <label className="toggle">
-            <input
-              checked={settings.autoPlayTarget}
-              type="checkbox"
-              onChange={(event) => void saveSettings({ ...settings, autoPlayTarget: event.target.checked })}
-            />
-            <span />
-          </label>
-        </div>
-
-        <div className="setting-row">
-          <div>
             <strong>离开阈值</strong>
             <span>聚焦但无输入后标记中断</span>
           </div>

@@ -9,29 +9,31 @@ interface StaffPromptProps {
 }
 
 export function StaffPrompt({ note, compact = false }: StaffPromptProps): JSX.Element {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const rendererTargetRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
+    const frame = frameRef.current;
+    const rendererTarget = rendererTargetRef.current;
+    if (!frame || !rendererTarget) {
       return;
     }
 
     function render(): void {
-      if (!container) {
+      if (!frame || !rendererTarget) {
         return;
       }
-      container.innerHTML = "";
-      const containerWidth = container.clientWidth || (compact ? 220 : 620);
-      const width = Math.max(compact ? 220 : 360, Math.min(compact ? 320 : 720, containerWidth));
-      const height = compact ? 150 : 250;
-      const renderer = new Renderer(container, Renderer.Backends.SVG);
+      rendererTarget.innerHTML = "";
+      const containerWidth = frame.clientWidth || (compact ? 192 : 620);
+      const width = Math.max(compact ? 192 : 360, Math.min(compact ? 226 : 720, containerWidth));
+      const height = compact ? 116 : 250;
+      const renderer = new Renderer(rendererTarget, Renderer.Backends.SVG);
       renderer.resize(width, height);
       const context = renderer.getContext();
-      const staveWidth = width - (compact ? 34 : 56);
-      const x = compact ? 18 : 28;
-      const trebleY = compact ? 14 : 24;
-      const bassY = compact ? 82 : 138;
+      const staveWidth = width - (compact ? 24 : 56);
+      const x = compact ? 12 : 28;
+      const trebleY = compact ? -6 : 24;
+      const bassY = compact ? 50 : 138;
       const treble = new Stave(x, trebleY, staveWidth).addClef("treble");
       const bass = new Stave(x, bassY, staveWidth).addClef("bass");
       treble.setContext(context).draw();
@@ -47,15 +49,39 @@ export function StaffPrompt({ note, compact = false }: StaffPromptProps): JSX.El
         duration: "w",
       });
       const voice = new Voice({ numBeats: 4, beatValue: 4 }).addTickables([staveNote]);
-      new Formatter().joinVoices([voice]).format([voice], staveWidth - (compact ? 96 : 150), { context });
+      new Formatter().joinVoices([voice]).format([voice], staveWidth - (compact ? 74 : 150), { context });
       voice.draw(context, targetStave);
+      if (compact) {
+        const svg = rendererTarget.querySelector("svg");
+        const bounds = svg?.getBBox();
+        if (svg && bounds && bounds.width > 0 && bounds.height > 0) {
+          const horizontalPadding = 8;
+          const verticalPadding = 10;
+          const viewBoxWidth = Math.max(width, bounds.width + horizontalPadding * 2);
+          const viewBoxHeight = Math.max(112, bounds.height + verticalPadding * 2);
+          const viewBoxX = bounds.x + bounds.width / 2 - viewBoxWidth / 2;
+          const viewBoxY = bounds.y + bounds.height / 2 - viewBoxHeight / 2;
+          svg.setAttribute(
+            "viewBox",
+            `${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`,
+          );
+          svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+          svg.style.overflow = "hidden";
+          svg.removeAttribute("height");
+          svg.removeAttribute("width");
+        }
+      }
     }
 
     render();
     const observer = new ResizeObserver(render);
-    observer.observe(container);
+    observer.observe(frame);
     return () => observer.disconnect();
   }, [compact, note]);
 
-  return <div ref={containerRef} className={compact ? "staff staff-compact" : "staff"} aria-label={`谱面 ${note.id}`} />;
+  return (
+    <div ref={frameRef} className={compact ? "staff staff-compact" : "staff"} aria-label={`谱面 ${note.id}`}>
+      <div ref={rendererTargetRef} className="staff-renderer" />
+    </div>
+  );
 }

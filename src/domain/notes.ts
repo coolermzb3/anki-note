@@ -37,6 +37,10 @@ export const PRACTICE_GROUPS: PracticeGroup[] = GROUP_ORDER.map((group) => ({
   notes: NOTE_NAMES.map((noteName) => makeTargetNote(noteName, group.octave, group.id)),
 }));
 
+export const PRACTICE_GROUPS_LOW_TO_HIGH: PracticeGroup[] = [...PRACTICE_GROUPS].sort(
+  (a, b) => a.octave - b.octave,
+);
+
 export const ALL_NOTES: TargetNote[] = PRACTICE_GROUPS.flatMap((group) => group.notes);
 
 export const DEFAULT_ENABLED_GROUPS: PracticeGroupId[] = ["C4-B4"];
