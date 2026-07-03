@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.vite-dev.*.log
+*.local
+*.tsbuildinfo
+/vite.config.js
+/vite.config.d.ts
+/vitest.config.js
+/vitest.config.d.ts
+/backup/
+/%SystemDrive%/

@@ -1,0 +1,96 @@
+import type { ReviewRecord, TargetNote, TargetNoteId } from "./types";
+
+export interface SelectNextNoteOptions {
+  notes: TargetNote[];
+  reviews: ReviewRecord[];
+  lastTargetNoteId?: TargetNoteId;
+  newCardRate?: number;
+  rng?: () => number;
+}
+
+interface NotePerformance {
+  exposure: number;
+  recentMedianMs?: number;
+  errorRate: number;
+}
+
+function qualifiedReviewsFor(note: TargetNote, reviews: ReviewRecord[]): ReviewRecord[] {
+  return reviews
+    .filter((review) => review.targetNoteId === note.id && review.answeredCorrectly && !review.interrupted)
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+}
+
+function median(values: number[]): number | undefined {
+  if (values.length === 0) {
+    return undefined;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) {
+    return sorted[mid];
+  }
+  return (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+export function getNotePerformance(note: TargetNote, reviews: ReviewRecord[]): NotePerformance {
+  const qualified = qualifiedReviewsFor(note, reviews);
+  const recent = qualified.slice(-8);
+  const reviewsWithErrors = qualified.filter((review) => review.wrongAnswers.length > 0).length;
+  return {
+    exposure: qualified.length,
+    recentMedianMs: median(recent.map((review) => review.activeMs)),
+    errorRate: qualified.length === 0 ? 0 : reviewsWithErrors / qualified.length,
+  };
+}
+
+export function getNoteWeight(note: TargetNote, reviews: ReviewRecord[]): number {
+  const performance = getNotePerformance(note, reviews);
+  const newCardReward = Math.max(0, 2 - performance.exposure * 0.4);
+  const slowPenalty =
+    performance.recentMedianMs === undefined ? 0 : Math.max(0, Math.min(3, (performance.recentMedianMs - 1400) / 1000));
+  const errorPenalty = performance.errorRate * 3;
+  return 1 + newCardReward + slowPenalty + errorPenalty;
+}
+
+function withoutImmediateRepeat(notes: TargetNote[], lastTargetNoteId?: TargetNoteId): TargetNote[] {
+  if (notes.length <= 1 || !lastTargetNoteId) {
+    return notes;
+  }
+  const filtered = notes.filter((note) => note.id !== lastTargetNoteId);
+  return filtered.length > 0 ? filtered : notes;
+}
+
+export function selectNextNote({
+  notes,
+  reviews,
+  lastTargetNoteId,
+  newCardRate = 0.25,
+  rng = Math.random,
+}: SelectNextNoteOptions): TargetNote {
+  if (notes.length === 0) {
+    throw new Error("Cannot select a note without enabled groups.");
+  }
+
+  const eligible = withoutImmediateRepeat(notes, lastTargetNoteId);
+  if (eligible.length === 1) {
+    return eligible[0];
+  }
+
+  if (rng() < newCardRate) {
+    const exposures = eligible.map((note) => ({ note, exposure: getNotePerformance(note, reviews).exposure }));
+    const minExposure = Math.min(...exposures.map((entry) => entry.exposure));
+    const leastSeen = exposures.filter((entry) => entry.exposure === minExposure).map((entry) => entry.note);
+    return leastSeen[Math.floor(rng() * leastSeen.length)] ?? leastSeen[0];
+  }
+
+  const weighted = eligible.map((note) => ({ note, weight: getNoteWeight(note, reviews) }));
+  const total = weighted.reduce((sum, entry) => sum + entry.weight, 0);
+  let cursor = rng() * total;
+  for (const entry of weighted) {
+    cursor -= entry.weight;
+    if (cursor <= 0) {
+      return entry.note;
+    }
+  }
+  return weighted[weighted.length - 1].note;
+}

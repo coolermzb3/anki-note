@@ -1,0 +1,17 @@
+{
+  "name": "单音识谱",
+  "short_name": "识谱",
+  "description": "钢琴五线谱单音识谱练习",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f3eb",
+  "theme_color": "#f7f3eb",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
