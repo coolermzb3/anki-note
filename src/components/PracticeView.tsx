@@ -482,6 +482,11 @@ export function PracticeView({
         void replayTarget();
         return;
       }
+      if (event.code === "Escape") {
+        event.preventDefault();
+        void completeSession("manual-stop", "manual-stop");
+        return;
+      }
       const answer = ANSWER_BUTTONS.find((button) => event.key === button.key);
       if (answer) {
         event.preventDefault();
@@ -491,7 +496,7 @@ export function PracticeView({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [phase, replayTarget, submitAnswer]);
+  }, [completeSession, phase, replayTarget, submitAnswer]);
 
   useEffect(() => {
     if (phase !== "running") {
@@ -782,7 +787,7 @@ export function PracticeView({
             </span>
           )}
         </div>
-        <button title="结束" onClick={() => void completeSession("manual-stop", "manual-stop")}>
+        <button title="结束 Esc" onClick={() => void completeSession("manual-stop", "manual-stop")}>
           <Square size={18} />
           结束
         </button>

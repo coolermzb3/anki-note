@@ -1,5 +1,6 @@
 import { BarChart3, Dumbbell, Settings } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { preloadPianoSamples } from "./audio/piano";
 import { getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
 import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord } from "./domain/types";
 import { PracticeView } from "./components/PracticeView";
@@ -28,6 +29,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     void recoverAbandonedSessions().then(refresh);
   }, [refresh]);
+
+  useEffect(() => {
+    preloadPianoSamples();
+  }, []);
 
   useEffect(() => {
     if ("serviceWorker" in navigator && import.meta.env.PROD) {

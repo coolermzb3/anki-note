@@ -28,6 +28,9 @@ const PIANO_SAMPLE_URLS = {
 } as const;
 
 type SamplerStatus = "idle" | "loading" | "loaded" | "failed";
+interface GetSamplerOptions {
+  retryFailed?: boolean;
+}
 
 let sampler: Tone.Sampler | undefined;
 let samplerLoadPromise: Promise<void> | undefined;
@@ -46,9 +49,19 @@ function getFallbackSynth(): Tone.PolySynth {
   return fallbackSynth;
 }
 
-function getSampler(): Tone.Sampler | undefined {
+function resetFailedSampler(): void {
+  sampler?.dispose();
+  sampler = undefined;
+  samplerLoadPromise = undefined;
+  samplerStatus = "idle";
+}
+
+function getSampler({ retryFailed = false }: GetSamplerOptions = {}): Tone.Sampler | undefined {
   if (samplerStatus === "failed") {
-    return undefined;
+    if (!retryFailed) {
+      return undefined;
+    }
+    resetFailedSampler();
   }
   if (sampler) {
     return sampler;
@@ -99,9 +112,13 @@ function getLoadedSampler(): Tone.Sampler | undefined {
   return undefined;
 }
 
+export function preloadPianoSamples(): void {
+  getSampler();
+}
+
 export async function unlockAudio(): Promise<void> {
   await Tone.start();
-  getSampler();
+  getSampler({ retryFailed: true });
 }
 
 export async function playPianoNote(noteName: NoteName, octave: Octave): Promise<void> {

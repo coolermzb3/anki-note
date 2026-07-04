@@ -7,3 +7,5 @@ The sampled piano path in `piano.ts` streams Salamander Grand Piano MP3 samples 
 - License: Creative Commons Attribution 3.0 (CC BY 3.0)
 - License text: https://creativecommons.org/licenses/by/3.0/
 
+Future direction: if remote hosting becomes a reliability issue, vendor the sampled piano files under `public/audio/`,
+point `piano.ts` at the local base URL, and consider trimming long sample tails to reduce decoded audio memory.
