@@ -110,6 +110,7 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
       fixedCount: 20,
       fixedDurationSeconds: 180,
       autoPlayTarget: true,
+      includeLedgerVariants: true,
       focusedTraining: false,
       inactivityThresholdSeconds: 30,
       correctDelayMs: 400,
@@ -117,6 +118,7 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
     dataSetId: manifest.dataSetId,
     createdAt: manifest.createdAt,
     firstReviewAt: manifest.firstReviewAt,
+    includeLedgerVariants: existingSettings?.includeLedgerVariants ?? true,
     focusedTraining: existingSettings?.focusedTraining ?? false,
   };
   return { manifest, settings, sessions, reviews };

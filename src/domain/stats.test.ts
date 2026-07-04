@@ -90,6 +90,7 @@ describe("stats", () => {
 
     const f3 = buildNoteStats(reviews).find((stat) => stat.targetNoteId === "F3")!;
     expect(f3.reviewCount).toBe(3);
+    expect(f3.errorCount).toBe(2);
     expect(f3.commonConfusion).toBe("A");
     expect(Math.round(f3.errorRate * 100)).toBe(67);
   });

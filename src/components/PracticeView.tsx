@@ -3,7 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playPianoNote, playTargetNote, unlockAudio } from "../audio/piano";
 import { db, saveReview } from "../data/db";
 import { writeBackupNow } from "../data/backup";
-import { ANSWER_BUTTONS, getNotesForGroups, PRACTICE_GROUPS_LOW_TO_HIGH } from "../domain/notes";
+import {
+  ANSWER_BUTTONS,
+  formatTargetNoteLabel,
+  getNoteById,
+  getNotesForGroups,
+  PRACTICE_GROUPS_LOW_TO_HIGH,
+} from "../domain/notes";
 import { selectNextNote } from "../domain/scheduler";
 import { buildNoteStats, formatMs, percentile } from "../domain/stats";
 import type {
@@ -68,6 +74,8 @@ function inputMinutesToDurationSeconds(value: string): number {
   return Math.max(60, Math.round(Number(value) * 60));
 }
 
+const ALL_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => group.id);
+
 export function PracticeView({
   settings,
   reviews,
@@ -82,6 +90,7 @@ export function PracticeView({
   const [fixedCount, setFixedCount] = useState(settings.fixedCount);
   const [fixedDurationSeconds, setFixedDurationSeconds] = useState(settings.fixedDurationSeconds);
   const [autoPlayTarget, setAutoPlayTarget] = useState(settings.autoPlayTarget);
+  const [includeLedgerVariants, setIncludeLedgerVariants] = useState(settings.includeLedgerVariants ?? true);
   const [focusedTraining, setFocusedTraining] = useState(settings.focusedTraining ?? false);
   const [session, setSession] = useState<PracticeSessionRecord | null>(null);
   const [currentNote, setCurrentNote] = useState<TargetNote | null>(null);
@@ -113,11 +122,20 @@ export function PracticeView({
       setFixedCount(settings.fixedCount);
       setFixedDurationSeconds(settings.fixedDurationSeconds);
       setAutoPlayTarget(settings.autoPlayTarget);
+      setIncludeLedgerVariants(settings.includeLedgerVariants ?? true);
       setFocusedTraining(settings.focusedTraining ?? false);
     }
   }, [phase, settings]);
 
-  const enabledNotes = useMemo(() => getNotesForGroups(enabledGroupIds), [enabledGroupIds]);
+  const enabledNotes = useMemo(
+    () => getNotesForGroups(enabledGroupIds, includeLedgerVariants),
+    [enabledGroupIds, includeLedgerVariants],
+  );
+  const fullPracticeCount = useMemo(
+    () => getNotesForGroups(ALL_GROUP_IDS, includeLedgerVariants).length,
+    [includeLedgerVariants],
+  );
+  const fixedCountPresets = useMemo(() => Array.from(new Set([10, 20, fullPracticeCount])), [fullPracticeCount]);
 
   const getPromptActiveMs = useCallback((): number => {
     const prompt = promptRef.current;
@@ -192,6 +210,7 @@ export function PracticeView({
       fixedCount,
       fixedDurationSeconds,
       autoPlayTarget,
+      includeLedgerVariants,
       focusedTraining,
     };
     await db.settings.put(nextSettings);
@@ -203,6 +222,7 @@ export function PracticeView({
     fixedCount,
     fixedDurationSeconds,
     focusedTraining,
+    includeLedgerVariants,
     mode,
     onSettingsSaved,
     settings,
@@ -369,7 +389,7 @@ export function PracticeView({
     setWrongAnswerCount(0);
     setSummary(null);
     setPhase("running");
-    const nextEnabledNotes = getNotesForGroups(nextSettings.enabledGroupIds);
+    const nextEnabledNotes = getNotesForGroups(nextSettings.enabledGroupIds, nextSettings.includeLedgerVariants);
     const firstNote = selectNextNote({
       notes: nextEnabledNotes,
       reviews,
@@ -382,6 +402,7 @@ export function PracticeView({
     fixedCount,
     fixedDurationSeconds,
     focusedTraining,
+    includeLedgerVariants,
     mode,
     persistConfig,
     reviews,
@@ -592,7 +613,7 @@ export function PracticeView({
               <div className="control-block">
                 <span className="control-label">题数</span>
                 <div className="number-row">
-                  {[10, 20, 35].map((count) => (
+                  {fixedCountPresets.map((count) => (
                     <button className={fixedCount === count ? "active" : ""} key={count} onClick={() => setFixedCount(count)}>
                       {count}
                     </button>
@@ -635,28 +656,42 @@ export function PracticeView({
 
             <div className="control-block">
               <span className="control-label">训练策略</span>
-              <label className={focusedTraining ? "choice choice-active" : "choice"}>
+              <label className={focusedTraining ? "choice choice-active choice-detail" : "choice choice-detail"}>
                 <input
                   checked={focusedTraining}
                   type="checkbox"
                   onChange={(event) => setFocusedTraining(event.target.checked)}
                 />
-                <span>加强专项训练</span>
+                <div className="choice-body">
+                  <strong>薄弱项优先</strong>
+                  <span>约 80% 慢卡/易错卡，20% 全量探索</span>
+                </div>
+              </label>
+              <label className={includeLedgerVariants ? "choice choice-active choice-detail" : "choice choice-detail"}>
+                <input
+                  checked={includeLedgerVariants}
+                  type="checkbox"
+                  onChange={(event) => setIncludeLedgerVariants(event.target.checked)}
+                />
+                <div className="choice-body">
+                  <strong>加练双谱号写法</strong>
+                  <span>E3-A4 同时练高音谱号和低音谱号写法</span>
+                </div>
               </label>
             </div>
 
-            <div className="setting-row setup-setting-row">
-              <div>
-                <strong>自动播放目标音</strong>
-                <span>卡片出现时播放一次</span>
-              </div>
-              <label className="toggle">
+            <div className="control-block">
+              <span className="control-label">声音</span>
+              <label className={autoPlayTarget ? "choice choice-active choice-detail" : "choice choice-detail"}>
                 <input
                   checked={autoPlayTarget}
                   type="checkbox"
                   onChange={(event) => setAutoPlayTarget(event.target.checked)}
                 />
-                <span />
+                <div className="choice-body">
+                  <strong>自动播放目标音</strong>
+                  <span>卡片出现时播放一次</span>
+                </div>
               </label>
             </div>
 
@@ -705,7 +740,7 @@ export function PracticeView({
           <div className="note-list">
             {weakestNotes.map((note) => (
               <div className="note-row" key={note.targetNoteId}>
-                <span>{note.targetNoteId}</span>
+                <span>{formatTargetNoteLabel(getNoteById(note.targetNoteId))}</span>
                 <span>{formatMs(note.medianMs)}</span>
                 <span>{Math.round(note.errorRate * 100)}%</span>
                 <span>{note.commonConfusion ? `常错 ${note.commonConfusion}` : "无混淆"}</span>

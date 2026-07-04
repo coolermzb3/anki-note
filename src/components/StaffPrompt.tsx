@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Formatter, Renderer, Stave, StaveConnector, StaveNote, Voice } from "vexflow";
-import { noteToVexKey } from "../domain/notes";
+import { formatTargetNoteLabel, noteToVexKey } from "../domain/notes";
 import type { TargetNote } from "../domain/types";
 
 interface StaffPromptProps {
@@ -80,7 +80,7 @@ export function StaffPrompt({ note, compact = false }: StaffPromptProps): JSX.El
   }, [compact, note]);
 
   return (
-    <div ref={frameRef} className={compact ? "staff staff-compact" : "staff"} aria-label={`谱面 ${note.id}`}>
+    <div ref={frameRef} className={compact ? "staff staff-compact" : "staff"} aria-label={`谱面 ${formatTargetNoteLabel(note)}`}>
       <div ref={rendererTargetRef} className="staff-renderer" />
     </div>
   );

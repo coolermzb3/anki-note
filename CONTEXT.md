@@ -5,19 +5,19 @@ This context defines the language for a web app that trains piano staff note rec
 ## Language
 
 **Natural-note card**:
-A flashcard whose answer is one of the seven natural piano note names, without sharps or flats. The first practice set contains 35 natural-note cards from C2 through B6.
+A flashcard whose answer is one of the seven natural piano note names, without sharps or flats. The first practice set contains 46 natural-note cards from C2 through B6, because pitches E3 through A4 each appear as separate treble-staff and bass-staff cards.
 _Avoid_: Piano card, note card
 
 **Target note**:
-The exact pitch shown by a card, including its octave, such as C4 or B6. The target note determines the staff position and audio pitch, but the learner answers only its natural note name.
+The exact card prompt shown to the learner, including its pitch, octave, and staff placement when a pitch has both treble-staff and bass-staff variants. The target note determines the staff position and audio pitch, but the learner answers only its natural note name.
 _Avoid_: Correct pitch
 
 **Practice range**:
-The closed set of notes that may appear as cards in a practice session. The first practice range is C2 through B6, grouped into five octave-sized groups of seven natural notes.
+The closed set of notes that may appear as cards in a practice session. The first practice range is C2 through B6, grouped into five octave-sized groups. Pitches E3 through A4 have two target-note cards so the learner can practice both ledger-line spellings; this added ledger-variant set can be disabled on the start page.
 _Avoid_: Piano range, common range
 
 **Practice group**:
-One octave-sized subset of the practice range, containing seven natural-note cards from C through B. The default group order expands from the middle outward: C4-B4, C3-B3, C5-B5, C2-B2, then C6-B6.
+One octave-sized subset of the practice range. Each group covers the seven natural pitches from C through B, and groups that overlap E3 through A4 contain extra staff-variant cards. The default group order expands from the middle outward: C4-B4, C3-B3, C5-B5, C2-B2, then C6-B6.
 _Avoid_: Difficulty level, card group
 
 **Enabled group**:
@@ -33,7 +33,7 @@ The card selection flow for a practice session. The first version favors target 
 _Avoid_: Deck scheduler, spaced-repetition scheduler
 
 **Grand-staff prompt**:
-A card prompt that always shows both treble and bass staves while asking for a single note. Notes C4 and above appear on the treble staff, and notes B3 and below appear on the bass staff.
+A card prompt that always shows both treble and bass staves while asking for a single note. Outside the overlap range, notes C4 and above appear on the treble staff and notes B3 and below appear on the bass staff. In the overlap range E3 through A4, each pitch has a treble-staff card and a bass-staff card.
 _Avoid_: Staff image, sheet image
 
 **Answer button**:

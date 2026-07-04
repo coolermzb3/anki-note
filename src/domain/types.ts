@@ -1,6 +1,8 @@
 export type NoteName = "C" | "D" | "E" | "F" | "G" | "A" | "B";
 export type Octave = 2 | 3 | 4 | 5 | 6;
-export type TargetNoteId = `${NoteName}${Octave}`;
+export type Staff = "treble" | "bass";
+export type PitchId = `${NoteName}${Octave}`;
+export type TargetNoteId = PitchId | `${PitchId}-${Staff}`;
 
 export type PracticeMode = "open-ended" | "fixed-count" | "fixed-duration";
 export type SessionEndReason = "manual-stop" | "completed-count" | "completed-duration" | "abandoned";
@@ -13,10 +15,12 @@ export type InterruptReason =
 
 export interface TargetNote {
   id: TargetNoteId;
+  pitchId: PitchId;
   noteName: NoteName;
   octave: Octave;
   groupId: PracticeGroupId;
-  staff: "treble" | "bass";
+  staff: Staff;
+  isLedgerVariant: boolean;
 }
 
 export type PracticeGroupId = "C4-B4" | "C3-B3" | "C5-B5" | "C2-B2" | "C6-B6";
@@ -84,6 +88,7 @@ export interface AppSettings {
   fixedCount: number;
   fixedDurationSeconds: number;
   autoPlayTarget: boolean;
+  includeLedgerVariants: boolean;
   focusedTraining: boolean;
   inactivityThresholdSeconds: number;
   correctDelayMs: number;

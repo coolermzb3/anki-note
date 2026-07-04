@@ -33,6 +33,7 @@ export function makeDefaultSettings(): AppSettings {
     fixedCount: 20,
     fixedDurationSeconds: 180,
     autoPlayTarget: true,
+    includeLedgerVariants: true,
     focusedTraining: false,
     inactivityThresholdSeconds: 30,
     correctDelayMs: 400,
@@ -42,8 +43,12 @@ export function makeDefaultSettings(): AppSettings {
 export async function ensureSettings(): Promise<AppSettings> {
   const existing = await db.settings.get("default");
   if (existing) {
-    if (existing.focusedTraining === undefined) {
-      const migrated = { ...existing, focusedTraining: false };
+    if (existing.focusedTraining === undefined || existing.includeLedgerVariants === undefined) {
+      const migrated = {
+        ...existing,
+        focusedTraining: existing.focusedTraining ?? false,
+        includeLedgerVariants: existing.includeLedgerVariants ?? true,
+      };
       await db.settings.put(migrated);
       return migrated;
     }

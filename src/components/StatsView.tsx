@@ -9,10 +9,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { getNoteById, PRACTICE_GROUPS_LOW_TO_HIGH } from "../domain/notes";
-import { buildDailyStats, buildNoteStats, buildPracticeSessionStats, formatMs, isQualifiedReview } from "../domain/stats";
-import type { PracticeGroupId, PracticeSessionRecord, ReviewRecord } from "../domain/types";
-import { StaffPrompt } from "./StaffPrompt";
+import { PRACTICE_GROUPS_LOW_TO_HIGH } from "../domain/notes";
+import { buildDailyStats, buildNoteStats, buildPracticeSessionStats, isQualifiedReview } from "../domain/stats";
+import type { NoteName, PracticeGroupId, PracticeSessionRecord, ReviewRecord, Staff, TargetNote } from "../domain/types";
+import { StatsRangeStaff, type StaffHeatNote } from "./StatsRangeStaff";
 
 interface StatsViewProps {
   reviews: ReviewRecord[];
@@ -23,6 +23,27 @@ type RangeKey = "7" | "30" | "all";
 type RecognitionTimeGrouping = "day" | "practice-session";
 
 const EMPTY_SESSIONS: PracticeSessionRecord[] = [];
+const NOTE_ORDER: Record<NoteName, number> = {
+  C: 0,
+  D: 1,
+  E: 2,
+  F: 3,
+  G: 4,
+  A: 5,
+  B: 6,
+};
+const STAFF_ORDER: Record<Staff, number> = {
+  bass: 0,
+  treble: 1,
+};
+
+function compareRangeStaffNotes(a: TargetNote, b: TargetNote): number {
+  return (
+    STAFF_ORDER[a.staff] - STAFF_ORDER[b.staff] ||
+    a.octave - b.octave ||
+    NOTE_ORDER[a.noteName] - NOTE_ORDER[b.noteName]
+  );
+}
 
 function formatShortDateTime(iso: string): { label: string; tooltipLabel: string } {
   const date = new Date(iso);
@@ -155,14 +176,22 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
     () => buildNoteStats(filteredReviews, groupFilter, includeInterrupted),
     [filteredReviews, groupFilter, includeInterrupted],
   );
-  const weakest = [...noteStats]
-    .filter((stat) => stat.reviewCount > 0)
-    .sort((a, b) => b.weaknessScore - a.weaknessScore)
-    .slice(0, 5);
-  const strongest = [...noteStats]
-    .filter((stat) => stat.reviewCount > 0)
-    .sort((a, b) => a.weaknessScore - b.weaknessScore)
-    .slice(0, 5);
+  const rangeStaffNotes = useMemo(() => {
+    const activeGroups = groupFilter.length > 0 ? new Set(groupFilter) : undefined;
+    const statsByNoteId = new Map(noteStats.map((stat) => [stat.targetNoteId, stat]));
+    return PRACTICE_GROUPS_LOW_TO_HIGH.flatMap((group) => group.notes)
+      .filter((note) => !activeGroups || activeGroups.has(note.groupId))
+      .sort(compareRangeStaffNotes)
+      .map((note) => ({ note, stat: statsByNoteId.get(note.id) }));
+  }, [groupFilter, noteStats]);
+  const errorStaffNotes = useMemo<StaffHeatNote[]>(
+    () => rangeStaffNotes.map(({ note, stat }) => ({ note, value: stat?.errorCount ?? 0 })),
+    [rangeStaffNotes],
+  );
+  const timeStaffNotes = useMemo<StaffHeatNote[]>(
+    () => rangeStaffNotes.map(({ note, stat }) => ({ note, value: stat?.medianMs })),
+    [rangeStaffNotes],
+  );
 
   function toggleChartGroup(groupId: PracticeGroupId): void {
     setChartGroupFilter((current) => {
@@ -295,44 +324,50 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
         </div>
 
         <aside className="stats-right-column">
-          <div className="rank-grid">
-            <div className="panel">
-              <div className="panel-heading">
-                <h2>最需要练</h2>
-              </div>
-              <div className="stat-card-list">
-                {weakest.map((stat) => (
-                  <div className="stat-card" key={stat.targetNoteId}>
-                    <StaffPrompt compact note={getNoteById(stat.targetNoteId)} />
-                    <div className="stat-card-body">
-                      <strong>{stat.targetNoteId}</strong>
-                      <span>中位 {formatMs(stat.medianMs)}</span>
-                      <span>错误率 {Math.round(stat.errorRate * 100)}%</span>
-                      <span>{stat.commonConfusion ? `常错 ${stat.commonConfusion}` : "无混淆"}</span>
-                    </div>
-                  </div>
-                ))}
-                {weakest.length === 0 ? <div className="empty-state">暂无记录</div> : null}
-              </div>
+          <div className="panel note-heat-panel">
+            <div className="panel-heading">
+              <h2>音域分布</h2>
             </div>
-
-            <div className="panel">
-              <div className="panel-heading">
-                <h2>最稳定</h2>
-              </div>
-              <div className="stat-card-list">
-                {strongest.map((stat) => (
-                  <div className="stat-card" key={stat.targetNoteId}>
-                    <StaffPrompt compact note={getNoteById(stat.targetNoteId)} />
-                    <div className="stat-card-body">
-                      <strong>{stat.targetNoteId}</strong>
-                      <span>中位 {formatMs(stat.medianMs)}</span>
-                      <span>错误率 {Math.round(stat.errorRate * 100)}%</span>
-                      <span>记录 {stat.reviewCount}</span>
-                    </div>
+            <div className="note-heat-stack">
+              <div className="note-heat-row">
+                <div className="note-heat-row-heading">
+                  <h3>错误次数</h3>
+                  <div className="range-legend">
+                    <span>
+                      <i className="legend-swatch legend-neutral" />
+                      0
+                    </span>
+                    <span>
+                      <i className="legend-swatch legend-red-light" />
+                      较低
+                    </span>
+                    <span>
+                      <i className="legend-swatch legend-red-dark" />
+                      较高
+                    </span>
                   </div>
-                ))}
-                {strongest.length === 0 ? <div className="empty-state">暂无记录</div> : null}
+                </div>
+                <StatsRangeStaff label="错误次数音域分布" notes={errorStaffNotes} tone="red" />
+              </div>
+              <div className="note-heat-row">
+                <div className="note-heat-row-heading">
+                  <h3>识别时长</h3>
+                  <div className="range-legend">
+                    <span>
+                      <i className="legend-swatch legend-neutral" />
+                      无记录
+                    </span>
+                    <span>
+                      <i className="legend-swatch legend-blue-light" />
+                      较短
+                    </span>
+                    <span>
+                      <i className="legend-swatch legend-blue-dark" />
+                      较长
+                    </span>
+                  </div>
+                </div>
+                <StatsRangeStaff label="识别时长音域分布" notes={timeStaffNotes} tone="blue" />
               </div>
             </div>
           </div>
