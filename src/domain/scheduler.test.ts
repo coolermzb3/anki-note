@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getNotesForGroups } from "./notes";
-import { getFocusedTrainingNotes, getNoteWeight, selectNextNote } from "./scheduler";
+import { getFocusedTrainingNotes, getNoteWeight, selectNextNote, selectNotePage } from "./scheduler";
 import { makeReview } from "./testFactories";
 
 function makeDifferentiatedFocusedTrainingData() {
@@ -65,6 +65,26 @@ describe("scheduler", () => {
       rng: () => 0,
     });
     expect(selected.id).not.toBe("C5");
+  });
+
+  it("uses planned page exposure while drawing a page", () => {
+    const notes = getNotesForGroups(["C5-B5"]).slice(0, 3);
+
+    const selected = selectNotePage({
+      notes,
+      reviews: [],
+      count: 3,
+      newCardRate: 1,
+      rng: () => 0,
+    });
+
+    expect(selected.map((note) => note.id)).toEqual(["C5", "D5", "E5"]);
+  });
+
+  it("uses the requested page size", () => {
+    const notes = getNotesForGroups(["C5-B5"]);
+
+    expect(selectNotePage({ notes, reviews: [], count: 5 })).toHaveLength(5);
   });
 
   it("keeps the weaker half for focused training", () => {

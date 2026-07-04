@@ -36,6 +36,10 @@ _Avoid_: Deck scheduler, spaced-repetition scheduler
 A card prompt that always shows both treble and bass staves while asking for a single note. Outside the overlap range, notes C4 and above appear on the treble staff and notes B3 and below appear on the bass staff. In the overlap range E3 through A4, each pitch has a treble-staff card and a bass-staff card.
 _Avoid_: Staff image, sheet image
 
+**Staff-page prompt**:
+A practice presentation that shows a batch of target notes together on one grand-staff page while the learner answers them one at a time in a fixed order. Each answered target note on the page produces its own review; unstarted target notes on an interrupted page do not.
+_Avoid_: Aggregate card, multi-note card
+
 **Answer button**:
 One of the seven note-choice controls used to answer a card. In the first practice set, answer buttons are primarily labeled 1 through 7 and correspond to the absolute natural note names C, D, E, F, G, A, and B, not movable scale degrees.
 _Avoid_: Number button, key button, scale-degree button

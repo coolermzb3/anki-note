@@ -10,7 +10,7 @@ import {
   getNotesForGroups,
   PRACTICE_GROUPS_LOW_TO_HIGH,
 } from "../domain/notes";
-import { selectNextNote } from "../domain/scheduler";
+import { selectNextNote, selectNotePage } from "../domain/scheduler";
 import { buildNoteStats, formatMs, percentile } from "../domain/stats";
 import type {
   AppSettings,
@@ -20,10 +20,13 @@ import type {
   PracticeGroupId,
   PracticeMode,
   PracticeSessionRecord,
+  PromptDisplayMode,
+  PromptNoteDuration,
   ReviewRecord,
   TargetNote,
   WrongAnswer,
 } from "../domain/types";
+import { StaffPagePrompt } from "./StaffPagePrompt";
 import { StaffPrompt } from "./StaffPrompt";
 
 interface PracticeViewProps {
@@ -55,6 +58,12 @@ interface SessionSummary {
   reviews: ReviewRecord[];
 }
 
+interface StaffPageRuntime {
+  notes: TargetNote[];
+  index: number;
+  completedCount: number;
+}
+
 function newSessionId(): string {
   return crypto.randomUUID();
 }
@@ -75,6 +84,7 @@ function inputMinutesToDurationSeconds(value: string): number {
 }
 
 const ALL_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => group.id);
+const STAFF_PAGE_SIZE = 48;
 
 export function PracticeView({
   settings,
@@ -86,6 +96,12 @@ export function PracticeView({
 }: PracticeViewProps): JSX.Element {
   const [phase, setPhase] = useState<Phase>("setup");
   const [mode, setMode] = useState<PracticeMode>(settings.defaultMode);
+  const [promptDisplayMode, setPromptDisplayMode] = useState<PromptDisplayMode>(
+    settings.promptDisplayMode ?? "single-note",
+  );
+  const [promptNoteDuration, setPromptNoteDuration] = useState<PromptNoteDuration>(
+    settings.promptNoteDuration ?? "whole",
+  );
   const [enabledGroupIds, setEnabledGroupIds] = useState<PracticeGroupId[]>(settings.enabledGroupIds);
   const [fixedCount, setFixedCount] = useState(settings.fixedCount);
   const [fixedDurationSeconds, setFixedDurationSeconds] = useState(settings.fixedDurationSeconds);
@@ -99,11 +115,15 @@ export function PracticeView({
   const [feedback, setFeedback] = useState<{ type: "wrong" | "correct"; noteName?: NoteName } | null>(null);
   const [tick, setTick] = useState(0);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const [staffPageNotes, setStaffPageNotes] = useState<TargetNote[]>([]);
+  const [staffPageIndex, setStaffPageIndex] = useState(0);
+  const [staffPageCompletedCount, setStaffPageCompletedCount] = useState(0);
 
   const promptRef = useRef<PromptRuntime | null>(null);
   const sessionRef = useRef<PracticeSessionRecord | null>(null);
   const sessionReviewsRef = useRef<ReviewRecord[]>([]);
   const lastTargetNoteIdRef = useRef<TargetNote["id"] | undefined>();
+  const staffPageRef = useRef<StaffPageRuntime | null>(null);
   const endingRef = useRef(false);
   const sessionActiveBaseMsRef = useRef(0);
   const sessionActiveStartedAtRef = useRef<number | null>(null);
@@ -118,6 +138,8 @@ export function PracticeView({
   useEffect(() => {
     if (phase === "setup") {
       setMode(settings.defaultMode);
+      setPromptDisplayMode(settings.promptDisplayMode ?? "single-note");
+      setPromptNoteDuration(settings.promptNoteDuration ?? "whole");
       setEnabledGroupIds(settings.enabledGroupIds);
       setFixedCount(settings.fixedCount);
       setFixedDurationSeconds(settings.fixedDurationSeconds);
@@ -207,6 +229,8 @@ export function PracticeView({
       ...settings,
       enabledGroupIds,
       defaultMode: mode,
+      promptDisplayMode,
+      promptNoteDuration,
       fixedCount,
       fixedDurationSeconds,
       autoPlayTarget,
@@ -226,6 +250,8 @@ export function PracticeView({
     mode,
     onSettingsSaved,
     settings,
+    promptDisplayMode,
+    promptNoteDuration,
   ]);
 
   const maybeBackupDuringOpenEnded = useCallback(
@@ -244,6 +270,23 @@ export function PracticeView({
       await writeBackupNow().catch(() => undefined);
     },
     [mode],
+  );
+
+  const syncStaffPage = useCallback((page: StaffPageRuntime | null): void => {
+    staffPageRef.current = page;
+    setStaffPageNotes(page?.notes ?? []);
+    setStaffPageIndex(page?.index ?? 0);
+    setStaffPageCompletedCount(page?.completedCount ?? 0);
+  }, []);
+
+  const getNextStaffPageCount = useCallback(
+    (nextCompletedCount: number): number => {
+      if (mode !== "fixed-count") {
+        return STAFF_PAGE_SIZE;
+      }
+      return Math.min(STAFF_PAGE_SIZE, Math.max(0, fixedCount - nextCompletedCount));
+    },
+    [fixedCount, mode],
   );
 
   const startPrompt = useCallback(
@@ -267,6 +310,68 @@ export function PracticeView({
       }
     },
     [autoPlayTarget],
+  );
+
+  const markCurrentStaffPageNoteComplete = useCallback((): void => {
+    const page = staffPageRef.current;
+    if (!page) {
+      return;
+    }
+    syncStaffPage({
+      ...page,
+      completedCount: Math.max(page.completedCount, page.index + 1),
+    });
+  }, [syncStaffPage]);
+
+  const startStaffPageIndex = useCallback(
+    (index: number): boolean => {
+      const page = staffPageRef.current;
+      if (!page || index >= page.notes.length) {
+        return false;
+      }
+      const nextPage = {
+        ...page,
+        index,
+      };
+      syncStaffPage(nextPage);
+      startPrompt(nextPage.notes[index]);
+      return true;
+    },
+    [startPrompt, syncStaffPage],
+  );
+
+  const startStaffPage = useCallback(
+    ({
+      sourceNotes,
+      sourceReviews,
+      sourceFocusedTraining,
+      nextCompletedCount,
+    }: {
+      sourceNotes: TargetNote[];
+      sourceReviews: ReviewRecord[];
+      sourceFocusedTraining: boolean;
+      nextCompletedCount: number;
+    }): void => {
+      const count = getNextStaffPageCount(nextCompletedCount);
+      if (count <= 0) {
+        return;
+      }
+      const notes = selectNotePage({
+        notes: sourceNotes,
+        reviews: sourceReviews,
+        focusedTraining: sourceFocusedTraining,
+        lastTargetNoteId: lastTargetNoteIdRef.current,
+        count,
+      });
+      const page = {
+        notes,
+        index: 0,
+        completedCount: 0,
+      };
+      syncStaffPage(page);
+      startPrompt(notes[0]);
+    },
+    [getNextStaffPageCount, startPrompt, syncStaffPage],
   );
 
   const selectAndStartNext = useCallback(
@@ -348,12 +453,13 @@ export function PracticeView({
       setSession(finalSession);
       setSummary({ session: finalSession, reviews: finalReviews });
       setCurrentNote(null);
+      syncStaffPage(null);
       setPhase("summary");
       await writeBackupNow().catch(() => undefined);
       await onDataChanged();
       endingRef.current = false;
     },
-    [finishCurrentReview, onDataChanged, pauseActiveTimers],
+    [finishCurrentReview, onDataChanged, pauseActiveTimers, syncStaffPage],
   );
 
   const startSession = useCallback(async (): Promise<void> => {
@@ -379,6 +485,7 @@ export function PracticeView({
     sessionRef.current = nextSession;
     sessionReviewsRef.current = [];
     lastTargetNoteIdRef.current = undefined;
+    syncStaffPage(null);
     endingRef.current = false;
     lastBackupAtRef.current = performance.now();
     lastBackupCompletedRef.current = 0;
@@ -390,12 +497,21 @@ export function PracticeView({
     setSummary(null);
     setPhase("running");
     const nextEnabledNotes = getNotesForGroups(nextSettings.enabledGroupIds, nextSettings.includeLedgerVariants);
-    const firstNote = selectNextNote({
-      notes: nextEnabledNotes,
-      reviews,
-      focusedTraining: nextSettings.focusedTraining,
-    });
-    startPrompt(firstNote);
+    if (nextSettings.promptDisplayMode === "staff-page") {
+      startStaffPage({
+        sourceNotes: nextEnabledNotes,
+        sourceReviews: reviews,
+        sourceFocusedTraining: nextSettings.focusedTraining,
+        nextCompletedCount: 0,
+      });
+    } else {
+      const firstNote = selectNextNote({
+        notes: nextEnabledNotes,
+        reviews,
+        focusedTraining: nextSettings.focusedTraining,
+      });
+      startPrompt(firstNote);
+    }
   }, [
     enabledGroupIds,
     enabledNotes.length,
@@ -405,8 +521,11 @@ export function PracticeView({
     includeLedgerVariants,
     mode,
     persistConfig,
+    promptDisplayMode,
     reviews,
     startPrompt,
+    startStaffPage,
+    syncStaffPage,
   ]);
 
   const replayTarget = useCallback(async (): Promise<void> => {
@@ -442,12 +561,32 @@ export function PracticeView({
       }
       const nextCompletedCount = completedCount + 1;
       setCompletedCount(nextCompletedCount);
+      if (promptDisplayMode === "staff-page") {
+        markCurrentStaffPageNoteComplete();
+      }
       await maybeBackupDuringOpenEnded(nextCompletedCount);
+      const reviewSessionId = review.sessionId;
 
       window.setTimeout(() => {
+        if (sessionRef.current?.id !== reviewSessionId || sessionRef.current.endedAt) {
+          return;
+        }
         resumeActiveTimers();
         if (mode === "fixed-count" && nextCompletedCount >= fixedCount) {
           void completeSession("completed-count");
+          return;
+        }
+        if (promptDisplayMode === "staff-page") {
+          const page = staffPageRef.current;
+          if (page && startStaffPageIndex(page.index + 1)) {
+            return;
+          }
+          startStaffPage({
+            sourceNotes: enabledNotes,
+            sourceReviews: [...reviews, ...sessionReviewsRef.current],
+            sourceFocusedTraining: focusedTraining,
+            nextCompletedCount,
+          });
           return;
         }
         selectAndStartNext([review]);
@@ -456,15 +595,22 @@ export function PracticeView({
     [
       completeSession,
       completedCount,
+      enabledNotes,
       feedback?.type,
       finishCurrentReview,
       fixedCount,
+      focusedTraining,
       getPromptActiveMs,
+      markCurrentStaffPageNoteComplete,
       maybeBackupDuringOpenEnded,
       mode,
+      promptDisplayMode,
       resumeActiveTimers,
+      reviews,
       selectAndStartNext,
       settings.correctDelayMs,
+      startStaffPage,
+      startStaffPageIndex,
     ],
   );
 
@@ -611,6 +757,40 @@ export function PracticeView({
                 <button className={mode === "fixed-duration" ? "active" : ""} onClick={() => setMode("fixed-duration")}>
                   固定时长
                 </button>
+              </div>
+            </div>
+
+            <div className="control-block">
+              <span className="control-label">显示方式</span>
+              <div className="display-options">
+                <div className="segmented">
+                  <button
+                    className={promptDisplayMode === "single-note" ? "active" : ""}
+                    onClick={() => setPromptDisplayMode("single-note")}
+                  >
+                    单音
+                  </button>
+                  <button
+                    className={promptDisplayMode === "staff-page" ? "active" : ""}
+                    onClick={() => setPromptDisplayMode("staff-page")}
+                  >
+                    谱页
+                  </button>
+                </div>
+                <div className="segmented">
+                  <button
+                    className={promptNoteDuration === "whole" ? "active" : ""}
+                    onClick={() => setPromptNoteDuration("whole")}
+                  >
+                    全音符 𝅝
+                  </button>
+                  <button
+                    className={promptNoteDuration === "quarter" ? "active" : ""}
+                    onClick={() => setPromptNoteDuration("quarter")}
+                  >
+                    四分音符 ♩
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -793,8 +973,17 @@ export function PracticeView({
         </button>
       </div>
 
-      <div className="prompt-stage">
-        {currentNote ? <StaffPrompt note={currentNote} /> : null}
+      <div className={promptDisplayMode === "staff-page" ? "prompt-stage staff-page-stage" : "prompt-stage"}>
+        {promptDisplayMode === "staff-page" ? (
+          <StaffPagePrompt
+            notes={staffPageNotes}
+            completedCount={staffPageCompletedCount}
+            noteDuration={promptNoteDuration}
+            wrongIndex={feedback?.type === "wrong" ? staffPageIndex : undefined}
+          />
+        ) : currentNote ? (
+          <StaffPrompt note={currentNote} noteDuration={promptNoteDuration} />
+        ) : null}
         <button className="replay-button" title="重播目标音 Space" onClick={() => void replayTarget()}>
           <Volume2 size={20} />
         </button>

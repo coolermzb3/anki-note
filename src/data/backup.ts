@@ -107,6 +107,8 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
       createdAt: manifest.createdAt,
       enabledGroupIds: ["C4-B4"],
       defaultMode: "open-ended",
+      promptDisplayMode: "single-note",
+      promptNoteDuration: "whole",
       fixedCount: 20,
       fixedDurationSeconds: 180,
       autoPlayTarget: true,
@@ -120,6 +122,8 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
     firstReviewAt: manifest.firstReviewAt,
     includeLedgerVariants: existingSettings?.includeLedgerVariants ?? true,
     focusedTraining: existingSettings?.focusedTraining ?? false,
+    promptDisplayMode: existingSettings?.promptDisplayMode ?? "single-note",
+    promptNoteDuration: existingSettings?.promptNoteDuration ?? "whole",
   };
   return { manifest, settings, sessions, reviews };
 }

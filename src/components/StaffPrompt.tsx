@@ -1,14 +1,23 @@
 import { useEffect, useRef } from "react";
 import { Formatter, Renderer, Stave, StaveConnector, StaveNote, Voice } from "vexflow";
 import { formatTargetNoteLabel, noteToVexKey } from "../domain/notes";
-import type { TargetNote } from "../domain/types";
+import type { PromptNoteDuration, TargetNote } from "../domain/types";
 
 interface StaffPromptProps {
   note: TargetNote;
   compact?: boolean;
+  noteDuration: PromptNoteDuration;
 }
 
-export function StaffPrompt({ note, compact = false }: StaffPromptProps): JSX.Element {
+function noteDurationToVexDuration(noteDuration: PromptNoteDuration): "q" | "w" {
+  return noteDuration === "quarter" ? "q" : "w";
+}
+
+function noteDurationToBeats(noteDuration: PromptNoteDuration): number {
+  return noteDuration === "quarter" ? 1 : 4;
+}
+
+export function StaffPrompt({ note, compact = false, noteDuration }: StaffPromptProps): JSX.Element {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const rendererTargetRef = useRef<HTMLDivElement | null>(null);
 
@@ -46,9 +55,9 @@ export function StaffPrompt({ note, compact = false }: StaffPromptProps): JSX.El
       const staveNote = new StaveNote({
         clef: note.staff,
         keys: [noteToVexKey(note)],
-        duration: "w",
+        duration: noteDurationToVexDuration(noteDuration),
       });
-      const voice = new Voice({ numBeats: 4, beatValue: 4 }).addTickables([staveNote]);
+      const voice = new Voice({ numBeats: noteDurationToBeats(noteDuration), beatValue: 4 }).addTickables([staveNote]);
       new Formatter().joinVoices([voice]).format([voice], staveWidth - (compact ? 74 : 150), { context });
       voice.draw(context, targetStave);
       if (compact) {
@@ -77,7 +86,7 @@ export function StaffPrompt({ note, compact = false }: StaffPromptProps): JSX.El
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [compact, note]);
+  }, [compact, note, noteDuration]);
 
   return (
     <div ref={frameRef} className={compact ? "staff staff-compact" : "staff"} aria-label={`谱面 ${formatTargetNoteLabel(note)}`}>

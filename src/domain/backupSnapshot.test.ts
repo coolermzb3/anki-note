@@ -11,6 +11,8 @@ const settings: AppSettings = {
   firstReviewAt: "2026-07-04T10:00:00.000+08:00",
   enabledGroupIds: ["C4-B4"],
   defaultMode: "open-ended",
+  promptDisplayMode: "single-note",
+  promptNoteDuration: "whole",
   fixedCount: 20,
   fixedDurationSeconds: 180,
   autoPlayTarget: true,

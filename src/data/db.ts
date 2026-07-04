@@ -30,6 +30,8 @@ export function makeDefaultSettings(): AppSettings {
     createdAt: now,
     enabledGroupIds: DEFAULT_ENABLED_GROUPS,
     defaultMode: "open-ended",
+    promptDisplayMode: "single-note",
+    promptNoteDuration: "whole",
     fixedCount: 20,
     fixedDurationSeconds: 180,
     autoPlayTarget: true,
@@ -43,11 +45,18 @@ export function makeDefaultSettings(): AppSettings {
 export async function ensureSettings(): Promise<AppSettings> {
   const existing = await db.settings.get("default");
   if (existing) {
-    if (existing.focusedTraining === undefined || existing.includeLedgerVariants === undefined) {
+    if (
+      existing.focusedTraining === undefined ||
+      existing.includeLedgerVariants === undefined ||
+      existing.promptDisplayMode === undefined ||
+      existing.promptNoteDuration === undefined
+    ) {
       const migrated = {
         ...existing,
         focusedTraining: existing.focusedTraining ?? false,
         includeLedgerVariants: existing.includeLedgerVariants ?? true,
+        promptDisplayMode: existing.promptDisplayMode ?? "single-note",
+        promptNoteDuration: existing.promptNoteDuration ?? "whole",
       };
       await db.settings.put(migrated);
       return migrated;

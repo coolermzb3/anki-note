@@ -5,6 +5,8 @@ export type PitchId = `${NoteName}${Octave}`;
 export type TargetNoteId = PitchId | `${PitchId}-${Staff}`;
 
 export type PracticeMode = "open-ended" | "fixed-count" | "fixed-duration";
+export type PromptDisplayMode = "single-note" | "staff-page";
+export type PromptNoteDuration = "whole" | "quarter";
 export type SessionEndReason = "manual-stop" | "completed-count" | "completed-duration" | "abandoned";
 export type InterruptReason =
   | "focus-lost"
@@ -85,6 +87,8 @@ export interface AppSettings {
   firstReviewAt?: string;
   enabledGroupIds: PracticeGroupId[];
   defaultMode: PracticeMode;
+  promptDisplayMode: PromptDisplayMode;
+  promptNoteDuration: PromptNoteDuration;
   fixedCount: number;
   fixedDurationSeconds: number;
   autoPlayTarget: boolean;
