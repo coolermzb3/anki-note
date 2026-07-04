@@ -5,6 +5,7 @@ export type PitchId = `${NoteName}${Octave}`;
 export type TargetNoteId = PitchId | `${PitchId}-${Staff}`;
 
 export type PracticeMode = "open-ended" | "fixed-count" | "fixed-duration";
+export type PracticeQueueStrategy = "adaptive" | "focused" | "melody";
 export type PromptDisplayMode = "single-note" | "staff-page";
 export type PromptNoteDuration = "whole" | "quarter";
 export type SessionEndReason = "manual-stop" | "completed-count" | "completed-duration" | "abandoned";
@@ -71,6 +72,7 @@ export interface PracticeSessionRecord {
   enabledGroupIds: PracticeGroupId[];
   fixedCount?: number;
   fixedDurationSeconds?: number;
+  queueStrategy?: PracticeQueueStrategy;
   focusedTraining?: boolean;
   startedAt: string;
   endedAt?: string;
@@ -93,7 +95,8 @@ export interface AppSettings {
   fixedDurationSeconds: number;
   autoPlayTarget: boolean;
   includeLedgerVariants: boolean;
-  focusedTraining: boolean;
+  queueStrategy: PracticeQueueStrategy;
+  focusedTraining?: boolean;
   inactivityThresholdSeconds: number;
   correctDelayMs: number;
 }

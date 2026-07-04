@@ -93,7 +93,21 @@ describe("scheduler", () => {
     expect(getFocusedTrainingNotes(notes, reviews).map((note) => note.id)).toEqual(["C5", "D5", "E5", "F5"]);
   });
 
-  it("usually draws from the focused pool during focused training", () => {
+  it("usually draws from the focused pool with the focused strategy", () => {
+    const { notes, reviews } = makeDifferentiatedFocusedTrainingData();
+    const rngValues = [0, 0.5, 0.99];
+    const selected = selectNextNote({
+      notes,
+      reviews,
+      queueStrategy: "focused",
+      newCardRate: 0,
+      rng: () => rngValues.shift() ?? 0,
+    });
+
+    expect(selected.id).toBe("F5");
+  });
+
+  it("keeps focusedTraining as a compatibility alias for the focused strategy", () => {
     const { notes, reviews } = makeDifferentiatedFocusedTrainingData();
     const rngValues = [0, 0.5, 0.99];
     const selected = selectNextNote({
@@ -105,6 +119,20 @@ describe("scheduler", () => {
     });
 
     expect(selected.id).toBe("F5");
+  });
+
+  it("routes melody strategy through a generated pitch sequence", () => {
+    const notes = getNotesForGroups(["C4-B4"], false);
+    const rngValues = [0, 0];
+    const selected = selectNextNote({
+      notes,
+      reviews: [],
+      queueStrategy: "melody",
+      lastTargetNoteId: "C4",
+      rng: () => rngValues.shift() ?? 0,
+    });
+
+    expect(selected.id).toBe("D4");
   });
 
   it("keeps some full-pool exploration during focused training", () => {

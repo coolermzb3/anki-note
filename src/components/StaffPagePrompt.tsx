@@ -15,6 +15,8 @@ const ROW_HEIGHT = 172;
 const NEUTRAL_COLOR = "#211c18";
 const COMPLETE_COLOR = "#2f8f5f";
 const WRONG_COLOR = "#c84c3d";
+const BARLINE_INTERVAL = 4;
+const BARLINE_COLOR = "#211c18";
 
 function chunkNotes(notes: TargetNote[]): TargetNote[][] {
   const rows: TargetNote[][] = [];
@@ -53,6 +55,19 @@ function colorForIndex(index: number, completedCount: number, wrongIndex: number
   return NEUTRAL_COLOR;
 }
 
+function addBarline(svg: SVGSVGElement, x: number, y1: number, y2: number): void {
+  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  line.setAttribute("class", "staff-page-barline");
+  line.setAttribute("x1", x.toFixed(2));
+  line.setAttribute("x2", x.toFixed(2));
+  line.setAttribute("y1", y1.toFixed(2));
+  line.setAttribute("y2", y2.toFixed(2));
+  line.setAttribute("stroke", BARLINE_COLOR);
+  line.setAttribute("stroke-width", "1.6");
+  line.setAttribute("shape-rendering", "crispEdges");
+  svg.appendChild(line);
+}
+
 export function StaffPagePrompt({
   notes,
   completedCount,
@@ -83,6 +98,7 @@ export function StaffPagePrompt({
       const renderer = new Renderer(rendererTarget, Renderer.Backends.SVG);
       renderer.resize(width, height);
       const context = renderer.getContext();
+      const svg = rendererTarget.querySelector("svg");
       const x = 24;
       const staveWidth = width - 48;
 
@@ -117,6 +133,20 @@ export function StaffPagePrompt({
         });
         trebleVoice.draw(context, treble);
         bassVoice.draw(context, bass);
+
+        if (!svg) {
+          return;
+        }
+        for (
+          let boundaryIndex = BARLINE_INTERVAL;
+          boundaryIndex <= rowNotes.length && boundaryIndex < NOTES_PER_ROW;
+          boundaryIndex += BARLINE_INTERVAL
+        ) {
+          const previousTickable = trebleTickables[boundaryIndex - 1];
+          const nextTickable = trebleTickables[boundaryIndex];
+          const barlineX = (previousTickable.getAbsoluteX() + nextTickable.getAbsoluteX()) / 2;
+          addBarline(svg, barlineX, treble.getYForLine(0), bass.getYForLine(4));
+        }
       });
     }
 

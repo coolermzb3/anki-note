@@ -17,6 +17,7 @@ const settings: AppSettings = {
   fixedDurationSeconds: 180,
   autoPlayTarget: true,
   includeLedgerVariants: true,
+  queueStrategy: "adaptive",
   focusedTraining: false,
   inactivityThresholdSeconds: 30,
   correctDelayMs: 400,

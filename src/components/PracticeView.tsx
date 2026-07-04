@@ -1,7 +1,7 @@
 import { BarChart3, Play, RotateCcw, SlidersHorizontal, Square, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playPianoNote, playTargetNote, unlockAudio } from "../audio/piano";
-import { db, saveReview } from "../data/db";
+import { db, resolveQueueStrategy, saveReview } from "../data/db";
 import { writeBackupNow } from "../data/backup";
 import {
   ANSWER_BUTTONS,
@@ -19,6 +19,7 @@ import type {
   NoteName,
   PracticeGroupId,
   PracticeMode,
+  PracticeQueueStrategy,
   PracticeSessionRecord,
   PromptDisplayMode,
   PromptNoteDuration,
@@ -85,6 +86,24 @@ function inputMinutesToDurationSeconds(value: string): number {
 
 const ALL_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => group.id);
 const STAFF_PAGE_SIZE = 48;
+const MELODY_BUFFER_SIZE = 16;
+const PRACTICE_QUEUE_OPTIONS: Array<{ strategy: PracticeQueueStrategy; label: string; description: string }> = [
+  {
+    strategy: "adaptive",
+    label: "常规队列",
+    description: "按新卡、慢卡和易错卡做轻量加权",
+  },
+  {
+    strategy: "focused",
+    label: "薄弱项优先",
+    description: "约 80% 慢卡/易错卡，20% 全量探索",
+  },
+  {
+    strategy: "melody",
+    label: "自动旋律生成",
+    description: "在启用组音域内生成级进为主的练习",
+  },
+];
 
 export function PracticeView({
   settings,
@@ -107,7 +126,7 @@ export function PracticeView({
   const [fixedDurationSeconds, setFixedDurationSeconds] = useState(settings.fixedDurationSeconds);
   const [autoPlayTarget, setAutoPlayTarget] = useState(settings.autoPlayTarget);
   const [includeLedgerVariants, setIncludeLedgerVariants] = useState(settings.includeLedgerVariants ?? true);
-  const [focusedTraining, setFocusedTraining] = useState(settings.focusedTraining ?? false);
+  const [queueStrategy, setQueueStrategy] = useState<PracticeQueueStrategy>(resolveQueueStrategy(settings));
   const [session, setSession] = useState<PracticeSessionRecord | null>(null);
   const [currentNote, setCurrentNote] = useState<TargetNote | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
@@ -123,6 +142,7 @@ export function PracticeView({
   const sessionRef = useRef<PracticeSessionRecord | null>(null);
   const sessionReviewsRef = useRef<ReviewRecord[]>([]);
   const lastTargetNoteIdRef = useRef<TargetNote["id"] | undefined>();
+  const melodyQueueRef = useRef<TargetNote[]>([]);
   const staffPageRef = useRef<StaffPageRuntime | null>(null);
   const endingRef = useRef(false);
   const sessionActiveBaseMsRef = useRef(0);
@@ -145,7 +165,7 @@ export function PracticeView({
       setFixedDurationSeconds(settings.fixedDurationSeconds);
       setAutoPlayTarget(settings.autoPlayTarget);
       setIncludeLedgerVariants(settings.includeLedgerVariants ?? true);
-      setFocusedTraining(settings.focusedTraining ?? false);
+      setQueueStrategy(resolveQueueStrategy(settings));
     }
   }, [phase, settings]);
 
@@ -235,7 +255,8 @@ export function PracticeView({
       fixedDurationSeconds,
       autoPlayTarget,
       includeLedgerVariants,
-      focusedTraining,
+      queueStrategy,
+      focusedTraining: queueStrategy === "focused",
     };
     await db.settings.put(nextSettings);
     onSettingsSaved(nextSettings);
@@ -245,10 +266,10 @@ export function PracticeView({
     enabledGroupIds,
     fixedCount,
     fixedDurationSeconds,
-    focusedTraining,
     includeLedgerVariants,
     mode,
     onSettingsSaved,
+    queueStrategy,
     settings,
     promptDisplayMode,
     promptNoteDuration,
@@ -344,12 +365,12 @@ export function PracticeView({
     ({
       sourceNotes,
       sourceReviews,
-      sourceFocusedTraining,
+      sourceQueueStrategy,
       nextCompletedCount,
     }: {
       sourceNotes: TargetNote[];
       sourceReviews: ReviewRecord[];
-      sourceFocusedTraining: boolean;
+      sourceQueueStrategy: PracticeQueueStrategy;
       nextCompletedCount: number;
     }): void => {
       const count = getNextStaffPageCount(nextCompletedCount);
@@ -359,7 +380,7 @@ export function PracticeView({
       const notes = selectNotePage({
         notes: sourceNotes,
         reviews: sourceReviews,
-        focusedTraining: sourceFocusedTraining,
+        queueStrategy: sourceQueueStrategy,
         lastTargetNoteId: lastTargetNoteIdRef.current,
         count,
       });
@@ -374,18 +395,42 @@ export function PracticeView({
     [getNextStaffPageCount, startPrompt, syncStaffPage],
   );
 
-  const selectAndStartNext = useCallback(
-    (extraReviews: ReviewRecord[] = []): void => {
-      const nextReviews = [...reviews, ...sessionReviewsRef.current, ...extraReviews];
-      const note = selectNextNote({
-        notes: enabledNotes,
-        reviews: nextReviews,
-        focusedTraining,
+  const drawMelodyNote = useCallback((sourceNotes: TargetNote[], remainingCount?: number): TargetNote => {
+    if (melodyQueueRef.current.length === 0) {
+      const count =
+        remainingCount === undefined ? MELODY_BUFFER_SIZE : Math.min(MELODY_BUFFER_SIZE, Math.max(1, remainingCount));
+      melodyQueueRef.current = selectNotePage({
+        notes: sourceNotes,
+        reviews: [],
+        queueStrategy: "melody",
         lastTargetNoteId: lastTargetNoteIdRef.current,
+        count,
       });
+    }
+    const [nextNote, ...remainingNotes] = melodyQueueRef.current;
+    if (!nextNote) {
+      throw new Error("Cannot draw a melody note without enabled groups.");
+    }
+    melodyQueueRef.current = remainingNotes;
+    return nextNote;
+  }, []);
+
+  const selectAndStartNext = useCallback(
+    (nextCompletedCount: number, extraReviews: ReviewRecord[] = []): void => {
+      const nextReviews = [...reviews, ...sessionReviewsRef.current, ...extraReviews];
+      const remainingCount = mode === "fixed-count" ? fixedCount - nextCompletedCount : undefined;
+      const note =
+        queueStrategy === "melody"
+          ? drawMelodyNote(enabledNotes, remainingCount)
+          : selectNextNote({
+              notes: enabledNotes,
+              reviews: nextReviews,
+              queueStrategy,
+              lastTargetNoteId: lastTargetNoteIdRef.current,
+            });
       startPrompt(note);
     },
-    [enabledNotes, focusedTraining, reviews, startPrompt],
+    [drawMelodyNote, enabledNotes, fixedCount, mode, queueStrategy, reviews, startPrompt],
   );
 
   const finishCurrentReview = useCallback(
@@ -476,7 +521,8 @@ export function PracticeView({
       enabledGroupIds,
       fixedCount: mode === "fixed-count" ? fixedCount : undefined,
       fixedDurationSeconds: mode === "fixed-duration" ? fixedDurationSeconds : undefined,
-      focusedTraining,
+      queueStrategy,
+      focusedTraining: queueStrategy === "focused",
       startedAt,
       completedCount: 0,
       interruptedCount: 0,
@@ -485,6 +531,7 @@ export function PracticeView({
     sessionRef.current = nextSession;
     sessionReviewsRef.current = [];
     lastTargetNoteIdRef.current = undefined;
+    melodyQueueRef.current = [];
     syncStaffPage(null);
     endingRef.current = false;
     lastBackupAtRef.current = performance.now();
@@ -501,15 +548,18 @@ export function PracticeView({
       startStaffPage({
         sourceNotes: nextEnabledNotes,
         sourceReviews: reviews,
-        sourceFocusedTraining: nextSettings.focusedTraining,
+        sourceQueueStrategy: nextSettings.queueStrategy,
         nextCompletedCount: 0,
       });
     } else {
-      const firstNote = selectNextNote({
-        notes: nextEnabledNotes,
-        reviews,
-        focusedTraining: nextSettings.focusedTraining,
-      });
+      const firstNote =
+        nextSettings.queueStrategy === "melody"
+          ? drawMelodyNote(nextEnabledNotes, mode === "fixed-count" ? fixedCount : undefined)
+          : selectNextNote({
+              notes: nextEnabledNotes,
+              reviews,
+              queueStrategy: nextSettings.queueStrategy,
+            });
       startPrompt(firstNote);
     }
   }, [
@@ -517,11 +567,12 @@ export function PracticeView({
     enabledNotes.length,
     fixedCount,
     fixedDurationSeconds,
-    focusedTraining,
+    drawMelodyNote,
     includeLedgerVariants,
     mode,
     persistConfig,
     promptDisplayMode,
+    queueStrategy,
     reviews,
     startPrompt,
     startStaffPage,
@@ -584,12 +635,12 @@ export function PracticeView({
           startStaffPage({
             sourceNotes: enabledNotes,
             sourceReviews: [...reviews, ...sessionReviewsRef.current],
-            sourceFocusedTraining: focusedTraining,
+            sourceQueueStrategy: queueStrategy,
             nextCompletedCount,
           });
           return;
         }
-        selectAndStartNext([review]);
+        selectAndStartNext(nextCompletedCount, [review]);
       }, settings.correctDelayMs);
     },
     [
@@ -599,12 +650,12 @@ export function PracticeView({
       feedback?.type,
       finishCurrentReview,
       fixedCount,
-      focusedTraining,
       getPromptActiveMs,
       markCurrentStaffPageNoteComplete,
       maybeBackupDuringOpenEnded,
       mode,
       promptDisplayMode,
+      queueStrategy,
       resumeActiveTimers,
       reviews,
       selectAndStartNext,
@@ -841,17 +892,30 @@ export function PracticeView({
 
             <div className="control-block">
               <span className="control-label">训练策略</span>
-              <label className={focusedTraining ? "choice choice-active choice-detail" : "choice choice-detail"}>
-                <input
-                  checked={focusedTraining}
-                  type="checkbox"
-                  onChange={(event) => setFocusedTraining(event.target.checked)}
-                />
-                <div className="choice-body">
-                  <strong>薄弱项优先</strong>
-                  <span>约 80% 慢卡/易错卡，20% 全量探索</span>
-                </div>
-              </label>
+              <div className="strategy-options">
+                {PRACTICE_QUEUE_OPTIONS.map((option) => (
+                  <label
+                    className={queueStrategy === option.strategy ? "choice choice-active choice-detail" : "choice choice-detail"}
+                    key={option.strategy}
+                  >
+                    <input
+                      checked={queueStrategy === option.strategy}
+                      name="practice-queue-strategy"
+                      type="radio"
+                      value={option.strategy}
+                      onChange={() => setQueueStrategy(option.strategy)}
+                    />
+                    <div className="choice-body">
+                      <strong>{option.label}</strong>
+                      <span>{option.description}</span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="control-block">
+              <span className="control-label">谱号变体</span>
               <label className={includeLedgerVariants ? "choice choice-active choice-detail" : "choice choice-detail"}>
                 <input
                   checked={includeLedgerVariants}

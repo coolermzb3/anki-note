@@ -1,4 +1,5 @@
-import type { ReviewRecord, TargetNote, TargetNoteId } from "./types";
+import { selectMelodyNotes } from "./melody";
+import type { PracticeQueueStrategy, ReviewRecord, TargetNote, TargetNoteId } from "./types";
 
 export interface SelectNextNoteOptions {
   notes: TargetNote[];
@@ -6,6 +7,7 @@ export interface SelectNextNoteOptions {
   lastTargetNoteId?: TargetNoteId;
   plannedTargetNoteIds?: TargetNoteId[];
   newCardRate?: number;
+  queueStrategy?: PracticeQueueStrategy;
   focusedTraining?: boolean;
   focusedTrainingRate?: number;
   rng?: () => number;
@@ -94,12 +96,23 @@ function withoutImmediateRepeat(notes: TargetNote[], lastTargetNoteId?: TargetNo
   return filtered.length > 0 ? filtered : notes;
 }
 
+function resolvePracticeQueueStrategy({
+  queueStrategy,
+  focusedTraining,
+}: {
+  queueStrategy?: PracticeQueueStrategy;
+  focusedTraining?: boolean;
+}): PracticeQueueStrategy {
+  return queueStrategy ?? (focusedTraining ? "focused" : "adaptive");
+}
+
 export function selectNextNote({
   notes,
   reviews,
   lastTargetNoteId,
   plannedTargetNoteIds = [],
   newCardRate = 0.25,
+  queueStrategy,
   focusedTraining = false,
   focusedTrainingRate = 0.8,
   rng = Math.random,
@@ -108,8 +121,15 @@ export function selectNextNote({
     throw new Error("Cannot select a note without enabled groups.");
   }
 
+  const effectiveQueueStrategy = resolvePracticeQueueStrategy({ queueStrategy, focusedTraining });
+  if (effectiveQueueStrategy === "melody") {
+    return selectMelodyNotes({ notes, count: 1, lastTargetNoteId, rng })[0];
+  }
+
   const sourceNotes =
-    focusedTraining && rng() < focusedTrainingRate ? getFocusedTrainingNotes(notes, reviews, plannedTargetNoteIds) : notes;
+    effectiveQueueStrategy === "focused" && rng() < focusedTrainingRate
+      ? getFocusedTrainingNotes(notes, reviews, plannedTargetNoteIds)
+      : notes;
   const eligible = withoutImmediateRepeat(sourceNotes, lastTargetNoteId);
   if (eligible.length === 1) {
     return eligible[0];
@@ -142,6 +162,15 @@ export interface SelectNotePageOptions extends SelectNextNoteOptions {
 }
 
 export function selectNotePage({ count, ...options }: SelectNotePageOptions): TargetNote[] {
+  if (resolvePracticeQueueStrategy(options) === "melody") {
+    return selectMelodyNotes({
+      notes: options.notes,
+      count,
+      lastTargetNoteId: options.lastTargetNoteId,
+      rng: options.rng,
+    });
+  }
+
   const selected: TargetNote[] = [];
   let lastTargetNoteId = options.lastTargetNoteId;
   for (let index = 0; index < count; index += 1) {

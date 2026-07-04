@@ -1,6 +1,6 @@
 import { buildBackupSnapshot } from "../domain/backupSnapshot";
 import type { AppSettings, BackupDayFile, BackupManifest, BackupSnapshot, PracticeSessionRecord, ReviewRecord } from "../domain/types";
-import { db, getBackupState, loadAllData, replaceAllData } from "./db";
+import { db, getBackupState, loadAllData, replaceAllData, resolveQueueStrategy } from "./db";
 
 async function ensureReadWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
   if (!handle.queryPermission || !handle.requestPermission) {
@@ -113,6 +113,7 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
       fixedDurationSeconds: 180,
       autoPlayTarget: true,
       includeLedgerVariants: true,
+      queueStrategy: "adaptive",
       focusedTraining: false,
       inactivityThresholdSeconds: 30,
       correctDelayMs: 400,
@@ -121,7 +122,8 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
     createdAt: manifest.createdAt,
     firstReviewAt: manifest.firstReviewAt,
     includeLedgerVariants: existingSettings?.includeLedgerVariants ?? true,
-    focusedTraining: existingSettings?.focusedTraining ?? false,
+    queueStrategy: resolveQueueStrategy(existingSettings ?? {}),
+    focusedTraining: existingSettings?.focusedTraining ?? resolveQueueStrategy(existingSettings ?? {}) === "focused",
     promptDisplayMode: existingSettings?.promptDisplayMode ?? "single-note",
     promptNoteDuration: existingSettings?.promptNoteDuration ?? "whole",
   };

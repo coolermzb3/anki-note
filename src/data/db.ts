@@ -1,6 +1,6 @@
 import Dexie, { type Table } from "dexie";
 import { DEFAULT_ENABLED_GROUPS } from "../domain/notes";
-import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord } from "../domain/types";
+import type { AppSettings, BackupState, PracticeQueueStrategy, PracticeSessionRecord, ReviewRecord } from "../domain/types";
 
 export class AppDatabase extends Dexie {
   settings!: Table<AppSettings, string>;
@@ -21,6 +21,10 @@ export class AppDatabase extends Dexie {
 
 export const db = new AppDatabase();
 
+export function resolveQueueStrategy(settings: { queueStrategy?: PracticeQueueStrategy; focusedTraining?: boolean }): PracticeQueueStrategy {
+  return settings.queueStrategy ?? (settings.focusedTraining ? "focused" : "adaptive");
+}
+
 export function makeDefaultSettings(): AppSettings {
   const now = new Date().toISOString();
   return {
@@ -36,6 +40,7 @@ export function makeDefaultSettings(): AppSettings {
     fixedDurationSeconds: 180,
     autoPlayTarget: true,
     includeLedgerVariants: true,
+    queueStrategy: "adaptive",
     focusedTraining: false,
     inactivityThresholdSeconds: 30,
     correctDelayMs: 400,
@@ -46,6 +51,7 @@ export async function ensureSettings(): Promise<AppSettings> {
   const existing = await db.settings.get("default");
   if (existing) {
     if (
+      existing.queueStrategy === undefined ||
       existing.focusedTraining === undefined ||
       existing.includeLedgerVariants === undefined ||
       existing.promptDisplayMode === undefined ||
@@ -53,7 +59,8 @@ export async function ensureSettings(): Promise<AppSettings> {
     ) {
       const migrated = {
         ...existing,
-        focusedTraining: existing.focusedTraining ?? false,
+        queueStrategy: resolveQueueStrategy(existing),
+        focusedTraining: existing.focusedTraining ?? resolveQueueStrategy(existing) === "focused",
         includeLedgerVariants: existing.includeLedgerVariants ?? true,
         promptDisplayMode: existing.promptDisplayMode ?? "single-note",
         promptNoteDuration: existing.promptNoteDuration ?? "whole",

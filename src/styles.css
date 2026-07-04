@@ -254,6 +254,12 @@ main {
   gap: 8px;
 }
 
+.strategy-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
 .choice {
   min-height: 42px;
   border: 1px solid var(--border);
@@ -276,7 +282,8 @@ main {
   background: var(--surface-soft);
 }
 
-.choice input[type="checkbox"] {
+.choice input[type="checkbox"],
+.choice input[type="radio"] {
   width: 16px;
   height: 16px;
   flex: 0 0 auto;
