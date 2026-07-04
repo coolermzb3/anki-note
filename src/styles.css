@@ -490,20 +490,69 @@ main {
   color: var(--muted);
 }
 
+.heatmap-shell {
+  --heatmap-cell: 14px;
+  --heatmap-gap: 4px;
+  --heatmap-month-row: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.heatmap-weekdays,
 .heatmap {
   display: grid;
-  grid-template-columns: repeat(12, 14px);
-  grid-auto-rows: 14px;
-  gap: 4px;
-  width: max-content;
+  grid-template-rows: repeat(7, var(--heatmap-cell));
+  gap: var(--heatmap-gap);
+}
+
+.heatmap-weekdays {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: var(--heatmap-cell);
+  padding-top: calc(var(--heatmap-month-row) + var(--heatmap-gap));
+}
+
+.heatmap-weekdays span {
+  display: grid;
+  place-items: center;
+  height: var(--heatmap-cell);
+}
+
+.heatmap-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 100%;
   overflow-x: auto;
   padding: 2px;
 }
 
+.heatmap-months {
+  display: grid;
+  grid-template-columns: repeat(12, var(--heatmap-cell));
+  gap: var(--heatmap-gap);
+  height: var(--heatmap-month-row);
+  margin-bottom: var(--heatmap-gap);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: var(--heatmap-month-row);
+}
+
+.heatmap-month {
+  white-space: nowrap;
+}
+
+.heatmap {
+  grid-auto-columns: var(--heatmap-cell);
+  grid-auto-flow: column;
+  width: max-content;
+}
+
 .heat-cell {
-  width: 14px;
-  height: 14px;
+  width: var(--heatmap-cell);
+  height: var(--heatmap-cell);
   border-radius: 4px;
   border: 1px solid rgba(66, 50, 34, 0.08);
 }
@@ -518,6 +567,10 @@ main {
 
 .heat-2 {
   background: var(--accent);
+}
+
+.heat-future {
+  opacity: 0.36;
 }
 
 .chart-panel,
@@ -774,6 +827,12 @@ main {
 }
 
 @media (max-width: 820px) {
+  .heatmap-shell {
+    --heatmap-cell: 12px;
+    --heatmap-gap: 3px;
+    --heatmap-month-row: 12px;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
     grid-template-rows: 64px 1fr;
@@ -844,14 +903,11 @@ main {
     min-width: 0;
   }
 
-  .heatmap {
-    grid-template-columns: repeat(12, 12px);
-    grid-auto-rows: 12px;
-    gap: 3px;
+  .heatmap-weekdays {
+    font-size: 10px;
   }
 
-  .heat-cell {
-    width: 12px;
-    height: 12px;
+  .heatmap-months {
+    font-size: 10px;
   }
 }

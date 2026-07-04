@@ -23,6 +23,8 @@ type RangeKey = "7" | "30" | "all";
 type RecognitionTimeGrouping = "day" | "practice-session";
 
 const EMPTY_SESSIONS: PracticeSessionRecord[] = [];
+const HEATMAP_WEEK_COUNT = 12;
+const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const NOTE_ORDER: Record<NoteName, number> = {
   C: 0,
   D: 1,
@@ -58,6 +60,33 @@ function formatShortDateTime(iso: string): { label: string; tooltipLabel: string
 function formatShortDate(dateKey: string): string {
   const date = new Date(`${dateKey}T00:00:00`);
   return `${String(date.getFullYear()).slice(2)}/${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function formatDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function formatMonthLabel(date: Date): string {
+  return `${date.getMonth() + 1}月`;
+}
+
+function startOfWeek(date: Date): Date {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  return start;
+}
+
+function monthLabelForWeek(weekStart: Date, index: number): string {
+  for (let dayOffset = 0; dayOffset < 7; dayOffset += 1) {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + dayOffset);
+    if (date.getDate() === 1) {
+      return formatMonthLabel(date);
+    }
+  }
+
+  return index === 0 ? formatMonthLabel(weekStart) : "";
 }
 
 function RecognitionTimeTick({
@@ -98,22 +127,50 @@ function HeatMap({ reviews, includeInterrupted }: { reviews: ReviewRecord[]; inc
   const daily = buildDailyStats(reviews, includeInterrupted);
   const byDate = new Map(daily.map((day) => [day.date, day]));
   const today = new Date();
-  const days = Array.from({ length: 84 }, (_, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() - (83 - index));
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    return { key, stat: byDate.get(key) };
+  const todayStart = new Date(today);
+  todayStart.setHours(0, 0, 0, 0);
+  const firstWeekStart = startOfWeek(today);
+  firstWeekStart.setDate(firstWeekStart.getDate() - (HEATMAP_WEEK_COUNT - 1) * 7);
+  const weekStarts = Array.from({ length: HEATMAP_WEEK_COUNT }, (_, index) => {
+    const date = new Date(firstWeekStart);
+    date.setDate(firstWeekStart.getDate() + index * 7);
+    return date;
+  });
+  const days = weekStarts.flatMap((weekStart) => {
+    return Array.from({ length: 7 }, (_, dayOffset) => {
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + dayOffset);
+      const key = formatDateKey(date);
+      return { isFuture: date.getTime() > todayStart.getTime(), key, stat: byDate.get(key) };
+    });
   });
 
   return (
-    <div className="heatmap" aria-label="练习热力图">
-      {days.map((day) => (
-        <div
-          className={`heat-cell heat-${day.stat?.heatLevel ?? 0}`}
-          key={day.key}
-          title={`${day.key}: ${day.stat?.completedReviews ?? 0}`}
-        />
-      ))}
+    <div className="heatmap-shell" aria-label="练习热力图">
+      <div className="heatmap-weekdays" aria-hidden="true">
+        {WEEKDAY_LABELS.map((label) => (
+          <span key={label}>{label}</span>
+        ))}
+      </div>
+      <div className="heatmap-scroll">
+        <div className="heatmap-months" aria-hidden="true">
+          {weekStarts.map((weekStart, index) => (
+            <span className="heatmap-month" key={formatDateKey(weekStart)}>
+              {monthLabelForWeek(weekStart, index)}
+            </span>
+          ))}
+        </div>
+        <div className="heatmap">
+          {days.map((day) => (
+            <div
+              aria-label={`${day.key}: ${day.isFuture ? "未到日期" : `${day.stat?.completedReviews ?? 0} 次`}`}
+              className={`heat-cell heat-${day.stat?.heatLevel ?? 0}${day.isFuture ? " heat-future" : ""}`}
+              key={day.key}
+              title={`${day.key}: ${day.isFuture ? "未到日期" : day.stat?.completedReviews ?? 0}`}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
