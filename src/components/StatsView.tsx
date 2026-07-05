@@ -10,7 +10,13 @@ import {
   YAxis,
 } from "recharts";
 import { PRACTICE_GROUPS_LOW_TO_HIGH } from "../domain/notes";
-import { buildDailyStats, buildNoteStats, buildPracticeSessionStats, isQualifiedReview } from "../domain/stats";
+import {
+  buildDailyStats,
+  buildNoteStats,
+  buildPracticeSessionStats,
+  filterLongTermReviews,
+  isQualifiedReview,
+} from "../domain/stats";
 import type { NoteName, PracticeGroupId, PracticeSessionRecord, ReviewRecord, Staff, TargetNote } from "../domain/types";
 import { StatsRangeStaff, type StaffHeatNote } from "./StatsRangeStaff";
 
@@ -124,8 +130,8 @@ function filterByRange(reviews: ReviewRecord[], range: RangeKey): ReviewRecord[]
   return reviews.filter((review) => new Date(review.endedAt) >= cutoff);
 }
 
-function HeatMap({ reviews, includeInterrupted }: { reviews: ReviewRecord[]; includeInterrupted: boolean }): JSX.Element {
-  const daily = buildDailyStats(reviews, includeInterrupted);
+function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
+  const daily = buildDailyStats(reviews);
   const byDate = new Map(daily.map((day) => [day.date, day]));
   const today = new Date();
   const todayStart = new Date(today);
@@ -179,20 +185,20 @@ function HeatMap({ reviews, includeInterrupted }: { reviews: ReviewRecord[]; inc
 export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps): JSX.Element {
   const [range, setRange] = useState<RangeKey>("30");
   const [groupFilter, setGroupFilter] = useState<PracticeGroupId[]>([]);
-  const [includeInterrupted, setIncludeInterrupted] = useState(false);
   const [recognitionTimeGrouping, setRecognitionTimeGrouping] = useState<RecognitionTimeGrouping>("practice-session");
   const [chartGroupFilter, setChartGroupFilter] = useState<PracticeGroupId[] | null>(null);
 
-  const filteredReviews = useMemo(() => filterByRange(reviews, range), [range, reviews]);
+  const longTermReviews = useMemo(() => filterLongTermReviews(reviews), [reviews]);
+  const filteredReviews = useMemo(() => filterByRange(longTermReviews, range), [longTermReviews, range]);
   const chartGroupIdsWithData = useMemo(() => {
     const groupIds = new Set<PracticeGroupId>();
     for (const review of filteredReviews) {
-      if (isQualifiedReview(review, includeInterrupted)) {
+      if (isQualifiedReview(review)) {
         groupIds.add(review.groupId);
       }
     }
     return PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => group.id).filter((groupId) => groupIds.has(groupId));
-  }, [filteredReviews, includeInterrupted]);
+  }, [filteredReviews]);
   const activeChartGroupIds = chartGroupFilter ?? chartGroupIdsWithData;
   const chartFilteredReviews = useMemo(() => {
     const activeGroups = new Set(activeChartGroupIds);
@@ -201,7 +207,7 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
   const recognitionTimeStats = useMemo(() => {
     const source =
       recognitionTimeGrouping === "day"
-        ? buildDailyStats(chartFilteredReviews, includeInterrupted).map((day) => ({
+        ? buildDailyStats(chartFilteredReviews).map((day) => ({
             key: day.date,
             label: formatShortDate(day.date),
             tooltipLabel: formatShortDate(day.date),
@@ -210,7 +216,7 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
             medianMs: day.medianMs,
             p90Ms: day.p90Ms,
           }))
-        : buildPracticeSessionStats(chartFilteredReviews, sessions, includeInterrupted).map((session) => {
+        : buildPracticeSessionStats(chartFilteredReviews, sessions).map((session) => {
             const startedAt = formatShortDateTime(session.startedAt);
             return {
               key: session.sessionId,
@@ -229,10 +235,10 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
       median: stat.medianMs === undefined ? undefined : Number((stat.medianMs / 1000).toFixed(2)),
       p90: stat.p90Ms === undefined ? undefined : Number((stat.p90Ms / 1000).toFixed(2)),
     }));
-  }, [chartFilteredReviews, includeInterrupted, recognitionTimeGrouping, sessions]);
+  }, [chartFilteredReviews, recognitionTimeGrouping, sessions]);
   const noteStats = useMemo(
-    () => buildNoteStats(filteredReviews, groupFilter, includeInterrupted),
-    [filteredReviews, groupFilter, includeInterrupted],
+    () => buildNoteStats(filteredReviews, groupFilter),
+    [filteredReviews, groupFilter],
   );
   const rangeStaffNotes = useMemo(() => {
     const activeGroups = groupFilter.length > 0 ? new Set(groupFilter) : undefined;
@@ -263,7 +269,6 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
       <div className="stats-header">
         <div>
           <h1>统计</h1>
-          <p>默认排除中断记录</p>
         </div>
         <BarChart3 size={24} />
       </div>
@@ -280,14 +285,6 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
             全部
           </button>
         </div>
-        <label className="switch-line">
-          <input
-            checked={includeInterrupted}
-            type="checkbox"
-            onChange={(event) => setIncludeInterrupted(event.target.checked)}
-          />
-          <span>含中断记录</span>
-        </label>
       </div>
 
       <div className="group-filter">
@@ -316,7 +313,7 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
             <div className="panel-heading">
               <h2>练习量</h2>
             </div>
-            <HeatMap reviews={reviews} includeInterrupted={includeInterrupted} />
+            <HeatMap reviews={longTermReviews} />
           </div>
 
           <div className="panel chart-panel">

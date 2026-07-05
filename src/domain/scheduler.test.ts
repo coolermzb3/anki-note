@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { getNotesForGroups } from "./notes";
-import { getFocusedTrainingNotes, getNoteWeight, selectNextNote, selectNotePage } from "./scheduler";
+import { getFocusedTrainingNotes, getNotePerformance, getNoteWeight, selectNextNote, selectNotePage } from "./scheduler";
 import { makeReview } from "./testFactories";
+
+function startedAtForMinute(minute: number): string {
+  return `2026-07-04T12:${String(minute).padStart(2, "0")}:00.000+08:00`;
+}
 
 function makeDifferentiatedFocusedTrainingData() {
   const notes = getNotesForGroups(["C5-B5"]);
@@ -64,6 +68,21 @@ describe("scheduler", () => {
     ];
 
     expect(getNoteWeight(c5, reviews)).toBe(getNoteWeight(c5, []));
+  });
+
+  it("uses the latest 20 qualified reviews for recent median performance", () => {
+    const notes = getNotesForGroups(["C5-B5"]);
+    const c5 = notes.find((note) => note.id === "C5")!;
+    const reviews = [
+      ...Array.from({ length: 11 }, (_, index) =>
+        makeReview({ targetNoteId: "C5", activeMs: 3000, startedAt: startedAtForMinute(index) }),
+      ),
+      ...Array.from({ length: 9 }, (_, index) =>
+        makeReview({ targetNoteId: "C5", activeMs: 900, startedAt: startedAtForMinute(index + 11) }),
+      ),
+    ];
+
+    expect(getNotePerformance(c5, reviews).recentMedianMs).toBe(3000);
   });
 
   it("can reserve draws for least-seen cards", () => {

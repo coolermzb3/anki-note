@@ -32,8 +32,20 @@ export interface PracticeSessionStat {
   p90Ms?: number;
 }
 
-export function isQualifiedReview(review: ReviewRecord, includeInterrupted = false): boolean {
-  return !review.ignored && review.answeredCorrectly && (includeInterrupted || !review.interrupted);
+export const MIN_LONG_TERM_SESSION_REVIEWS = 5;
+
+export function isQualifiedReview(review: ReviewRecord): boolean {
+  return !review.ignored && review.answeredCorrectly && !review.interrupted;
+}
+
+export function filterLongTermReviews(reviews: ReviewRecord[]): ReviewRecord[] {
+  const qualifiedCountBySession = new Map<string, number>();
+  for (const review of reviews) {
+    if (isQualifiedReview(review)) {
+      qualifiedCountBySession.set(review.sessionId, (qualifiedCountBySession.get(review.sessionId) ?? 0) + 1);
+    }
+  }
+  return reviews.filter((review) => (qualifiedCountBySession.get(review.sessionId) ?? 0) >= MIN_LONG_TERM_SESSION_REVIEWS);
 }
 
 export function percentile(values: number[], percent: number): number | undefined {
@@ -74,9 +86,9 @@ function commonConfusion(reviews: ReviewRecord[]): NoteName | undefined {
   return best?.noteName;
 }
 
-export function buildDailyStats(reviews: ReviewRecord[], includeInterrupted = false): DailyStat[] {
+export function buildDailyStats(reviews: ReviewRecord[]): DailyStat[] {
   const byDate = new Map<string, ReviewRecord[]>();
-  for (const review of reviews.filter((review) => isQualifiedReview(review, includeInterrupted))) {
+  for (const review of reviews.filter(isQualifiedReview)) {
     const date = localDateKey(review.answeredAt ?? review.endedAt);
     byDate.set(date, [...(byDate.get(date) ?? []), review]);
   }
@@ -118,12 +130,11 @@ function latestReviewEndedAt(reviews: ReviewRecord[]): string {
 export function buildPracticeSessionStats(
   reviews: ReviewRecord[],
   sessions: PracticeSessionRecord[] = [],
-  includeInterrupted = false,
 ): PracticeSessionStat[] {
   const sessionsById = new Map(sessions.map((session) => [session.id, session]));
   const reviewsBySession = new Map<string, ReviewRecord[]>();
 
-  for (const review of reviews.filter((review) => isQualifiedReview(review, includeInterrupted))) {
+  for (const review of reviews.filter(isQualifiedReview)) {
     reviewsBySession.set(review.sessionId, [...(reviewsBySession.get(review.sessionId) ?? []), review]);
   }
 
@@ -147,11 +158,10 @@ export function buildPracticeSessionStats(
 export function buildNoteStats(
   reviews: ReviewRecord[],
   groupFilter?: PracticeGroupId[],
-  includeInterrupted = false,
 ): NoteStat[] {
   const allowedGroups = groupFilter && groupFilter.length > 0 ? new Set(groupFilter) : undefined;
   return ALL_NOTES.filter((note) => !allowedGroups || allowedGroups.has(note.groupId)).map((note) => {
-    const noteReviews = reviews.filter((review) => review.targetNoteId === note.id && isQualifiedReview(review, includeInterrupted));
+    const noteReviews = reviews.filter((review) => review.targetNoteId === note.id && isQualifiedReview(review));
     const times = noteReviews.map((review) => review.activeMs);
     const reviewsWithErrors = noteReviews.filter((review) => review.wrongAnswers.length > 0).length;
     const errorCount = noteReviews.reduce((count, review) => count + review.wrongAnswers.length, 0);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDailyStats, buildNoteStats, buildPracticeSessionStats, percentile } from "./stats";
+import { buildDailyStats, buildNoteStats, buildPracticeSessionStats, filterLongTermReviews, percentile } from "./stats";
 import { makeReview } from "./testFactories";
 import type { PracticeSessionRecord } from "./types";
 
@@ -32,7 +32,6 @@ describe("stats", () => {
     ];
 
     expect(buildDailyStats(reviews)[0].medianMs).toBe(1000);
-    expect(buildDailyStats(reviews, true)[0].medianMs).toBe(3000);
   });
 
   it("excludes ignored reviews from long-term stats", () => {
@@ -41,9 +40,40 @@ describe("stats", () => {
       makeReview({ targetNoteId: "C4", activeMs: 9000, ignored: true }),
     ];
 
-    expect(buildDailyStats(reviews, true)[0].medianMs).toBe(1000);
-    expect(buildPracticeSessionStats(reviews, [], true)[0].medianMs).toBe(1000);
-    expect(buildNoteStats(reviews, undefined, true).find((stat) => stat.targetNoteId === "C4")?.reviewCount).toBe(1);
+    expect(buildDailyStats(reviews)[0].medianMs).toBe(1000);
+    expect(buildPracticeSessionStats(reviews)[0].medianMs).toBe(1000);
+    expect(buildNoteStats(reviews).find((stat) => stat.targetNoteId === "C4")?.reviewCount).toBe(1);
+  });
+
+  it("filters sessions with fewer than five qualified reviews from long-term stats", () => {
+    const shortSession = Array.from({ length: 4 }, (_, index) =>
+      makeReview({ id: `short-${index}`, targetNoteId: "C4", sessionId: "short-session" }),
+    );
+    const longSession = Array.from({ length: 5 }, (_, index) =>
+      makeReview({ id: `long-${index}`, targetNoteId: "D4", sessionId: "long-session" }),
+    );
+
+    const filtered = filterLongTermReviews([...shortSession, ...longSession]);
+
+    expect(new Set(filtered.map((review) => review.sessionId))).toEqual(new Set(["long-session"]));
+    expect(buildDailyStats(filtered)[0].completedReviews).toBe(5);
+  });
+
+  it("does not let interrupted reviews qualify a session for long-term stats", () => {
+    const reviews = [
+      ...Array.from({ length: 4 }, (_, index) =>
+        makeReview({ id: `completed-${index}`, targetNoteId: "C4", sessionId: "mixed-session" }),
+      ),
+      makeReview({
+        id: "interrupted",
+        targetNoteId: "D4",
+        sessionId: "mixed-session",
+        interrupted: true,
+        interruptReason: "focus-lost",
+      }),
+    ];
+
+    expect(filterLongTermReviews(reviews)).toHaveLength(0);
   });
 
   it("builds recognition time stats by practice session", () => {
@@ -70,7 +100,6 @@ describe("stats", () => {
     expect(stats[0].completedReviews).toBe(2);
     expect(stats[0].medianMs).toBe(2000);
     expect(stats[1].medianMs).toBe(5000);
-    expect(buildPracticeSessionStats(reviews, sessions, true)[1].medianMs).toBe(7000);
   });
 
   it("builds practice session stats from review session ids without session records", () => {

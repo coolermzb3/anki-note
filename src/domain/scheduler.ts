@@ -20,6 +20,8 @@ interface NotePerformance {
   errorRate: number;
 }
 
+const RECENT_PERFORMANCE_REVIEW_LIMIT = 20;
+
 function qualifiedReviewsFor(note: TargetNote, reviews: ReviewRecord[]): ReviewRecord[] {
   return reviews
     .filter((review) => review.targetNoteId === note.id && !review.ignored && review.answeredCorrectly && !review.interrupted)
@@ -48,7 +50,7 @@ export function getNotePerformance(
   plannedTargetNoteIds: TargetNoteId[] = [],
 ): NotePerformance {
   const qualified = qualifiedReviewsFor(note, reviews);
-  const recent = qualified.slice(-8);
+  const recent = qualified.slice(-RECENT_PERFORMANCE_REVIEW_LIMIT);
   const reviewsWithErrors = qualified.filter((review) => review.wrongAnswers.length > 0).length;
   return {
     exposure: qualified.length + plannedExposureFor(note, plannedTargetNoteIds),

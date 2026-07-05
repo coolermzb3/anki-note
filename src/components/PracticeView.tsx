@@ -11,7 +11,7 @@ import {
   PRACTICE_GROUPS_LOW_TO_HIGH,
 } from "../domain/notes";
 import { getDrillNotes, selectNextNote, selectNotePage } from "../domain/scheduler";
-import { buildNoteStats, formatMs, percentile } from "../domain/stats";
+import { buildNoteStats, filterLongTermReviews, formatMs, percentile } from "../domain/stats";
 import type {
   AppSettings,
   FocusLoss,
@@ -192,6 +192,7 @@ export function PracticeView({
     () => (queueStrategy === "note-drill" ? getDrillNotes(enabledNotes, drillNoteNames) : enabledNotes),
     [drillNoteNames, enabledNotes, queueStrategy],
   );
+  const schedulerReviews = useMemo(() => filterLongTermReviews(reviews), [reviews]);
 
   const toggleDrillNoteName = useCallback((noteName: NoteName, checked: boolean): void => {
     setDrillNoteNames((current) => {
@@ -476,8 +477,8 @@ export function PracticeView({
   }, []);
 
   const selectAndStartNext = useCallback(
-    (nextCompletedCount: number, extraReviews: ReviewRecord[] = []): void => {
-      const nextReviews = [...reviews, ...sessionReviewsRef.current, ...extraReviews];
+    (nextCompletedCount: number): void => {
+      const nextReviews = [...schedulerReviews, ...sessionReviewsRef.current];
       const remainingCount = mode === "fixed-count" ? fixedCount - nextCompletedCount : undefined;
       const note =
         queueStrategy === "melody"
@@ -491,7 +492,7 @@ export function PracticeView({
             });
       startPrompt(note);
     },
-    [drillNoteNames, drawMelodyNote, enabledNotes, fixedCount, mode, queueStrategy, reviews, startPrompt],
+    [drillNoteNames, drawMelodyNote, enabledNotes, fixedCount, mode, queueStrategy, schedulerReviews, startPrompt],
   );
 
   const finishCurrentReview = useCallback(
@@ -619,7 +620,7 @@ export function PracticeView({
     if (nextSettings.promptDisplayMode === "staff-page") {
       startStaffPage({
         sourceNotes: nextEnabledNotes,
-        sourceReviews: reviews,
+        sourceReviews: schedulerReviews,
         sourceQueueStrategy: nextSettings.queueStrategy,
         sourceDrillNoteNames: nextSettings.drillNoteNames,
         nextCompletedCount: 0,
@@ -630,7 +631,7 @@ export function PracticeView({
           ? drawMelodyNote(nextEnabledNotes, mode === "fixed-count" ? fixedCount : undefined)
           : selectNextNote({
               notes: nextEnabledNotes,
-              reviews,
+              reviews: schedulerReviews,
               queueStrategy: nextSettings.queueStrategy,
               drillNoteNames: nextSettings.drillNoteNames,
             });
@@ -648,7 +649,7 @@ export function PracticeView({
     promptDisplayMode,
     queueNotes.length,
     queueStrategy,
-    reviews,
+    schedulerReviews,
     startPrompt,
     startStaffPage,
     syncStaffPage,
@@ -709,14 +710,14 @@ export function PracticeView({
           }
           startStaffPage({
             sourceNotes: enabledNotes,
-            sourceReviews: [...reviews, ...sessionReviewsRef.current],
+            sourceReviews: [...schedulerReviews, ...sessionReviewsRef.current],
             sourceQueueStrategy: queueStrategy,
             sourceDrillNoteNames: drillNoteNames,
             nextCompletedCount,
           });
           return;
         }
-        selectAndStartNext(nextCompletedCount, [review]);
+        selectAndStartNext(nextCompletedCount);
       };
 
       window.setTimeout(() => {
@@ -742,7 +743,7 @@ export function PracticeView({
       promptDisplayMode,
       queueStrategy,
       resumeActiveTimers,
-      reviews,
+      schedulerReviews,
       selectAndStartNext,
       settings.correctDelayMs,
       startStaffPage,
