@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Formatter, GhostNote, Renderer, Stave, StaveConnector, StaveNote, Voice } from "vexflow";
+import { Formatter, GhostNote, Renderer, Stave, StaveConnector, StaveNote, Stem, Voice } from "vexflow";
 import { noteToVexKey } from "../domain/notes";
 import type { PromptNoteDuration, TargetNote } from "../domain/types";
 
@@ -12,11 +12,36 @@ interface StaffPagePromptProps {
 
 const NOTES_PER_ROW = 16;
 const ROW_HEIGHT = 172;
+const BOTTOM_PADDING = 30;
 const NEUTRAL_COLOR = "#211c18";
 const COMPLETE_COLOR = "#2f8f5f";
 const WRONG_COLOR = "#c84c3d";
 const BARLINE_INTERVAL = 4;
 const BARLINE_COLOR = "#211c18";
+const NOTE_NAME_ORDER = {
+  C: 0,
+  D: 1,
+  E: 2,
+  F: 3,
+  G: 4,
+  A: 5,
+  B: 6,
+} as const;
+
+function pitchOrder(note: Pick<TargetNote, "noteName" | "octave">): number {
+  return note.octave * 7 + NOTE_NAME_ORDER[note.noteName];
+}
+
+const STAFF_PITCH_BOUNDS = {
+  treble: {
+    lowest: pitchOrder({ noteName: "E", octave: 4 }),
+    highest: pitchOrder({ noteName: "F", octave: 5 }),
+  },
+  bass: {
+    lowest: pitchOrder({ noteName: "G", octave: 2 }),
+    highest: pitchOrder({ noteName: "A", octave: 3 }),
+  },
+} as const;
 
 function chunkNotes(notes: TargetNote[]): TargetNote[][] {
   const rows: TargetNote[][] = [];
@@ -34,11 +59,25 @@ function noteDurationToBeats(noteDuration: PromptNoteDuration): number {
   return noteDuration === "quarter" ? 1 : 4;
 }
 
+function ledgerStemDirection(note: TargetNote): typeof Stem.UP | typeof Stem.DOWN | undefined {
+  const order = pitchOrder(note);
+  const bounds = STAFF_PITCH_BOUNDS[note.staff];
+  if (order < bounds.lowest) {
+    return Stem.UP;
+  }
+  if (order > bounds.highest) {
+    return Stem.DOWN;
+  }
+  return undefined;
+}
+
 function makeStaveNote(note: TargetNote, color: string, noteDuration: PromptNoteDuration): StaveNote {
+  const stemDirection = ledgerStemDirection(note);
   const staveNote = new StaveNote({
     clef: note.staff,
     duration: noteDurationToVexDuration(noteDuration),
     keys: [noteToVexKey(note)],
+    ...(stemDirection === undefined ? {} : { stemDirection }),
   });
   staveNote.setStyle({ fillStyle: color, strokeStyle: color });
   staveNote.setLedgerLineStyle({ fillStyle: color, strokeStyle: color });
@@ -94,7 +133,7 @@ export function StaffPagePrompt({
       const rowCount = Math.max(1, rows.length);
       const containerWidth = frame.clientWidth || 920;
       const width = Math.max(720, Math.min(980, containerWidth));
-      const height = rowCount * ROW_HEIGHT + 18;
+      const height = rowCount * ROW_HEIGHT + BOTTOM_PADDING;
       const renderer = new Renderer(rendererTarget, Renderer.Backends.SVG);
       renderer.resize(width, height);
       const context = renderer.getContext();
