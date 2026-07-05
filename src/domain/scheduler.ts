@@ -1,4 +1,5 @@
 import { selectMelodyNotes } from "./melody";
+import { isStatisticalReview } from "./reviews";
 import type { NoteName, PracticeQueueStrategy, ReviewRecord, TargetNote, TargetNoteId } from "./types";
 
 export interface SelectNextNoteOptions {
@@ -24,7 +25,7 @@ const RECENT_PERFORMANCE_REVIEW_LIMIT = 20;
 
 function qualifiedReviewsFor(note: TargetNote, reviews: ReviewRecord[]): ReviewRecord[] {
   return reviews
-    .filter((review) => review.targetNoteId === note.id && !review.ignored && review.answeredCorrectly && !review.interrupted)
+    .filter((review) => review.targetNoteId === note.id && isStatisticalReview(review))
     .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
 

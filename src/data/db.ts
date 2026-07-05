@@ -111,6 +111,37 @@ export async function saveReview(review: ReviewRecord): Promise<void> {
   });
 }
 
+export async function deletePracticeSessionWithReviews(
+  sessionId: PracticeSessionRecord["id"],
+  reviews: ReviewRecord[],
+): Promise<void> {
+  const reviewIds = reviews.filter((review) => !review.ignored).map((review) => review.id);
+  await db.transaction("rw", db.settings, db.practiceSessions, db.reviews, async () => {
+    await db.practiceSessions.delete(sessionId);
+    if (reviewIds.length > 0) {
+      await db.reviews.bulkDelete(reviewIds);
+    }
+
+    const settings = await db.settings.get("default");
+    if (!settings) {
+      return;
+    }
+    const [firstRemainingReview] = await db.reviews.filter((review) => !review.ignored).sortBy("startedAt");
+    const nextFirstReviewAt = firstRemainingReview?.startedAt;
+    if (settings.firstReviewAt === nextFirstReviewAt) {
+      return;
+    }
+
+    const nextSettings = { ...settings };
+    if (nextFirstReviewAt) {
+      nextSettings.firstReviewAt = nextFirstReviewAt;
+    } else {
+      delete nextSettings.firstReviewAt;
+    }
+    await db.settings.put(nextSettings);
+  });
+}
+
 export async function replaceAllData(
   settings: AppSettings,
   sessions: PracticeSessionRecord[],

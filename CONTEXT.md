@@ -41,7 +41,7 @@ A practice queue strategy that orders enabled target notes into a melody-like pi
 _Avoid_: Song mode, generated sheet music
 
 **Single-note drill queue**:
-A practice queue strategy that restricts prompts to one or more selected answer note names across the enabled practice range. Single-note drill attempts are not part of long-term recognition statistics.
+A practice queue strategy that restricts prompts to one or more selected answer note names across the enabled practice range. When exactly one answer note name is selected, completed prompts are kept only as session activity; when multiple answer note names are selected, prompts are ordinary reviews scoped to those names.
 _Avoid_: Separate deck, filtered group
 
 **Grand-staff prompt**:

@@ -1,4 +1,5 @@
 import { ALL_NOTES } from "./notes";
+import { isStatisticalReview } from "./reviews";
 import type { NoteName, PracticeGroupId, PracticeSessionRecord, ReviewRecord, TargetNoteId } from "./types";
 
 export interface DailyStat {
@@ -34,14 +35,10 @@ export interface PracticeSessionStat {
 
 export const MIN_LONG_TERM_SESSION_REVIEWS = 5;
 
-export function isQualifiedReview(review: ReviewRecord): boolean {
-  return !review.ignored && review.answeredCorrectly && !review.interrupted;
-}
-
 export function filterLongTermReviews(reviews: ReviewRecord[]): ReviewRecord[] {
   const qualifiedCountBySession = new Map<string, number>();
   for (const review of reviews) {
-    if (isQualifiedReview(review)) {
+    if (isStatisticalReview(review)) {
       qualifiedCountBySession.set(review.sessionId, (qualifiedCountBySession.get(review.sessionId) ?? 0) + 1);
     }
   }
@@ -88,7 +85,7 @@ function commonConfusion(reviews: ReviewRecord[]): NoteName | undefined {
 
 export function buildDailyStats(reviews: ReviewRecord[]): DailyStat[] {
   const byDate = new Map<string, ReviewRecord[]>();
-  for (const review of reviews.filter(isQualifiedReview)) {
+  for (const review of reviews.filter(isStatisticalReview)) {
     const date = localDateKey(review.answeredAt ?? review.endedAt);
     byDate.set(date, [...(byDate.get(date) ?? []), review]);
   }
@@ -134,7 +131,7 @@ export function buildPracticeSessionStats(
   const sessionsById = new Map(sessions.map((session) => [session.id, session]));
   const reviewsBySession = new Map<string, ReviewRecord[]>();
 
-  for (const review of reviews.filter(isQualifiedReview)) {
+  for (const review of reviews.filter(isStatisticalReview)) {
     reviewsBySession.set(review.sessionId, [...(reviewsBySession.get(review.sessionId) ?? []), review]);
   }
 
@@ -161,7 +158,7 @@ export function buildNoteStats(
 ): NoteStat[] {
   const allowedGroups = groupFilter && groupFilter.length > 0 ? new Set(groupFilter) : undefined;
   return ALL_NOTES.filter((note) => !allowedGroups || allowedGroups.has(note.groupId)).map((note) => {
-    const noteReviews = reviews.filter((review) => review.targetNoteId === note.id && isQualifiedReview(review));
+    const noteReviews = reviews.filter((review) => review.targetNoteId === note.id && isStatisticalReview(review));
     const times = noteReviews.map((review) => review.activeMs);
     const reviewsWithErrors = noteReviews.filter((review) => review.wrongAnswers.length > 0).length;
     const errorCount = noteReviews.reduce((count, review) => count + review.wrongAnswers.length, 0);

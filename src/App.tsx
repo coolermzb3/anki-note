@@ -53,7 +53,7 @@ export function App(): JSX.Element {
     [practiceExitRequest, practiceRunning, view],
   );
 
-  const handleNavigationExitComplete = useCallback((targetView: PracticeNavigationExitTarget): void => {
+  const handleNavigationExit = useCallback((targetView: PracticeNavigationExitTarget): void => {
     setPracticeExitRequest(null);
     setView(targetView);
   }, []);
@@ -104,7 +104,7 @@ export function App(): JSX.Element {
             reviews={data.reviews}
             navigationExitRequest={practiceExitRequest}
             onDataChanged={refresh}
-            onNavigationExitComplete={handleNavigationExitComplete}
+            onNavigationExit={handleNavigationExit}
             onOpenStats={() => setView("stats")}
             onRunningChange={setPracticeRunning}
             onSettingsSaved={(settings) => setData((current) => (current ? { ...current, settings } : current))}

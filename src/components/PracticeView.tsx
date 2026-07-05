@@ -1,7 +1,7 @@
 import { BarChart3, Pause, Play, RotateCcw, SlidersHorizontal, Square, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playPianoNote, playTargetNote, unlockAudio } from "../audio/piano";
-import { db, resolveQueueStrategy, saveReview } from "../data/db";
+import { db, deletePracticeSessionWithReviews, resolveQueueStrategy, saveReview } from "../data/db";
 import { writeBackupNow } from "../data/backup";
 import { createUuid } from "../domain/id";
 import {
@@ -11,6 +11,8 @@ import {
   getNotesForGroups,
   PRACTICE_GROUPS,
 } from "../domain/notes";
+import { shouldIgnoreReviewForSession, shouldKeepPracticeSession } from "../domain/practiceSession";
+import { isCompletedReview } from "../domain/reviews";
 import { getDrillNotes, selectNextNote, selectNotePage } from "../domain/scheduler";
 import { buildNoteStats, filterLongTermReviews, formatMs, percentile } from "../domain/stats";
 import type {
@@ -35,7 +37,7 @@ interface PracticeViewProps {
   settings: AppSettings;
   reviews: ReviewRecord[];
   navigationExitRequest?: PracticeNavigationExitRequest | null;
-  onNavigationExitComplete?: (targetView: PracticeNavigationExitTarget) => void;
+  onNavigationExit?: (targetView: PracticeNavigationExitTarget) => void;
   onSettingsSaved: (settings: AppSettings) => void;
   onDataChanged: () => Promise<void>;
   onOpenStats: () => void;
@@ -77,6 +79,7 @@ interface StaffPageRuntime {
 
 interface CompleteSessionOptions {
   showSummary?: boolean;
+  updateUi?: boolean;
 }
 
 function newSessionId(): string {
@@ -128,7 +131,7 @@ export function PracticeView({
   settings,
   reviews,
   navigationExitRequest,
-  onNavigationExitComplete,
+  onNavigationExit,
   onSettingsSaved,
   onDataChanged,
   onOpenStats,
@@ -525,7 +528,7 @@ export function PracticeView({
       }
       pauseActiveTimers();
       const endedAt = new Date().toISOString();
-      const ignored = sessionRef.current.queueStrategy === "note-drill";
+      const ignored = shouldIgnoreReviewForSession(sessionRef.current);
       const review: ReviewRecord = {
         id: createUuid(),
         schemaVersion: 1,
@@ -567,6 +570,7 @@ export function PracticeView({
         return;
       }
       const showSummary = options.showSummary ?? true;
+      const updateUi = options.updateUi ?? true;
       endingRef.current = true;
       const unfinishedReview = promptRef.current ? await finishCurrentReview(false, unfinishedReason) : null;
       pauseActiveTimers();
@@ -578,19 +582,37 @@ export function PracticeView({
         ...sessionRef.current,
         endedAt,
         endReason,
-        completedCount: finalReviews.filter((review) => review.answeredCorrectly).length,
+        completedCount: finalReviews.filter(isCompletedReview).length,
         interruptedCount: finalReviews.filter((review) => review.interrupted).length,
       };
-      await db.practiceSessions.put(finalSession);
-      sessionRef.current = finalSession;
-      setSession(finalSession);
-      setSummary(showSummary ? { session: finalSession, reviews: finalReviews } : null);
-      setCurrentNote(null);
-      syncStaffPage(null);
+      const shouldKeepSession = shouldKeepPracticeSession(finalSession, finalReviews);
+      if (shouldKeepSession) {
+        await db.practiceSessions.put(finalSession);
+        sessionRef.current = finalSession;
+        if (updateUi) {
+          setSession(finalSession);
+          setSummary(showSummary ? { session: finalSession, reviews: finalReviews } : null);
+        }
+      } else {
+        await deletePracticeSessionWithReviews(finalSession.id, finalReviews);
+        sessionRef.current = null;
+        if (updateUi) {
+          setSession(null);
+          setSummary(null);
+        }
+      }
+      if (updateUi) {
+        setCurrentNote(null);
+        syncStaffPage(null);
+      } else {
+        staffPageRef.current = null;
+      }
       isPausedRef.current = false;
       pendingAfterPauseRef.current = null;
-      setIsPaused(false);
-      setPhase(showSummary ? "summary" : "setup");
+      if (updateUi) {
+        setIsPaused(false);
+        setPhase(showSummary && shouldKeepSession ? "summary" : "setup");
+      }
       await writeBackupNow().catch(() => undefined);
       await onDataChanged();
       endingRef.current = false;
@@ -607,10 +629,12 @@ export function PracticeView({
       return;
     }
     handledNavigationExitRequestIdRef.current = navigationExitRequest.id;
-    void completeSession("manual-stop", "manual-stop", { showSummary: false }).then(() => {
-      onNavigationExitComplete?.(navigationExitRequest.targetView);
-    });
-  }, [completeSession, navigationExitRequest, onNavigationExitComplete, phase]);
+    const backgroundExit = Promise.resolve().then(() =>
+      completeSession("manual-stop", "manual-stop", { showSummary: false, updateUi: false }),
+    );
+    onNavigationExit?.(navigationExitRequest.targetView);
+    void backgroundExit.catch(() => undefined);
+  }, [completeSession, navigationExitRequest, onNavigationExit, phase]);
 
   const startSession = useCallback(async (): Promise<void> => {
     if (queueNotes.length === 0) {
@@ -876,7 +900,7 @@ export function PracticeView({
   const setupDisabled = queueNotes.length === 0;
   const remainingMs = mode === "fixed-duration" ? fixedDurationSeconds * 1000 - getSessionActiveMs() : 0;
   const sessionQualifiedTimes = (summary?.reviews ?? [])
-    .filter((review) => review.answeredCorrectly && !review.interrupted)
+    .filter(isCompletedReview)
     .map((review) => review.activeMs);
   const weakestNotes = summary
     ? buildNoteStats(summary.reviews)
@@ -1113,7 +1137,7 @@ export function PracticeView({
           <div className="metric-grid">
             <div className="metric">
               <span>答对</span>
-              <strong>{summary.reviews.filter((review) => review.answeredCorrectly).length}</strong>
+              <strong>{summary.reviews.filter(isCompletedReview).length}</strong>
             </div>
             <div className="metric">
               <span>错误</span>
