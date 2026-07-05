@@ -72,8 +72,12 @@ export function App(): JSX.Element {
       return;
     }
 
+    const appBaseUrl = new URL(import.meta.env.BASE_URL, window.location.href);
+
     if (import.meta.env.PROD) {
-      void navigator.serviceWorker.register("/service-worker.js").catch(() => undefined);
+      void navigator.serviceWorker.register(new URL("service-worker.js", appBaseUrl).toString(), {
+        scope: appBaseUrl.pathname,
+      }).catch(() => undefined);
       return;
     }
 

@@ -1,5 +1,9 @@
 const CACHE_NAME = "anki-note-v2";
-const APP_SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon.svg"];
+const scopeUrl = new URL(self.registration.scope);
+const indexUrl = new URL("index.html", scopeUrl).toString();
+const APP_SHELL = ["", "index.html", "manifest.webmanifest", "icons/icon.svg"].map((path) =>
+  new URL(path, scopeUrl).toString(),
+);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
@@ -46,7 +50,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => cacheResponse(event.request, response))
-        .catch(() => caches.match("/index.html")),
+        .catch(() => caches.match(indexUrl)),
     );
     return;
   }
