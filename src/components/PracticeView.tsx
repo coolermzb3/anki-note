@@ -1138,6 +1138,10 @@ export function PracticeView({
           )}
         </div>
         <div className="topline-actions">
+          <button title="重播目标音 Space" onClick={() => void replayTarget()}>
+            <Volume2 size={18} />
+            重播
+          </button>
           <button title={isPaused ? "继续 P" : "暂停 P"} onClick={togglePause}>
             {isPaused ? <Play size={18} /> : <Pause size={18} />}
             {isPaused ? "继续" : "暂停"}
@@ -1160,9 +1164,6 @@ export function PracticeView({
         ) : currentNote ? (
           <StaffPrompt note={currentNote} noteDuration={promptNoteDuration} />
         ) : null}
-        <button className="replay-button" title="重播目标音 Space" onClick={() => void replayTarget()}>
-          <Volume2 size={20} />
-        </button>
       </div>
 
       <div className="answer-grid" aria-label="答案">
