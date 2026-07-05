@@ -23,5 +23,6 @@ export function makeReview(overrides: Partial<ReviewRecord> & { targetNoteId: Ta
     wrongAnswers: overrides.wrongAnswers ?? [],
     replayCount: overrides.replayCount ?? 0,
     focusLosses: overrides.focusLosses ?? [],
+    ignored: overrides.ignored,
   };
 }

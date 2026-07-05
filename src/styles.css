@@ -248,10 +248,15 @@ main {
 }
 
 .group-grid,
-.group-filter {
+.group-filter,
+.note-name-options {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 8px;
+}
+
+.note-name-options {
+  grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
 }
 
 .strategy-options {

@@ -1,6 +1,6 @@
 import Dexie, { type Table } from "dexie";
 import { DEFAULT_ENABLED_GROUPS } from "../domain/notes";
-import type { AppSettings, BackupState, PracticeQueueStrategy, PracticeSessionRecord, ReviewRecord } from "../domain/types";
+import type { AppSettings, BackupState, NoteName, PracticeQueueStrategy, PracticeSessionRecord, ReviewRecord } from "../domain/types";
 
 export class AppDatabase extends Dexie {
   settings!: Table<AppSettings, string>;
@@ -25,6 +25,10 @@ export function resolveQueueStrategy(settings: { queueStrategy?: PracticeQueueSt
   return settings.queueStrategy ?? (settings.focusedTraining ? "focused" : "adaptive");
 }
 
+export function resolveDrillNoteNames(settings: { drillNoteNames?: NoteName[] }): NoteName[] {
+  return settings.drillNoteNames && settings.drillNoteNames.length > 0 ? settings.drillNoteNames : ["C"];
+}
+
 export function makeDefaultSettings(): AppSettings {
   const now = new Date().toISOString();
   return {
@@ -41,6 +45,7 @@ export function makeDefaultSettings(): AppSettings {
     autoPlayTarget: true,
     includeLedgerVariants: true,
     queueStrategy: "adaptive",
+    drillNoteNames: ["C"],
     focusedTraining: false,
     inactivityThresholdSeconds: 30,
     correctDelayMs: 400,
@@ -52,6 +57,7 @@ export async function ensureSettings(): Promise<AppSettings> {
   if (existing) {
     if (
       existing.queueStrategy === undefined ||
+      existing.drillNoteNames === undefined ||
       existing.focusedTraining === undefined ||
       existing.includeLedgerVariants === undefined ||
       existing.promptDisplayMode === undefined ||
@@ -60,6 +66,7 @@ export async function ensureSettings(): Promise<AppSettings> {
       const migrated = {
         ...existing,
         queueStrategy: resolveQueueStrategy(existing),
+        drillNoteNames: resolveDrillNoteNames(existing),
         focusedTraining: existing.focusedTraining ?? resolveQueueStrategy(existing) === "focused",
         includeLedgerVariants: existing.includeLedgerVariants ?? true,
         promptDisplayMode: existing.promptDisplayMode ?? "single-note",
@@ -89,7 +96,7 @@ export async function saveReview(review: ReviewRecord): Promise<void> {
   await db.transaction("rw", db.reviews, db.settings, async () => {
     await db.reviews.put(review);
     const settings = await ensureSettings();
-    if (!settings.firstReviewAt) {
+    if (!review.ignored && !settings.firstReviewAt) {
       await db.settings.put({ ...settings, firstReviewAt: review.startedAt });
     }
   });

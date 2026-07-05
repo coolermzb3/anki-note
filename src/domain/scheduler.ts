@@ -1,5 +1,5 @@
 import { selectMelodyNotes } from "./melody";
-import type { PracticeQueueStrategy, ReviewRecord, TargetNote, TargetNoteId } from "./types";
+import type { NoteName, PracticeQueueStrategy, ReviewRecord, TargetNote, TargetNoteId } from "./types";
 
 export interface SelectNextNoteOptions {
   notes: TargetNote[];
@@ -8,6 +8,7 @@ export interface SelectNextNoteOptions {
   plannedTargetNoteIds?: TargetNoteId[];
   newCardRate?: number;
   queueStrategy?: PracticeQueueStrategy;
+  drillNoteNames?: NoteName[];
   focusedTraining?: boolean;
   focusedTrainingRate?: number;
   rng?: () => number;
@@ -21,7 +22,7 @@ interface NotePerformance {
 
 function qualifiedReviewsFor(note: TargetNote, reviews: ReviewRecord[]): ReviewRecord[] {
   return reviews
-    .filter((review) => review.targetNoteId === note.id && review.answeredCorrectly && !review.interrupted)
+    .filter((review) => review.targetNoteId === note.id && !review.ignored && review.answeredCorrectly && !review.interrupted)
     .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 }
 
@@ -106,6 +107,14 @@ function resolvePracticeQueueStrategy({
   return queueStrategy ?? (focusedTraining ? "focused" : "adaptive");
 }
 
+export function getDrillNotes(notes: TargetNote[], drillNoteNames: NoteName[] = []): TargetNote[] {
+  if (drillNoteNames.length === 0) {
+    return [];
+  }
+  const enabledNoteNames = new Set<NoteName>(drillNoteNames);
+  return notes.filter((note) => enabledNoteNames.has(note.noteName));
+}
+
 export function selectNextNote({
   notes,
   reviews,
@@ -113,6 +122,7 @@ export function selectNextNote({
   plannedTargetNoteIds = [],
   newCardRate = 0.25,
   queueStrategy,
+  drillNoteNames,
   focusedTraining = false,
   focusedTrainingRate = 0.8,
   rng = Math.random,
@@ -126,10 +136,15 @@ export function selectNextNote({
     return selectMelodyNotes({ notes, count: 1, lastTargetNoteId, rng })[0];
   }
 
+  const strategyNotes = effectiveQueueStrategy === "note-drill" ? getDrillNotes(notes, drillNoteNames) : notes;
+  if (strategyNotes.length === 0) {
+    throw new Error("Cannot select a note without enabled drill note names.");
+  }
+
   const sourceNotes =
     effectiveQueueStrategy === "focused" && rng() < focusedTrainingRate
-      ? getFocusedTrainingNotes(notes, reviews, plannedTargetNoteIds)
-      : notes;
+      ? getFocusedTrainingNotes(strategyNotes, reviews, plannedTargetNoteIds)
+      : strategyNotes;
   const eligible = withoutImmediateRepeat(sourceNotes, lastTargetNoteId);
   if (eligible.length === 1) {
     return eligible[0];
@@ -171,14 +186,18 @@ export function selectNotePage({ count, ...options }: SelectNotePageOptions): Ta
     });
   }
 
+  const optionsWithStrategyNotes =
+    resolvePracticeQueueStrategy(options) === "note-drill"
+      ? { ...options, notes: getDrillNotes(options.notes, options.drillNoteNames) }
+      : options;
   const selected: TargetNote[] = [];
-  let lastTargetNoteId = options.lastTargetNoteId;
+  let lastTargetNoteId = optionsWithStrategyNotes.lastTargetNoteId;
   for (let index = 0; index < count; index += 1) {
     const note = selectNextNote({
-      ...options,
+      ...optionsWithStrategyNotes,
       lastTargetNoteId,
       plannedTargetNoteIds: [
-        ...(options.plannedTargetNoteIds ?? []),
+        ...(optionsWithStrategyNotes.plannedTargetNoteIds ?? []),
         ...selected.map((selectedNote) => selectedNote.id),
       ],
     });

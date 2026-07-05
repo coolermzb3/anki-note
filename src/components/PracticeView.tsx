@@ -10,7 +10,7 @@ import {
   getNotesForGroups,
   PRACTICE_GROUPS_LOW_TO_HIGH,
 } from "../domain/notes";
-import { selectNextNote, selectNotePage } from "../domain/scheduler";
+import { getDrillNotes, selectNextNote, selectNotePage } from "../domain/scheduler";
 import { buildNoteStats, formatMs, percentile } from "../domain/stats";
 import type {
   AppSettings,
@@ -103,6 +103,11 @@ const PRACTICE_QUEUE_OPTIONS: Array<{ strategy: PracticeQueueStrategy; label: st
     label: "自动旋律生成",
     description: "在启用组音域内生成级进为主的练习",
   },
+  {
+    strategy: "note-drill",
+    label: "单音强化",
+    description: "只抽所选音名，不写入统计",
+  },
 ];
 
 export function PracticeView({
@@ -127,6 +132,7 @@ export function PracticeView({
   const [autoPlayTarget, setAutoPlayTarget] = useState(settings.autoPlayTarget);
   const [includeLedgerVariants, setIncludeLedgerVariants] = useState(settings.includeLedgerVariants ?? true);
   const [queueStrategy, setQueueStrategy] = useState<PracticeQueueStrategy>(resolveQueueStrategy(settings));
+  const [drillNoteNames, setDrillNoteNames] = useState<NoteName[]>(settings.drillNoteNames ?? ["C"]);
   const [session, setSession] = useState<PracticeSessionRecord | null>(null);
   const [currentNote, setCurrentNote] = useState<TargetNote | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
@@ -169,6 +175,7 @@ export function PracticeView({
       setAutoPlayTarget(settings.autoPlayTarget);
       setIncludeLedgerVariants(settings.includeLedgerVariants ?? true);
       setQueueStrategy(resolveQueueStrategy(settings));
+      setDrillNoteNames(settings.drillNoteNames ?? ["C"]);
     }
   }, [phase, settings]);
 
@@ -181,6 +188,18 @@ export function PracticeView({
     [includeLedgerVariants],
   );
   const fixedCountPresets = useMemo(() => Array.from(new Set([10, 20, fullPracticeCount])), [fullPracticeCount]);
+  const queueNotes = useMemo(
+    () => (queueStrategy === "note-drill" ? getDrillNotes(enabledNotes, drillNoteNames) : enabledNotes),
+    [drillNoteNames, enabledNotes, queueStrategy],
+  );
+
+  const toggleDrillNoteName = useCallback((noteName: NoteName, checked: boolean): void => {
+    setDrillNoteNames((current) => {
+      const next = checked ? [...current, noteName] : current.filter((name) => name !== noteName);
+      const selected = new Set(next);
+      return ANSWER_BUTTONS.map((button) => button.noteName).filter((name) => selected.has(name));
+    });
+  }, []);
 
   const getPromptActiveMs = useCallback((): number => {
     const prompt = promptRef.current;
@@ -292,6 +311,7 @@ export function PracticeView({
       autoPlayTarget,
       includeLedgerVariants,
       queueStrategy,
+      drillNoteNames,
       focusedTraining: queueStrategy === "focused",
     };
     await db.settings.put(nextSettings);
@@ -302,6 +322,7 @@ export function PracticeView({
     enabledGroupIds,
     fixedCount,
     fixedDurationSeconds,
+    drillNoteNames,
     includeLedgerVariants,
     mode,
     onSettingsSaved,
@@ -402,11 +423,13 @@ export function PracticeView({
       sourceNotes,
       sourceReviews,
       sourceQueueStrategy,
+      sourceDrillNoteNames,
       nextCompletedCount,
     }: {
       sourceNotes: TargetNote[];
       sourceReviews: ReviewRecord[];
       sourceQueueStrategy: PracticeQueueStrategy;
+      sourceDrillNoteNames: NoteName[];
       nextCompletedCount: number;
     }): void => {
       const count = getNextStaffPageCount(nextCompletedCount);
@@ -417,6 +440,7 @@ export function PracticeView({
         notes: sourceNotes,
         reviews: sourceReviews,
         queueStrategy: sourceQueueStrategy,
+        drillNoteNames: sourceDrillNoteNames,
         lastTargetNoteId: lastTargetNoteIdRef.current,
         count,
       });
@@ -462,11 +486,12 @@ export function PracticeView({
               notes: enabledNotes,
               reviews: nextReviews,
               queueStrategy,
+              drillNoteNames,
               lastTargetNoteId: lastTargetNoteIdRef.current,
             });
       startPrompt(note);
     },
-    [drawMelodyNote, enabledNotes, fixedCount, mode, queueStrategy, reviews, startPrompt],
+    [drillNoteNames, drawMelodyNote, enabledNotes, fixedCount, mode, queueStrategy, reviews, startPrompt],
   );
 
   const finishCurrentReview = useCallback(
@@ -482,6 +507,7 @@ export function PracticeView({
       }
       pauseActiveTimers();
       const endedAt = new Date().toISOString();
+      const ignored = sessionRef.current.queueStrategy === "note-drill";
       const review: ReviewRecord = {
         id: crypto.randomUUID(),
         schemaVersion: 1,
@@ -500,10 +526,13 @@ export function PracticeView({
         wrongAnswers: prompt.wrongAnswers,
         replayCount: prompt.replayCount,
         focusLosses: prompt.focusLosses,
+        ignored,
       };
       promptRef.current = null;
       lastTargetNoteIdRef.current = prompt.note.id;
-      await saveReview(review);
+      if (!ignored) {
+        await saveReview(review);
+      }
       sessionReviewsRef.current = [...sessionReviewsRef.current, review];
       return review;
     },
@@ -547,7 +576,7 @@ export function PracticeView({
   );
 
   const startSession = useCallback(async (): Promise<void> => {
-    if (enabledNotes.length === 0) {
+    if (queueNotes.length === 0) {
       return;
     }
     void unlockAudio().catch(() => undefined);
@@ -561,6 +590,7 @@ export function PracticeView({
       fixedCount: mode === "fixed-count" ? fixedCount : undefined,
       fixedDurationSeconds: mode === "fixed-duration" ? fixedDurationSeconds : undefined,
       queueStrategy,
+      drillNoteNames,
       focusedTraining: queueStrategy === "focused",
       startedAt,
       completedCount: 0,
@@ -591,6 +621,7 @@ export function PracticeView({
         sourceNotes: nextEnabledNotes,
         sourceReviews: reviews,
         sourceQueueStrategy: nextSettings.queueStrategy,
+        sourceDrillNoteNames: nextSettings.drillNoteNames,
         nextCompletedCount: 0,
       });
     } else {
@@ -601,19 +632,21 @@ export function PracticeView({
               notes: nextEnabledNotes,
               reviews,
               queueStrategy: nextSettings.queueStrategy,
+              drillNoteNames: nextSettings.drillNoteNames,
             });
       startPrompt(firstNote);
     }
   }, [
     enabledGroupIds,
-    enabledNotes.length,
     fixedCount,
     fixedDurationSeconds,
+    drillNoteNames,
     drawMelodyNote,
     includeLedgerVariants,
     mode,
     persistConfig,
     promptDisplayMode,
+    queueNotes.length,
     queueStrategy,
     reviews,
     startPrompt,
@@ -678,6 +711,7 @@ export function PracticeView({
             sourceNotes: enabledNotes,
             sourceReviews: [...reviews, ...sessionReviewsRef.current],
             sourceQueueStrategy: queueStrategy,
+            sourceDrillNoteNames: drillNoteNames,
             nextCompletedCount,
           });
           return;
@@ -696,6 +730,7 @@ export function PracticeView({
     [
       completeSession,
       completedCount,
+      drillNoteNames,
       enabledNotes,
       feedback?.type,
       finishCurrentReview,
@@ -801,7 +836,7 @@ export function PracticeView({
     settings.inactivityThresholdSeconds,
   ]);
 
-  const setupDisabled = enabledNotes.length === 0;
+  const setupDisabled = queueNotes.length === 0;
   const remainingMs = mode === "fixed-duration" ? fixedDurationSeconds * 1000 - getSessionActiveMs() : 0;
   const sessionQualifiedTimes = (summary?.reviews ?? [])
     .filter((review) => review.answeredCorrectly && !review.interrupted)
@@ -962,6 +997,27 @@ export function PracticeView({
                 ))}
               </div>
             </div>
+
+            {queueStrategy === "note-drill" ? (
+              <div className="control-block">
+                <span className="control-label">强化音名</span>
+                <div className="note-name-options">
+                  {ANSWER_BUTTONS.map((button) => {
+                    const checked = drillNoteNames.includes(button.noteName);
+                    return (
+                      <label className={checked ? "choice choice-active" : "choice"} key={button.noteName}>
+                        <input
+                          checked={checked}
+                          type="checkbox"
+                          onChange={(event) => toggleDrillNoteName(button.noteName, event.target.checked)}
+                        />
+                        <span>{button.noteName}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             <div className="control-block">
               <span className="control-label">谱号变体</span>

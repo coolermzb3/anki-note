@@ -56,6 +56,16 @@ describe("scheduler", () => {
     expect(getNoteWeight(c5, reviews)).toBeGreaterThan(getNoteWeight(d5, reviews));
   });
 
+  it("ignores ignored reviews when calculating note weights", () => {
+    const notes = getNotesForGroups(["C5-B5"]);
+    const c5 = notes.find((note) => note.id === "C5")!;
+    const reviews = [
+      makeReview({ targetNoteId: "C5", activeMs: 9000, wrongAnswers: [{ noteName: "D", atActiveMs: 900 }], ignored: true }),
+    ];
+
+    expect(getNoteWeight(c5, reviews)).toBe(getNoteWeight(c5, []));
+  });
+
   it("can reserve draws for least-seen cards", () => {
     const notes = getNotesForGroups(["C5-B5"]);
     const selected = selectNextNote({
@@ -133,6 +143,22 @@ describe("scheduler", () => {
     });
 
     expect(selected.id).toBe("D4");
+  });
+
+  it("restricts note drill draws to the selected note names", () => {
+    const notes = getNotesForGroups(["C4-B4", "C5-B5"], false);
+    const selected = selectNotePage({
+      notes,
+      reviews: [],
+      queueStrategy: "note-drill",
+      drillNoteNames: ["C"],
+      count: 4,
+      newCardRate: 1,
+      rng: () => 0,
+    });
+
+    expect(selected.every((note) => note.noteName === "C")).toBe(true);
+    expect(new Set(selected.map((note) => note.octave))).toEqual(new Set([4, 5]));
   });
 
   it("keeps some full-pool exploration during focused training", () => {

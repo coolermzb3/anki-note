@@ -35,6 +35,17 @@ describe("stats", () => {
     expect(buildDailyStats(reviews, true)[0].medianMs).toBe(3000);
   });
 
+  it("excludes ignored reviews from long-term stats", () => {
+    const reviews = [
+      makeReview({ targetNoteId: "C4", activeMs: 1000 }),
+      makeReview({ targetNoteId: "C4", activeMs: 9000, ignored: true }),
+    ];
+
+    expect(buildDailyStats(reviews, true)[0].medianMs).toBe(1000);
+    expect(buildPracticeSessionStats(reviews, [], true)[0].medianMs).toBe(1000);
+    expect(buildNoteStats(reviews, undefined, true).find((stat) => stat.targetNoteId === "C4")?.reviewCount).toBe(1);
+  });
+
   it("builds recognition time stats by practice session", () => {
     const sessions = [
       makeSession({ id: "session-2", startedAt: "2026-07-04T11:00:00.000+08:00" }),

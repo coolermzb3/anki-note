@@ -18,6 +18,7 @@ const settings: AppSettings = {
   autoPlayTarget: true,
   includeLedgerVariants: true,
   queueStrategy: "adaptive",
+  drillNoteNames: ["C"],
   focusedTraining: false,
   inactivityThresholdSeconds: 30,
   correctDelayMs: 400,

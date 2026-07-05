@@ -33,7 +33,7 @@ export interface PracticeSessionStat {
 }
 
 export function isQualifiedReview(review: ReviewRecord, includeInterrupted = false): boolean {
-  return review.answeredCorrectly && (includeInterrupted || !review.interrupted);
+  return !review.ignored && review.answeredCorrectly && (includeInterrupted || !review.interrupted);
 }
 
 export function percentile(values: number[], percent: number): number | undefined {

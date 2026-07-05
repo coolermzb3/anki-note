@@ -33,12 +33,16 @@ The card selection flow for a practice session. A practice queue decides which t
 _Avoid_: Deck scheduler, spaced-repetition scheduler
 
 **Practice queue strategy**:
-The learner-selected policy used to build the practice queue. Current strategies are a regular adaptive queue, a focused weak-note queue, and a melody queue.
+The learner-selected policy used to build the practice queue. Current strategies are a regular adaptive queue, a focused weak-note queue, a melody queue, and a single-note drill queue.
 _Avoid_: Training mode, scheduler
 
 **Melody queue**:
 A practice queue strategy that orders enabled target notes into a melody-like pitch sequence within the selected practice range. A melody queue still produces ordinary target-note reviews; it does not add rhythm, ear-training answers, or a separate scoring model.
 _Avoid_: Song mode, generated sheet music
+
+**Single-note drill queue**:
+A practice queue strategy that restricts prompts to one or more selected answer note names across the enabled practice range. Single-note drill attempts are not part of long-term recognition statistics.
+_Avoid_: Separate deck, filtered group
 
 **Grand-staff prompt**:
 A card prompt that always shows both treble and bass staves while asking for a single note. Outside the overlap range, notes C4 and above appear on the treble staff and notes B3 and below appear on the bass staff. In the overlap range E3 through A4, each pitch has a treble-staff card and a bass-staff card.

@@ -5,7 +5,7 @@ export type PitchId = `${NoteName}${Octave}`;
 export type TargetNoteId = PitchId | `${PitchId}-${Staff}`;
 
 export type PracticeMode = "open-ended" | "fixed-count" | "fixed-duration";
-export type PracticeQueueStrategy = "adaptive" | "focused" | "melody";
+export type PracticeQueueStrategy = "adaptive" | "focused" | "melody" | "note-drill";
 export type PromptDisplayMode = "single-note" | "staff-page";
 export type PromptNoteDuration = "whole" | "quarter";
 export type SessionEndReason = "manual-stop" | "completed-count" | "completed-duration" | "abandoned";
@@ -63,6 +63,7 @@ export interface ReviewRecord {
   wrongAnswers: WrongAnswer[];
   replayCount: number;
   focusLosses: FocusLoss[];
+  ignored?: boolean;
 }
 
 export interface PracticeSessionRecord {
@@ -73,6 +74,7 @@ export interface PracticeSessionRecord {
   fixedCount?: number;
   fixedDurationSeconds?: number;
   queueStrategy?: PracticeQueueStrategy;
+  drillNoteNames?: NoteName[];
   focusedTraining?: boolean;
   startedAt: string;
   endedAt?: string;
@@ -96,6 +98,7 @@ export interface AppSettings {
   autoPlayTarget: boolean;
   includeLedgerVariants: boolean;
   queueStrategy: PracticeQueueStrategy;
+  drillNoteNames: NoteName[];
   focusedTraining?: boolean;
   inactivityThresholdSeconds: number;
   correctDelayMs: number;
