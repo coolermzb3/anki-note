@@ -613,7 +613,9 @@ export function PracticeView({
         setIsPaused(false);
         setPhase(showSummary && shouldKeepSession ? "summary" : "setup");
       }
-      await writeBackupNow().catch(() => undefined);
+      if (shouldKeepSession) {
+        await writeBackupNow().catch(() => undefined);
+      }
       await onDataChanged();
       endingRef.current = false;
     },
