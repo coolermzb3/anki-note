@@ -7,6 +7,7 @@ import type { AppSettings, BackupState } from "../domain/types";
 interface SettingsViewProps {
   settings: AppSettings;
   backupState: BackupState;
+  hasBrowserPracticeData: boolean;
   onSettingsSaved: (settings: AppSettings) => void;
   onDataChanged: () => Promise<void>;
 }
@@ -14,11 +15,13 @@ interface SettingsViewProps {
 export function SettingsView({
   settings,
   backupState,
+  hasBrowserPracticeData,
   onSettingsSaved,
   onDataChanged,
 }: SettingsViewProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const backupBlockedUntilRestore = Boolean(backupState.restoreRequiredBeforeBackup);
 
   async function saveSettings(next: AppSettings): Promise<void> {
     await db.settings.put(next);
@@ -109,7 +112,10 @@ export function SettingsView({
             <FolderOpen size={18} />
             选择目录
           </button>
-          <button disabled={!backupState.directoryHandle || busy} onClick={() => void runBusy(writeBackupNow, "已备份")}>
+          <button
+            disabled={!backupState.directoryHandle || backupBlockedUntilRestore || busy}
+            onClick={() => void runBusy(writeBackupNow, "已备份")}
+          >
             <Save size={18} />
             立即备份
           </button>
@@ -119,7 +125,7 @@ export function SettingsView({
               if (!backupState.directoryHandle) {
                 return;
               }
-              if (window.confirm("恢复会替换当前本地数据。继续？")) {
+              if (!hasBrowserPracticeData || window.confirm("恢复会替换当前浏览器内练习数据。继续？")) {
                 void runBusy(() => restoreBackupFromDirectory(backupState.directoryHandle!), "已恢复备份");
               }
             }}
@@ -132,6 +138,9 @@ export function SettingsView({
             刷新
           </button>
         </div>
+        {backupBlockedUntilRestore ? (
+          <div className="status-line warning">检测到该目录已有备份，恢复前不会向这个目录写入新备份。</div>
+        ) : null}
         {message ? <div className="status-line">{message}</div> : null}
         {!supportsFileBackups() ? <div className="status-line">当前浏览器不支持 File System Access。</div> : null}
       </div>

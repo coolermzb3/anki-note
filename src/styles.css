@@ -206,6 +206,40 @@ main {
   min-width: 0;
 }
 
+.backup-reminder {
+  width: min(1120px, calc(100vw - 142px));
+  min-height: 64px;
+  margin: 18px auto -8px;
+  border: 1px solid rgba(216, 140, 36, 0.45);
+  border-radius: 8px;
+  background: #fff8ed;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+}
+
+.backup-reminder > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.backup-reminder span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.backup-reminder-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .practice-shell,
 .settings-shell {
   width: min(1120px, calc(100vw - 86px));
@@ -870,6 +904,10 @@ main {
   padding: 14px 0;
 }
 
+.status-line.warning {
+  color: #8a520f;
+}
+
 .settings-panel + .settings-panel {
   margin-top: 18px;
 }
@@ -993,6 +1031,17 @@ main {
   .settings-shell {
     width: 100%;
     padding: 16px;
+  }
+
+  .backup-reminder {
+    width: calc(100% - 32px);
+    margin: 12px 16px -4px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .backup-reminder-actions {
+    justify-content: flex-start;
   }
 
   .prompt-stage {

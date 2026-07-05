@@ -1,6 +1,7 @@
-import { BarChart3, Dumbbell, Settings } from "lucide-react";
+import { BarChart3, BellOff, Dumbbell, FolderOpen, Settings, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { preloadPianoSamples } from "./audio/piano";
+import { supportsFileBackups } from "./data/backup";
 import { getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
 import { IndexedDbMaintenancePanel } from "./debug/IndexedDbMaintenancePanel";
 import { installIndexedDbMaintenanceDebug } from "./debug/indexedDbMaintenance";
@@ -10,6 +11,9 @@ import { SettingsView } from "./components/SettingsView";
 import { StatsView } from "./components/StatsView";
 
 type View = "practice" | "stats" | "settings";
+type BackupReminderKind = "choose-directory" | "restore-before-backup";
+
+const BACKUP_REMINDER_SUPPRESSED_DATE_KEY = "anki-note.backupReminderSuppressedDate";
 
 interface AppData {
   settings: AppSettings;
@@ -18,10 +22,39 @@ interface AppData {
   backupState: BackupState;
 }
 
+function todayKey(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function isBackupReminderSuppressedToday(): boolean {
+  try {
+    return localStorage.getItem(BACKUP_REMINDER_SUPPRESSED_DATE_KEY) === todayKey();
+  } catch {
+    return false;
+  }
+}
+
+function getBackupReminderKind(backupState: BackupState): BackupReminderKind | null {
+  if (!supportsFileBackups()) {
+    return null;
+  }
+  if (backupState.restoreRequiredBeforeBackup) {
+    return "restore-before-backup";
+  }
+  if (!backupState.directoryHandle && !isBackupReminderSuppressedToday()) {
+    return "choose-directory";
+  }
+  return null;
+}
+
 export function App(): JSX.Element {
   const [view, setView] = useState<View>("practice");
   const [data, setData] = useState<AppData | null>(null);
   const [practiceRunning, setPracticeRunning] = useState(false);
+  const [backupReminderVisible, setBackupReminderVisible] = useState(false);
   const [practiceExitRequest, setPracticeExitRequest] = useState<PracticeNavigationExitRequest | null>(null);
   const practiceExitRequestIdRef = useRef(0);
 
@@ -37,6 +70,13 @@ export function App(): JSX.Element {
   useEffect(() => {
     preloadPianoSamples();
   }, []);
+
+  useEffect(() => {
+    if (!data) {
+      return;
+    }
+    setBackupReminderVisible(getBackupReminderKind(data.backupState) !== null);
+  }, [data !== null, data?.backupState.directoryHandle, data?.backupState.restoreRequiredBeforeBackup]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
@@ -66,6 +106,26 @@ export function App(): JSX.Element {
     setPracticeExitRequest(null);
     setView(targetView);
   }, []);
+
+  const openBackupSettings = useCallback((): void => {
+    setBackupReminderVisible(false);
+    selectView("settings");
+  }, [selectView]);
+
+  const suppressBackupReminderToday = useCallback((): void => {
+    try {
+      localStorage.setItem(BACKUP_REMINDER_SUPPRESSED_DATE_KEY, todayKey());
+    } catch {
+      // The current page can still hide the reminder even when storage is blocked.
+    }
+    setBackupReminderVisible(false);
+  }, []);
+
+  const showBackupReminderAfterPractice = useCallback((): void => {
+    if (data && getBackupReminderKind(data.backupState) !== null) {
+      setBackupReminderVisible(true);
+    }
+  }, [data]);
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) {
@@ -98,6 +158,9 @@ export function App(): JSX.Element {
     return <div className="loading">加载中</div>;
   }
 
+  const backupReminderKind = backupReminderVisible ? getBackupReminderKind(data.backupState) : null;
+  const hasBrowserPracticeData = data.sessions.length > 0 || data.reviews.length > 0;
+
   return (
     <div className="app-shell">
       <nav className="app-nav" aria-label="主导航">
@@ -116,6 +179,34 @@ export function App(): JSX.Element {
       </nav>
 
       <main>
+        {backupReminderKind && !practiceRunning ? (
+          <div className="backup-reminder" role="status">
+            <div>
+              <strong>{backupReminderKind === "restore-before-backup" ? "建议先恢复备份" : "建议设置备份目录"}</strong>
+              <span>
+                {backupReminderKind === "restore-before-backup"
+                  ? "检测到该目录已有备份，恢复前不会向这个目录写入新备份。"
+                  : "练习记录只保存在当前浏览器，设置目录后可以恢复和迁移数据。"}
+              </span>
+            </div>
+            <div className="backup-reminder-actions">
+              <button className="primary" onClick={openBackupSettings}>
+                <FolderOpen size={18} />
+                {backupReminderKind === "restore-before-backup" ? "去恢复" : "去设置"}
+              </button>
+              {backupReminderKind === "choose-directory" ? (
+                <button onClick={suppressBackupReminderToday}>
+                  <BellOff size={18} />
+                  今日不再提醒
+                </button>
+              ) : null}
+              <button title="关闭" onClick={() => setBackupReminderVisible(false)}>
+                <X size={18} />
+                稍后
+              </button>
+            </div>
+          </div>
+        ) : null}
         {view === "practice" ? (
           <PracticeView
             settings={data.settings}
@@ -124,6 +215,7 @@ export function App(): JSX.Element {
             onDataChanged={refresh}
             onNavigationExit={handleNavigationExit}
             onOpenStats={() => setView("stats")}
+            onPracticeFinished={showBackupReminderAfterPractice}
             onRunningChange={setPracticeRunning}
             onSettingsSaved={(settings) => setData((current) => (current ? { ...current, settings } : current))}
           />
@@ -132,6 +224,7 @@ export function App(): JSX.Element {
         {view === "settings" ? (
           <SettingsView
             backupState={data.backupState}
+            hasBrowserPracticeData={hasBrowserPracticeData}
             settings={data.settings}
             onDataChanged={refresh}
             onSettingsSaved={(settings) => setData((current) => (current ? { ...current, settings } : current))}

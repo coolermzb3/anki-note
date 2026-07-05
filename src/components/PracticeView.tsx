@@ -41,6 +41,7 @@ interface PracticeViewProps {
   onSettingsSaved: (settings: AppSettings) => void;
   onDataChanged: () => Promise<void>;
   onOpenStats: () => void;
+  onPracticeFinished: () => void;
   onRunningChange: (running: boolean) => void;
 }
 
@@ -135,6 +136,7 @@ export function PracticeView({
   onSettingsSaved,
   onDataChanged,
   onOpenStats,
+  onPracticeFinished,
   onRunningChange,
 }: PracticeViewProps): JSX.Element {
   const [phase, setPhase] = useState<Phase>("setup");
@@ -617,9 +619,12 @@ export function PracticeView({
         await writeBackupNow().catch(() => undefined);
       }
       await onDataChanged();
+      if (shouldKeepSession && updateUi) {
+        onPracticeFinished();
+      }
       endingRef.current = false;
     },
-    [finishCurrentReview, onDataChanged, pauseActiveTimers, syncStaffPage],
+    [finishCurrentReview, onDataChanged, onPracticeFinished, pauseActiveTimers, syncStaffPage],
   );
 
   useEffect(() => {

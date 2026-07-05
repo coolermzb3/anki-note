@@ -36,6 +36,25 @@ async function readJson<T>(directory: FileSystemDirectoryHandle, filename: strin
   return JSON.parse(await file.text()) as T;
 }
 
+async function fileExists(directory: FileSystemDirectoryHandle, filename: string): Promise<boolean> {
+  try {
+    await directory.getFileHandle(filename);
+    return true;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function readBackupManifestIfExists(directory: FileSystemDirectoryHandle): Promise<BackupManifest | null> {
+  if (!(await fileExists(directory, "manifest.json"))) {
+    return null;
+  }
+  return readJson<BackupManifest>(directory, "manifest.json");
+}
+
 export function supportsFileBackups(): boolean {
   return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
 }
@@ -49,11 +68,15 @@ export async function chooseBackupDirectory(): Promise<void> {
   if (!granted) {
     throw new Error("未获得备份目录写入权限。");
   }
+  const [{ settings, sessions, reviews }, existingManifest] = await Promise.all([loadAllData(), readBackupManifestIfExists(handle)]);
+  const hasBrowserPracticeData = sessions.length > 0 || reviews.length > 0;
+  const requiresRestore = Boolean(existingManifest && (!hasBrowserPracticeData || existingManifest.dataSetId !== settings.dataSetId));
   await db.backupStates.put({
     id: "default",
     schemaVersion: 1,
     directoryHandle: handle,
     directoryName: handle.name,
+    restoreRequiredBeforeBackup: requiresRestore,
     lastError: undefined,
   });
 }
@@ -62,6 +85,9 @@ export async function writeBackupNow(): Promise<void> {
   const state = await getBackupState();
   if (!state.directoryHandle) {
     return;
+  }
+  if (state.restoreRequiredBeforeBackup) {
+    throw new Error("检测到该目录已有备份，请先恢复后再备份。");
   }
 
   const now = new Date().toISOString();
@@ -132,4 +158,14 @@ export async function restoreBackupFromDirectory(directory: FileSystemDirectoryH
   }
   const snapshot = await readBackupSnapshot(directory);
   await replaceAllData(snapshot.settings, snapshot.sessions, snapshot.reviews);
+  const state = await getBackupState();
+  await db.backupStates.put({
+    ...state,
+    directoryHandle: state.directoryHandle ?? directory,
+    directoryName: state.directoryName ?? directory.name,
+    restoreRequiredBeforeBackup: false,
+    lastBackupAt: snapshot.manifest.lastBackupAt,
+    lastBackupReviewId: snapshot.manifest.lastReviewId,
+    lastError: undefined,
+  });
 }
