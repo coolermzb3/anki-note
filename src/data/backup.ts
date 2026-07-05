@@ -1,6 +1,14 @@
 import { buildBackupSnapshot } from "../domain/backupSnapshot";
 import type { AppSettings, BackupDayFile, BackupManifest, BackupSnapshot, PracticeSessionRecord, ReviewRecord } from "../domain/types";
-import { db, getBackupState, loadAllData, replaceAllData, resolveDrillNoteNames, resolveQueueStrategy } from "./db";
+import {
+  db,
+  getBackupState,
+  loadAllData,
+  makeDefaultSettings,
+  replaceAllData,
+  resolveDrillNoteNames,
+  resolveQueueStrategy,
+} from "./db";
 
 async function ensureReadWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
   if (!handle.queryPermission || !handle.requestPermission) {
@@ -99,35 +107,18 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
   const sessions = dayFiles.flatMap((day) => day.sessions);
   const reviews = dayFiles.flatMap((day) => day.reviews);
   const existingSettings = await db.settings.get("default");
+  const baseSettings = manifest.settings ?? existingSettings ?? makeDefaultSettings();
   const settings: AppSettings = {
-    ...(existingSettings ?? {
-      id: "default",
-      schemaVersion: 1,
-      dataSetId: manifest.dataSetId,
-      createdAt: manifest.createdAt,
-      enabledGroupIds: ["C4-B4"],
-      defaultMode: "open-ended",
-      promptDisplayMode: "single-note",
-      promptNoteDuration: "whole",
-      fixedCount: 20,
-      fixedDurationSeconds: 180,
-      autoPlayTarget: true,
-      includeLedgerVariants: true,
-      queueStrategy: "adaptive",
-      drillNoteNames: ["C"],
-      focusedTraining: false,
-      inactivityThresholdSeconds: 30,
-      correctDelayMs: 400,
-    }),
+    ...baseSettings,
     dataSetId: manifest.dataSetId,
     createdAt: manifest.createdAt,
     firstReviewAt: manifest.firstReviewAt,
-    includeLedgerVariants: existingSettings?.includeLedgerVariants ?? true,
-    queueStrategy: resolveQueueStrategy(existingSettings ?? {}),
-    drillNoteNames: resolveDrillNoteNames(existingSettings ?? {}),
-    focusedTraining: existingSettings?.focusedTraining ?? resolveQueueStrategy(existingSettings ?? {}) === "focused",
-    promptDisplayMode: existingSettings?.promptDisplayMode ?? "single-note",
-    promptNoteDuration: existingSettings?.promptNoteDuration ?? "whole",
+    includeLedgerVariants: baseSettings.includeLedgerVariants ?? true,
+    queueStrategy: resolveQueueStrategy(baseSettings),
+    drillNoteNames: resolveDrillNoteNames(baseSettings),
+    focusedTraining: baseSettings.focusedTraining ?? resolveQueueStrategy(baseSettings) === "focused",
+    promptDisplayMode: baseSettings.promptDisplayMode ?? "staff-page",
+    promptNoteDuration: baseSettings.promptNoteDuration ?? "quarter",
   };
   return { manifest, settings, sessions, reviews };
 }

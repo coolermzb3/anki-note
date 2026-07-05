@@ -41,6 +41,7 @@ export function buildBackupSnapshot(
       dataSetId: settings.dataSetId,
       createdAt: settings.createdAt,
       firstReviewAt: settings.firstReviewAt,
+      settings,
       lastBackupAt: backupAt,
       lastReviewId: latestReview(reviews)?.id,
       dates: [...dates].sort((a, b) => a.localeCompare(b)),

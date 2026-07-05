@@ -119,6 +119,7 @@ export interface BackupManifest {
   dataSetId: string;
   createdAt: string;
   firstReviewAt?: string;
+  settings?: AppSettings;
   lastBackupAt: string;
   lastReviewId?: string;
   dates: string[];

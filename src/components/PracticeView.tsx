@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playPianoNote, playTargetNote, unlockAudio } from "../audio/piano";
 import { db, resolveQueueStrategy, saveReview } from "../data/db";
 import { writeBackupNow } from "../data/backup";
+import { createUuid } from "../domain/id";
 import {
   ANSWER_BUTTONS,
   formatTargetNoteLabel,
@@ -66,7 +67,7 @@ interface StaffPageRuntime {
 }
 
 function newSessionId(): string {
-  return crypto.randomUUID();
+  return createUuid();
 }
 
 function formatDuration(ms: number): string {
@@ -121,10 +122,10 @@ export function PracticeView({
   const [phase, setPhase] = useState<Phase>("setup");
   const [mode, setMode] = useState<PracticeMode>(settings.defaultMode);
   const [promptDisplayMode, setPromptDisplayMode] = useState<PromptDisplayMode>(
-    settings.promptDisplayMode ?? "single-note",
+    settings.promptDisplayMode ?? "staff-page",
   );
   const [promptNoteDuration, setPromptNoteDuration] = useState<PromptNoteDuration>(
-    settings.promptNoteDuration ?? "whole",
+    settings.promptNoteDuration ?? "quarter",
   );
   const [enabledGroupIds, setEnabledGroupIds] = useState<PracticeGroupId[]>(settings.enabledGroupIds);
   const [fixedCount, setFixedCount] = useState(settings.fixedCount);
@@ -167,8 +168,8 @@ export function PracticeView({
   useEffect(() => {
     if (phase === "setup") {
       setMode(settings.defaultMode);
-      setPromptDisplayMode(settings.promptDisplayMode ?? "single-note");
-      setPromptNoteDuration(settings.promptNoteDuration ?? "whole");
+      setPromptDisplayMode(settings.promptDisplayMode ?? "staff-page");
+      setPromptNoteDuration(settings.promptNoteDuration ?? "quarter");
       setEnabledGroupIds(settings.enabledGroupIds);
       setFixedCount(settings.fixedCount);
       setFixedDurationSeconds(settings.fixedDurationSeconds);
@@ -510,7 +511,7 @@ export function PracticeView({
       const endedAt = new Date().toISOString();
       const ignored = sessionRef.current.queueStrategy === "note-drill";
       const review: ReviewRecord = {
-        id: crypto.randomUUID(),
+        id: createUuid(),
         schemaVersion: 1,
         sessionId: sessionRef.current.id,
         targetNoteId: prompt.note.id,

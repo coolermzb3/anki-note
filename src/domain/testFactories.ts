@@ -1,3 +1,4 @@
+import { createUuid } from "./id";
 import type { NoteName, PracticeGroupId, ReviewRecord, TargetNoteId } from "./types";
 
 export function makeReview(overrides: Partial<ReviewRecord> & { targetNoteId: TargetNoteId }): ReviewRecord {
@@ -6,7 +7,7 @@ export function makeReview(overrides: Partial<ReviewRecord> & { targetNoteId: Ta
   const groupId = `C${octave}-B${octave}` as PracticeGroupId;
   const now = "2026-07-04T12:00:00.000+08:00";
   return {
-    id: overrides.id ?? crypto.randomUUID(),
+    id: overrides.id ?? createUuid(),
     schemaVersion: 1,
     sessionId: overrides.sessionId ?? "session-1",
     targetNoteId: overrides.targetNoteId,

@@ -1,4 +1,5 @@
 import Dexie, { type Table } from "dexie";
+import { createUuid } from "../domain/id";
 import { DEFAULT_ENABLED_GROUPS } from "../domain/notes";
 import type { AppSettings, BackupState, NoteName, PracticeQueueStrategy, PracticeSessionRecord, ReviewRecord } from "../domain/types";
 
@@ -34,21 +35,21 @@ export function makeDefaultSettings(): AppSettings {
   return {
     id: "default",
     schemaVersion: 1,
-    dataSetId: crypto.randomUUID(),
+    dataSetId: createUuid(),
     createdAt: now,
     enabledGroupIds: DEFAULT_ENABLED_GROUPS,
-    defaultMode: "open-ended",
-    promptDisplayMode: "single-note",
-    promptNoteDuration: "whole",
+    defaultMode: "fixed-duration",
+    promptDisplayMode: "staff-page",
+    promptNoteDuration: "quarter",
     fixedCount: 20,
-    fixedDurationSeconds: 180,
-    autoPlayTarget: true,
+    fixedDurationSeconds: 60,
+    autoPlayTarget: false,
     includeLedgerVariants: true,
     queueStrategy: "adaptive",
     drillNoteNames: ["C"],
     focusedTraining: false,
     inactivityThresholdSeconds: 30,
-    correctDelayMs: 400,
+    correctDelayMs: 0,
   };
 }
 
@@ -69,8 +70,8 @@ export async function ensureSettings(): Promise<AppSettings> {
         drillNoteNames: resolveDrillNoteNames(existing),
         focusedTraining: existing.focusedTraining ?? resolveQueueStrategy(existing) === "focused",
         includeLedgerVariants: existing.includeLedgerVariants ?? true,
-        promptDisplayMode: existing.promptDisplayMode ?? "single-note",
-        promptNoteDuration: existing.promptNoteDuration ?? "whole",
+        promptDisplayMode: existing.promptDisplayMode ?? "staff-page",
+        promptNoteDuration: existing.promptNoteDuration ?? "quarter",
       };
       await db.settings.put(migrated);
       return migrated;
