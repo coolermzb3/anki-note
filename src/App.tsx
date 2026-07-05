@@ -35,9 +35,21 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    if ("serviceWorker" in navigator && import.meta.env.PROD) {
-      void navigator.serviceWorker.register("/service-worker.js").catch(() => undefined);
+    if (!("serviceWorker" in navigator)) {
+      return;
     }
+
+    if (import.meta.env.PROD) {
+      void navigator.serviceWorker.register("/service-worker.js").catch(() => undefined);
+      return;
+    }
+
+    void navigator.serviceWorker
+      .getRegistrations()
+      .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+      .then(() => ("caches" in window ? caches.keys() : []))
+      .then((keys) => Promise.all(keys.filter((key) => key.startsWith("anki-note-")).map((key) => caches.delete(key))))
+      .catch(() => undefined);
   }, []);
 
   if (!data) {
