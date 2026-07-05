@@ -24,6 +24,7 @@ type RecognitionTimeGrouping = "day" | "practice-session";
 
 const EMPTY_SESSIONS: PracticeSessionRecord[] = [];
 const HEATMAP_WEEK_COUNT = 12;
+const RECOGNITION_CHART_ANIMATION_MS = 180;
 const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const NOTE_ORDER: Record<NoteName, number> = {
   C: 0,
@@ -370,9 +371,33 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
                       formatter={(value, name) => [`${value}s`, name]}
                       labelFormatter={(_, payload) => payload?.[0]?.payload?.tooltipLabel ?? ""}
                     />
-                    <Line dataKey="p10" dot={false} name="P10" stroke="#2f7d74" strokeWidth={2} type="monotone" />
-                    <Line dataKey="median" dot={false} name="中位" stroke="#2b2520" strokeWidth={2.5} type="monotone" />
-                    <Line dataKey="p90" dot={false} name="P90" stroke="#c84c3d" strokeWidth={2} type="monotone" />
+                    <Line
+                      animationDuration={RECOGNITION_CHART_ANIMATION_MS}
+                      dataKey="p10"
+                      dot={false}
+                      name="P10"
+                      stroke="#2f7d74"
+                      strokeWidth={2}
+                      type="monotone"
+                    />
+                    <Line
+                      animationDuration={RECOGNITION_CHART_ANIMATION_MS}
+                      dataKey="median"
+                      dot={false}
+                      name="中位"
+                      stroke="#2b2520"
+                      strokeWidth={2.5}
+                      type="monotone"
+                    />
+                    <Line
+                      animationDuration={RECOGNITION_CHART_ANIMATION_MS}
+                      dataKey="p90"
+                      dot={false}
+                      name="P90"
+                      stroke="#c84c3d"
+                      strokeWidth={2}
+                      type="monotone"
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               )}

@@ -360,6 +360,12 @@ main {
   gap: 12px;
 }
 
+.topline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .progress-readout {
   min-width: 118px;
   min-height: 40px;
@@ -468,6 +474,51 @@ main {
   background: #ecf8f1;
   border-color: var(--success);
   color: #22653c;
+}
+
+.pause-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  width: 100%;
+  min-height: 100vh;
+  border: 0;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.62);
+  color: rgba(43, 37, 32, 0.9);
+  box-shadow: none;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  padding: 0;
+  backdrop-filter: blur(1px) saturate(1.04);
+}
+
+.pause-overlay:hover:not(:disabled) {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: none;
+}
+
+.pause-overlay:active:not(:disabled) {
+  transform: none;
+}
+
+.pause-overlay span {
+  font-size: 42px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.pause-overlay small {
+  color: rgba(43, 37, 32, 0.68);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0;
 }
 
 .metric-grid {

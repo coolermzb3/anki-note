@@ -1,4 +1,4 @@
-import { BarChart3, Play, RotateCcw, SlidersHorizontal, Square, Volume2 } from "lucide-react";
+import { BarChart3, Pause, Play, RotateCcw, SlidersHorizontal, Square, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playPianoNote, playTargetNote, unlockAudio } from "../audio/piano";
 import { db, resolveQueueStrategy, saveReview } from "../data/db";
@@ -137,6 +137,7 @@ export function PracticeView({
   const [staffPageNotes, setStaffPageNotes] = useState<TargetNote[]>([]);
   const [staffPageIndex, setStaffPageIndex] = useState(0);
   const [staffPageCompletedCount, setStaffPageCompletedCount] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
 
   const promptRef = useRef<PromptRuntime | null>(null);
   const sessionRef = useRef<PracticeSessionRecord | null>(null);
@@ -147,6 +148,8 @@ export function PracticeView({
   const endingRef = useRef(false);
   const sessionActiveBaseMsRef = useRef(0);
   const sessionActiveStartedAtRef = useRef<number | null>(null);
+  const isPausedRef = useRef(false);
+  const pendingAfterPauseRef = useRef<(() => void) | null>(null);
   const lastBackupCompletedRef = useRef(0);
   const lastBackupAtRef = useRef<number>(performance.now());
 
@@ -232,7 +235,40 @@ export function PracticeView({
     }
   }, []);
 
-  const handleFocusLost = useCallback((): void => {
+  const pausePractice = useCallback((): void => {
+    pauseActiveTimers();
+    if (!isPausedRef.current) {
+      isPausedRef.current = true;
+      setIsPaused(true);
+    }
+  }, [pauseActiveTimers]);
+
+  const resumePractice = useCallback((): void => {
+    if (!isPausedRef.current) {
+      return;
+    }
+    isPausedRef.current = false;
+    setIsPaused(false);
+    const pendingAfterPause = pendingAfterPauseRef.current;
+    pendingAfterPauseRef.current = null;
+    if (pendingAfterPause) {
+      pendingAfterPause();
+      return;
+    }
+    if (promptRef.current) {
+      resumeActiveTimers();
+    }
+  }, [resumeActiveTimers]);
+
+  const togglePause = useCallback((): void => {
+    if (isPausedRef.current) {
+      resumePractice();
+      return;
+    }
+    pausePractice();
+  }, [pausePractice, resumePractice]);
+
+  const pauseForFocusLoss = useCallback((): void => {
     const prompt = promptRef.current;
     if (prompt) {
       markInterrupted("focus-lost");
@@ -241,8 +277,8 @@ export function PracticeView({
         prompt.focusLosses.push({ lostFocusAt: new Date().toISOString() });
       }
     }
-    pauseActiveTimers();
-  }, [markInterrupted, pauseActiveTimers]);
+    pausePractice();
+  }, [markInterrupted, pausePractice]);
 
   const persistConfig = useCallback(async (): Promise<AppSettings> => {
     const nextSettings: AppSettings = {
@@ -499,6 +535,9 @@ export function PracticeView({
       setSummary({ session: finalSession, reviews: finalReviews });
       setCurrentNote(null);
       syncStaffPage(null);
+      isPausedRef.current = false;
+      pendingAfterPauseRef.current = null;
+      setIsPaused(false);
       setPhase("summary");
       await writeBackupNow().catch(() => undefined);
       await onDataChanged();
@@ -538,10 +577,13 @@ export function PracticeView({
     lastBackupCompletedRef.current = 0;
     sessionActiveBaseMsRef.current = 0;
     sessionActiveStartedAtRef.current = performance.now();
+    isPausedRef.current = false;
+    pendingAfterPauseRef.current = null;
     setSession(nextSession);
     setCompletedCount(0);
     setWrongAnswerCount(0);
     setSummary(null);
+    setIsPaused(false);
     setPhase("running");
     const nextEnabledNotes = getNotesForGroups(nextSettings.enabledGroupIds, nextSettings.includeLedgerVariants);
     if (nextSettings.promptDisplayMode === "staff-page") {
@@ -581,7 +623,7 @@ export function PracticeView({
 
   const replayTarget = useCallback(async (): Promise<void> => {
     const prompt = promptRef.current;
-    if (!prompt) {
+    if (!prompt || isPausedRef.current) {
       return;
     }
     prompt.lastInputAt = performance.now();
@@ -592,7 +634,7 @@ export function PracticeView({
   const submitAnswer = useCallback(
     async (noteName: NoteName): Promise<void> => {
       const prompt = promptRef.current;
-      if (!prompt || feedback?.type === "correct") {
+      if (!prompt || isPausedRef.current || feedback?.type === "correct") {
         return;
       }
       prompt.lastInputAt = performance.now();
@@ -618,7 +660,7 @@ export function PracticeView({
       await maybeBackupDuringOpenEnded(nextCompletedCount);
       const reviewSessionId = review.sessionId;
 
-      window.setTimeout(() => {
+      const continueAfterCorrectDelay = (): void => {
         if (sessionRef.current?.id !== reviewSessionId || sessionRef.current.endedAt) {
           return;
         }
@@ -641,6 +683,14 @@ export function PracticeView({
           return;
         }
         selectAndStartNext(nextCompletedCount, [review]);
+      };
+
+      window.setTimeout(() => {
+        if (isPausedRef.current) {
+          pendingAfterPauseRef.current = continueAfterCorrectDelay;
+          return;
+        }
+        continueAfterCorrectDelay();
       }, settings.correctDelayMs);
     },
     [
@@ -674,14 +724,23 @@ export function PracticeView({
       if (event.repeat) {
         return;
       }
-      if (event.code === "Space") {
+      if (event.code === "KeyP") {
         event.preventDefault();
-        void replayTarget();
+        togglePause();
         return;
       }
       if (event.code === "Escape") {
         event.preventDefault();
         void completeSession("manual-stop", "manual-stop");
+        return;
+      }
+      if (isPausedRef.current) {
+        event.preventDefault();
+        return;
+      }
+      if (event.code === "Space") {
+        event.preventDefault();
+        void replayTarget();
         return;
       }
       const answer = ANSWER_BUTTONS.find((button) => event.key === button.key);
@@ -693,7 +752,7 @@ export function PracticeView({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [completeSession, phase, replayTarget, submitAnswer]);
+  }, [completeSession, phase, replayTarget, submitAnswer, togglePause]);
 
   useEffect(() => {
     if (phase !== "running") {
@@ -702,27 +761,17 @@ export function PracticeView({
 
     function onVisibilityOrBlur(): void {
       if (document.visibilityState === "hidden" || !document.hasFocus()) {
-        handleFocusLost();
-      }
-    }
-
-    function onFocus(): void {
-      if (document.visibilityState === "visible" && document.hasFocus()) {
-        resumeActiveTimers();
+        pauseForFocusLoss();
       }
     }
 
     window.addEventListener("blur", onVisibilityOrBlur);
-    window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibilityOrBlur);
-    document.addEventListener("visibilitychange", onFocus);
     return () => {
       window.removeEventListener("blur", onVisibilityOrBlur);
-      window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityOrBlur);
-      document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [handleFocusLost, phase, resumeActiveTimers]);
+  }, [pauseForFocusLoss, phase]);
 
   useEffect(() => {
     if (phase !== "running") {
@@ -1031,10 +1080,16 @@ export function PracticeView({
             </span>
           )}
         </div>
-        <button title="结束 Esc" onClick={() => void completeSession("manual-stop", "manual-stop")}>
-          <Square size={18} />
-          结束
-        </button>
+        <div className="topline-actions">
+          <button title={isPaused ? "继续 P" : "暂停 P"} onClick={togglePause}>
+            {isPaused ? <Play size={18} /> : <Pause size={18} />}
+            {isPaused ? "继续" : "暂停"}
+          </button>
+          <button title="结束 Esc" onClick={() => void completeSession("manual-stop", "manual-stop")}>
+            <Square size={18} />
+            结束
+          </button>
+        </div>
       </div>
 
       <div className={promptDisplayMode === "staff-page" ? "prompt-stage staff-page-stage" : "prompt-stage"}>
@@ -1074,6 +1129,12 @@ export function PracticeView({
       <span className="sr-only" aria-live="polite">
         {tick} {wrongAnswerCount}
       </span>
+      {isPaused ? (
+        <button className="pause-overlay" onClick={resumePractice} type="button">
+          <span>已暂停</span>
+          <small>点击或按 P 继续</small>
+        </button>
+      ) : null}
     </section>
   );
 }
