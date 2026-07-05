@@ -8,15 +8,15 @@ function startedAtForMinute(minute: number): string {
 }
 
 function makeDifferentiatedFocusedTrainingData() {
-  const notes = getNotesForGroups(["C5-B5"]);
+  const notes = getNotesForGroups(["G4-F5"], false);
   const activeMsByNote = {
-    C5: 3200,
-    D5: 2800,
-    E5: 2100,
-    F5: 1800,
-    G5: 900,
-    A5: 850,
-    B5: 800,
+    G4: 3200,
+    A4: 2800,
+    B4: 2100,
+    C5: 1800,
+    D5: 900,
+    E5: 850,
+    F5: 800,
   } as const;
   const reviews = notes.flatMap((note) =>
     Array.from({ length: 5 }, () =>
@@ -24,7 +24,7 @@ function makeDifferentiatedFocusedTrainingData() {
         targetNoteId: note.id,
         activeMs: activeMsByNote[note.id as keyof typeof activeMsByNote],
         wrongAnswers:
-          note.id === "C5" || note.id === "D5"
+          note.id === "G4" || note.id === "A4"
             ? [{ noteName: "E", atActiveMs: 1000 }]
             : [],
       }),
@@ -35,7 +35,7 @@ function makeDifferentiatedFocusedTrainingData() {
 
 describe("scheduler", () => {
   it("does not repeat the previous target when alternatives exist", () => {
-    const notes = getNotesForGroups(["C5-B5"]);
+    const notes = getNotesForGroups(["G4-F5"], false);
     const selected = selectNextNote({
       notes,
       reviews: [],
@@ -47,7 +47,7 @@ describe("scheduler", () => {
   });
 
   it("raises weight for slow and error-prone recent reviews", () => {
-    const notes = getNotesForGroups(["C5-B5"]);
+    const notes = getNotesForGroups(["G4-F5"], false);
     const c5 = notes.find((note) => note.id === "C5")!;
     const d5 = notes.find((note) => note.id === "D5")!;
     const reviews = [
@@ -61,7 +61,7 @@ describe("scheduler", () => {
   });
 
   it("ignores ignored reviews when calculating note weights", () => {
-    const notes = getNotesForGroups(["C5-B5"]);
+    const notes = getNotesForGroups(["G4-F5"], false);
     const c5 = notes.find((note) => note.id === "C5")!;
     const reviews = [
       makeReview({ targetNoteId: "C5", activeMs: 9000, wrongAnswers: [{ noteName: "D", atActiveMs: 900 }], ignored: true }),
@@ -71,7 +71,7 @@ describe("scheduler", () => {
   });
 
   it("uses the latest 20 qualified reviews for recent median performance", () => {
-    const notes = getNotesForGroups(["C5-B5"]);
+    const notes = getNotesForGroups(["G4-F5"], false);
     const c5 = notes.find((note) => note.id === "C5")!;
     const reviews = [
       ...Array.from({ length: 11 }, (_, index) =>
@@ -86,7 +86,7 @@ describe("scheduler", () => {
   });
 
   it("can reserve draws for least-seen cards", () => {
-    const notes = getNotesForGroups(["C5-B5"]);
+    const notes = getNotesForGroups(["G4-F5"], false);
     const selected = selectNextNote({
       notes,
       reviews: [makeReview({ targetNoteId: "C5" })],
@@ -97,7 +97,7 @@ describe("scheduler", () => {
   });
 
   it("uses planned page exposure while drawing a page", () => {
-    const notes = getNotesForGroups(["C5-B5"]).slice(0, 3);
+    const notes = getNotesForGroups(["G4-F5"], false).slice(0, 3);
 
     const selected = selectNotePage({
       notes,
@@ -107,11 +107,11 @@ describe("scheduler", () => {
       rng: () => 0,
     });
 
-    expect(selected.map((note) => note.id)).toEqual(["C5", "D5", "E5"]);
+    expect(selected.map((note) => note.id)).toEqual(["G4", "A4", "B4"]);
   });
 
   it("uses the requested page size", () => {
-    const notes = getNotesForGroups(["C5-B5"]);
+    const notes = getNotesForGroups(["G4-F5"], false);
 
     expect(selectNotePage({ notes, reviews: [], count: 5 })).toHaveLength(5);
   });
@@ -119,7 +119,7 @@ describe("scheduler", () => {
   it("keeps the weaker half for focused training", () => {
     const { notes, reviews } = makeDifferentiatedFocusedTrainingData();
 
-    expect(getFocusedTrainingNotes(notes, reviews).map((note) => note.id)).toEqual(["C5", "D5", "E5", "F5"]);
+    expect(getFocusedTrainingNotes(notes, reviews).map((note) => note.id)).toEqual(["G4", "A4", "B4", "C5"]);
   });
 
   it("usually draws from the focused pool with the focused strategy", () => {
@@ -133,7 +133,7 @@ describe("scheduler", () => {
       rng: () => rngValues.shift() ?? 0,
     });
 
-    expect(selected.id).toBe("F5");
+    expect(selected.id).toBe("C5");
   });
 
   it("keeps focusedTraining as a compatibility alias for the focused strategy", () => {
@@ -147,11 +147,11 @@ describe("scheduler", () => {
       rng: () => rngValues.shift() ?? 0,
     });
 
-    expect(selected.id).toBe("F5");
+    expect(selected.id).toBe("C5");
   });
 
   it("routes melody strategy through a generated pitch sequence", () => {
-    const notes = getNotesForGroups(["C4-B4"], false);
+    const notes = getNotesForGroups(["G3-F4"], false);
     const rngValues = [0, 0];
     const selected = selectNextNote({
       notes,
@@ -161,11 +161,11 @@ describe("scheduler", () => {
       rng: () => rngValues.shift() ?? 0,
     });
 
-    expect(selected.id).toBe("D4");
+    expect(selected.id).toBe("B3");
   });
 
   it("restricts note drill draws to the selected note names", () => {
-    const notes = getNotesForGroups(["C4-B4", "C5-B5"], false);
+    const notes = getNotesForGroups(["G3-F4", "G4-F5"], false);
     const selected = selectNotePage({
       notes,
       reviews: [],
@@ -191,28 +191,28 @@ describe("scheduler", () => {
       rng: () => rngValues.shift() ?? 0,
     });
 
-    expect(selected.id).toBe("B5");
+    expect(selected.id).toBe("F5");
   });
 
   it("falls back to every note when focused training has no differentiating data", () => {
-    const notes = getNotesForGroups(["C5-B5"]);
+    const notes = getNotesForGroups(["G4-F5"], false);
 
     expect(getFocusedTrainingNotes(notes, [])).toEqual(notes);
   });
 
   it("keeps at least three notes for focused training", () => {
-    const notes = getNotesForGroups(["C5-B5"]).slice(0, 4);
+    const notes = getNotesForGroups(["G4-F5"], false).slice(0, 4);
     const reviews = [
-      makeReview({ targetNoteId: "C5", activeMs: 3000, wrongAnswers: [{ noteName: "D", atActiveMs: 1000 }] }),
-      makeReview({ targetNoteId: "D5", activeMs: 2200 }),
-      makeReview({ targetNoteId: "E5", activeMs: 900 }),
-      makeReview({ targetNoteId: "F5", activeMs: 800 }),
+      makeReview({ targetNoteId: "G4", activeMs: 3000, wrongAnswers: [{ noteName: "D", atActiveMs: 1000 }] }),
+      makeReview({ targetNoteId: "A4", activeMs: 2200 }),
+      makeReview({ targetNoteId: "B4", activeMs: 900 }),
+      makeReview({ targetNoteId: "C5", activeMs: 800 }),
     ];
 
     const focused = getFocusedTrainingNotes(notes, reviews).map((note) => note.id);
     expect(focused.length).toBeGreaterThanOrEqual(3);
-    expect(focused).toContain("C5");
-    expect(focused).toContain("D5");
-    expect(focused).toContain("E5");
+    expect(focused).toContain("G4");
+    expect(focused).toContain("A4");
+    expect(focused).toContain("B4");
   });
 });

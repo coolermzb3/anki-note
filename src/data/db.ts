@@ -1,6 +1,6 @@
 import Dexie, { type Table } from "dexie";
 import { createUuid } from "../domain/id";
-import { DEFAULT_ENABLED_GROUPS } from "../domain/notes";
+import { DEFAULT_ENABLED_GROUPS, normalizePracticeGroupIds } from "../domain/notes";
 import type { AppSettings, BackupState, NoteName, PracticeQueueStrategy, PracticeSessionRecord, ReviewRecord } from "../domain/types";
 
 export class AppDatabase extends Dexie {
@@ -53,19 +53,27 @@ export function makeDefaultSettings(): AppSettings {
   };
 }
 
+function sameGroupIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((groupId, index) => groupId === b[index]);
+}
+
 export async function ensureSettings(): Promise<AppSettings> {
   const existing = await db.settings.get("default");
   if (existing) {
+    const persistedGroupIds = existing.enabledGroupIds ?? [];
+    const enabledGroupIds = normalizePracticeGroupIds(persistedGroupIds);
     if (
       existing.queueStrategy === undefined ||
       existing.drillNoteNames === undefined ||
       existing.focusedTraining === undefined ||
       existing.includeLedgerVariants === undefined ||
       existing.promptDisplayMode === undefined ||
-      existing.promptNoteDuration === undefined
+      existing.promptNoteDuration === undefined ||
+      !sameGroupIds(persistedGroupIds, enabledGroupIds)
     ) {
       const migrated = {
         ...existing,
+        enabledGroupIds,
         queueStrategy: resolveQueueStrategy(existing),
         drillNoteNames: resolveDrillNoteNames(existing),
         focusedTraining: existing.focusedTraining ?? resolveQueueStrategy(existing) === "focused",

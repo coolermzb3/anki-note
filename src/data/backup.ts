@@ -1,4 +1,5 @@
 import { buildBackupSnapshot } from "../domain/backupSnapshot";
+import { normalizePracticeGroupIds } from "../domain/notes";
 import type { AppSettings, BackupDayFile, BackupManifest, BackupSnapshot, PracticeSessionRecord, ReviewRecord } from "../domain/types";
 import {
   db,
@@ -113,6 +114,7 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
     dataSetId: manifest.dataSetId,
     createdAt: manifest.createdAt,
     firstReviewAt: manifest.firstReviewAt,
+    enabledGroupIds: normalizePracticeGroupIds(baseSettings.enabledGroupIds ?? []),
     includeLedgerVariants: baseSettings.includeLedgerVariants ?? true,
     queueStrategy: resolveQueueStrategy(baseSettings),
     drillNoteNames: resolveDrillNoteNames(baseSettings),

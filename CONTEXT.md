@@ -5,7 +5,7 @@ This context defines the language for a web app that trains piano staff note rec
 ## Language
 
 **Natural-note card**:
-A flashcard whose answer is one of the seven natural piano note names, without sharps or flats. The first practice set contains 46 natural-note cards from C2 through B6, because pitches E3 through A4 each appear as separate treble-staff and bass-staff cards.
+A flashcard whose answer is one of the seven natural piano note names, without sharps or flats. The first practice set contains 48 natural-note cards from F1 through G6, because pitches E3 through A4 each appear as separate treble-staff and bass-staff cards.
 _Avoid_: Piano card, note card
 
 **Target note**:
@@ -13,11 +13,11 @@ The exact card prompt shown to the learner, including its pitch, octave, and sta
 _Avoid_: Correct pitch
 
 **Practice range**:
-The closed set of notes that may appear as cards in a practice session. The first practice range is C2 through B6, grouped into five octave-sized groups. Pitches E3 through A4 have two target-note cards so the learner can practice both ledger-line spellings; this added ledger-variant set can be disabled on the start page.
+The closed set of notes that may appear as cards in a practice session. The first practice range is F1 through G6, grouped into five contiguous practice groups. Pitches E3 through A4 have two target-note cards so the learner can practice both ledger-line spellings; this added ledger-variant set can be disabled on the start page.
 _Avoid_: Piano range, common range
 
 **Practice group**:
-One octave-sized subset of the practice range. Each group covers the seven natural pitches from C through B, and groups that overlap E3 through A4 contain extra staff-variant cards. The default group order expands from the middle outward: C4-B4, C3-B3, C5-B5, C2-B2, then C6-B6.
+A contiguous subset of the practice range. The middle groups cover the natural pitches from G through F across neighboring octaves, while the edge groups include the adjacent boundary notes F1 and G6. Groups that overlap E3 through A4 contain extra staff-variant cards. The default enabled group is the middle group G3-F4.
 _Avoid_: Difficulty level, card group
 
 **Enabled group**:

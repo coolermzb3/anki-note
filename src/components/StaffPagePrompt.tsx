@@ -11,7 +11,7 @@ interface StaffPagePromptProps {
 }
 
 const NOTES_PER_ROW = 16;
-const ROW_HEIGHT = 180;
+const ROW_HEIGHT = 220;
 const BOTTOM_PADDING = 30;
 const NEUTRAL_COLOR = "#211c18";
 const COMPLETE_COLOR = "#2f8f5f";

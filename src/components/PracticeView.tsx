@@ -9,7 +9,7 @@ import {
   formatTargetNoteLabel,
   getNoteById,
   getNotesForGroups,
-  PRACTICE_GROUPS_LOW_TO_HIGH,
+  PRACTICE_GROUPS,
 } from "../domain/notes";
 import { getDrillNotes, selectNextNote, selectNotePage } from "../domain/scheduler";
 import { buildNoteStats, filterLongTermReviews, formatMs, percentile } from "../domain/stats";
@@ -98,7 +98,7 @@ function inputMinutesToDurationSeconds(value: string): number {
   return Math.max(60, Math.round(Number(value) * 60));
 }
 
-const ALL_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => group.id);
+const ALL_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS.map((group) => group.id);
 const STAFF_PAGE_SIZE = 48;
 const MELODY_BUFFER_SIZE = 16;
 const PRACTICE_QUEUE_OPTIONS: Array<{ strategy: PracticeQueueStrategy; label: string; description: string }> = [
@@ -897,7 +897,7 @@ export function PracticeView({
             <div className="control-block">
               <span className="control-label">启用组</span>
               <div className="group-grid">
-                {PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => {
+                {PRACTICE_GROUPS.map((group) => {
                   const checked = enabledGroupIds.includes(group.id);
                   return (
                     <label className={checked ? "choice choice-active" : "choice"} key={group.id}>

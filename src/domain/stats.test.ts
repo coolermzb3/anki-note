@@ -8,7 +8,7 @@ function makeSession(overrides: Partial<PracticeSessionRecord> & { id: string; s
     id: overrides.id,
     schemaVersion: 1,
     mode: overrides.mode ?? "open-ended",
-    enabledGroupIds: overrides.enabledGroupIds ?? ["C4-B4"],
+    enabledGroupIds: overrides.enabledGroupIds ?? ["G3-F4"],
     fixedCount: overrides.fixedCount,
     fixedDurationSeconds: overrides.fixedDurationSeconds,
     startedAt: overrides.startedAt,
@@ -133,5 +133,15 @@ describe("stats", () => {
     expect(f3.errorCount).toBe(2);
     expect(f3.commonConfusion).toBe("A");
     expect(Math.round(f3.errorRate * 100)).toBe(67);
+  });
+
+  it("builds note stats from the current target-note group instead of the review group snapshot", () => {
+    const reviews = [makeReview({ targetNoteId: "C4", groupId: "G5-G6" })];
+
+    const c4 = buildNoteStats(reviews, ["G3-F4"]).find((stat) => stat.targetNoteId === "C4")!;
+    const outOfRange = buildNoteStats(reviews, ["G5-G6"]).find((stat) => stat.targetNoteId === "C4");
+
+    expect(c4.reviewCount).toBe(1);
+    expect(outOfRange).toBeUndefined();
   });
 });

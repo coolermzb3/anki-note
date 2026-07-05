@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { PRACTICE_GROUPS_LOW_TO_HIGH } from "../domain/notes";
+import { getCurrentTargetNoteIdsForGroups, PRACTICE_GROUPS } from "../domain/notes";
 import {
   buildDailyStats,
   buildNoteStats,
@@ -28,7 +28,7 @@ type RangeKey = "1" | "7" | "30" | "all";
 type RecognitionTimeGrouping = "day" | "practice-session";
 
 const EMPTY_SESSIONS: PracticeSessionRecord[] = [];
-const ALL_STATS_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => group.id);
+const ALL_STATS_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS.map((group) => group.id);
 const HEATMAP_WEEK_COUNT = 53;
 const RECOGNITION_CHART_ANIMATION_MS = 180;
 const WEEKDAY_LABELS = ["周一", "", "周三", "", "周五", "", "周日"];
@@ -207,8 +207,8 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
 
   const longTermReviews = useMemo(() => filterLongTermReviews(reviews), [reviews]);
   const filteredReviews = useMemo(() => {
-    const activeGroups = new Set(selectedGroupIds);
-    return filterByRange(longTermReviews, range).filter((review) => activeGroups.has(review.groupId));
+    const activeTargetNoteIds = getCurrentTargetNoteIdsForGroups(selectedGroupIds);
+    return filterByRange(longTermReviews, range).filter((review) => activeTargetNoteIds.has(review.targetNoteId));
   }, [longTermReviews, range, selectedGroupIds]);
   const recognitionTimeStats = useMemo(() => {
     const source =
@@ -251,7 +251,7 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
   const rangeStaffNotes = useMemo(() => {
     const activeGroups = new Set(selectedGroupIds);
     const statsByNoteId = new Map(noteStats.map((stat) => [stat.targetNoteId, stat]));
-    return PRACTICE_GROUPS_LOW_TO_HIGH.flatMap((group) => group.notes)
+    return PRACTICE_GROUPS.flatMap((group) => group.notes)
       .filter((note) => activeGroups.has(note.groupId))
       .sort(compareRangeStaffNotes)
       .map((note) => ({ note, stat: statsByNoteId.get(note.id) }));
@@ -293,7 +293,7 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
         <div className="stats-left-column">
           <div className="stats-filter-row">
             <div className="group-filter stats-group-filter" aria-label="统计分组筛选">
-              {PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => {
+              {PRACTICE_GROUPS.map((group) => {
                 const checked = selectedGroupIds.includes(group.id);
                 return (
                   <label className={checked ? "choice choice-active" : "choice"} key={group.id}>

@@ -1,5 +1,5 @@
 export type NoteName = "C" | "D" | "E" | "F" | "G" | "A" | "B";
-export type Octave = 2 | 3 | 4 | 5 | 6;
+export type Octave = 1 | 2 | 3 | 4 | 5 | 6;
 export type Staff = "treble" | "bass";
 export type PitchId = `${NoteName}${Octave}`;
 export type TargetNoteId = PitchId | `${PitchId}-${Staff}`;
@@ -26,12 +26,11 @@ export interface TargetNote {
   isLedgerVariant: boolean;
 }
 
-export type PracticeGroupId = "C4-B4" | "C3-B3" | "C5-B5" | "C2-B2" | "C6-B6";
+export type PracticeGroupId = "F1-F2" | "G2-F3" | "G3-F4" | "G4-F5" | "G5-G6";
 
 export interface PracticeGroup {
   id: PracticeGroupId;
   label: string;
-  octave: Octave;
   notes: TargetNote[];
 }
 

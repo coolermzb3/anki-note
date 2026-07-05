@@ -4,6 +4,11 @@ import type { NoteName, Octave, TargetNote } from "../domain/types";
 
 const PIANO_SAMPLE_BASE_URL = "https://tonejs.github.io/audio/salamander/";
 const PIANO_SAMPLE_URLS = {
+  A0: "A0.mp3",
+  C1: "C1.mp3",
+  "D#1": "Ds1.mp3",
+  "F#1": "Fs1.mp3",
+  A1: "A1.mp3",
   C2: "C2.mp3",
   "D#2": "Ds2.mp3",
   "F#2": "Fs2.mp3",

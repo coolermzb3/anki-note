@@ -9,6 +9,7 @@ describe("makeDefaultSettings", () => {
       promptDisplayMode: "staff-page",
       promptNoteDuration: "quarter",
       autoPlayTarget: false,
+      enabledGroupIds: ["G3-F4"],
       correctDelayMs: 0,
     });
   });
