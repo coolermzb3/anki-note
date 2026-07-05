@@ -34,10 +34,19 @@ import { StaffPrompt } from "./StaffPrompt";
 interface PracticeViewProps {
   settings: AppSettings;
   reviews: ReviewRecord[];
+  navigationExitRequest?: PracticeNavigationExitRequest | null;
+  onNavigationExitComplete?: (targetView: PracticeNavigationExitTarget) => void;
   onSettingsSaved: (settings: AppSettings) => void;
   onDataChanged: () => Promise<void>;
   onOpenStats: () => void;
   onRunningChange: (running: boolean) => void;
+}
+
+export type PracticeNavigationExitTarget = "practice" | "stats" | "settings";
+
+export interface PracticeNavigationExitRequest {
+  id: number;
+  targetView: PracticeNavigationExitTarget;
 }
 
 interface PromptRuntime {
@@ -64,6 +73,10 @@ interface StaffPageRuntime {
   notes: TargetNote[];
   index: number;
   completedCount: number;
+}
+
+interface CompleteSessionOptions {
+  showSummary?: boolean;
 }
 
 function newSessionId(): string {
@@ -114,6 +127,8 @@ const PRACTICE_QUEUE_OPTIONS: Array<{ strategy: PracticeQueueStrategy; label: st
 export function PracticeView({
   settings,
   reviews,
+  navigationExitRequest,
+  onNavigationExitComplete,
   onSettingsSaved,
   onDataChanged,
   onOpenStats,
@@ -159,6 +174,7 @@ export function PracticeView({
   const pendingAfterPauseRef = useRef<(() => void) | null>(null);
   const lastBackupCompletedRef = useRef(0);
   const lastBackupAtRef = useRef<number>(performance.now());
+  const handledNavigationExitRequestIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     onRunningChange(phase === "running");
@@ -542,10 +558,15 @@ export function PracticeView({
   );
 
   const completeSession = useCallback(
-    async (endReason: PracticeSessionRecord["endReason"], unfinishedReason?: InterruptReason): Promise<void> => {
+    async (
+      endReason: PracticeSessionRecord["endReason"],
+      unfinishedReason?: InterruptReason,
+      options: CompleteSessionOptions = {},
+    ): Promise<void> => {
       if (endingRef.current || !sessionRef.current) {
         return;
       }
+      const showSummary = options.showSummary ?? true;
       endingRef.current = true;
       const unfinishedReview = promptRef.current ? await finishCurrentReview(false, unfinishedReason) : null;
       pauseActiveTimers();
@@ -563,19 +584,33 @@ export function PracticeView({
       await db.practiceSessions.put(finalSession);
       sessionRef.current = finalSession;
       setSession(finalSession);
-      setSummary({ session: finalSession, reviews: finalReviews });
+      setSummary(showSummary ? { session: finalSession, reviews: finalReviews } : null);
       setCurrentNote(null);
       syncStaffPage(null);
       isPausedRef.current = false;
       pendingAfterPauseRef.current = null;
       setIsPaused(false);
-      setPhase("summary");
+      setPhase(showSummary ? "summary" : "setup");
       await writeBackupNow().catch(() => undefined);
       await onDataChanged();
       endingRef.current = false;
     },
     [finishCurrentReview, onDataChanged, pauseActiveTimers, syncStaffPage],
   );
+
+  useEffect(() => {
+    if (
+      phase !== "running" ||
+      !navigationExitRequest ||
+      handledNavigationExitRequestIdRef.current === navigationExitRequest.id
+    ) {
+      return;
+    }
+    handledNavigationExitRequestIdRef.current = navigationExitRequest.id;
+    void completeSession("manual-stop", "manual-stop", { showSummary: false }).then(() => {
+      onNavigationExitComplete?.(navigationExitRequest.targetView);
+    });
+  }, [completeSession, navigationExitRequest, onNavigationExitComplete, phase]);
 
   const startSession = useCallback(async (): Promise<void> => {
     if (queueNotes.length === 0) {
@@ -1148,7 +1183,7 @@ export function PracticeView({
             {isPaused ? "继续" : "暂停"}
           </button>
           <button title="结束 Esc" onClick={() => void completeSession("manual-stop", "manual-stop")}>
-            <Square size={18} />
+            <Square fill="currentColor" size={14} strokeWidth={0} />
             结束
           </button>
         </div>
@@ -1163,7 +1198,7 @@ export function PracticeView({
             wrongIndex={feedback?.type === "wrong" ? staffPageIndex : undefined}
           />
         ) : currentNote ? (
-          <StaffPrompt note={currentNote} noteDuration={promptNoteDuration} />
+          <StaffPrompt note={currentNote} noteDuration={promptNoteDuration} wrong={feedback?.type === "wrong"} />
         ) : null}
       </div>
 

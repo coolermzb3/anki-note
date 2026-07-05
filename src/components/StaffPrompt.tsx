@@ -7,7 +7,11 @@ interface StaffPromptProps {
   note: TargetNote;
   compact?: boolean;
   noteDuration: PromptNoteDuration;
+  wrong?: boolean;
 }
+
+const NEUTRAL_COLOR = "#211c18";
+const WRONG_COLOR = "#c84c3d";
 
 function noteDurationToVexDuration(noteDuration: PromptNoteDuration): "q" | "w" {
   return noteDuration === "quarter" ? "q" : "w";
@@ -17,7 +21,7 @@ function noteDurationToBeats(noteDuration: PromptNoteDuration): number {
   return noteDuration === "quarter" ? 1 : 4;
 }
 
-export function StaffPrompt({ note, compact = false, noteDuration }: StaffPromptProps): JSX.Element {
+export function StaffPrompt({ note, compact = false, noteDuration, wrong = false }: StaffPromptProps): JSX.Element {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const rendererTargetRef = useRef<HTMLDivElement | null>(null);
 
@@ -57,6 +61,9 @@ export function StaffPrompt({ note, compact = false, noteDuration }: StaffPrompt
         keys: [noteToVexKey(note)],
         duration: noteDurationToVexDuration(noteDuration),
       });
+      const noteColor = wrong ? WRONG_COLOR : NEUTRAL_COLOR;
+      staveNote.setStyle({ fillStyle: noteColor, strokeStyle: noteColor });
+      staveNote.setLedgerLineStyle({ fillStyle: noteColor, strokeStyle: noteColor });
       const voice = new Voice({ numBeats: noteDurationToBeats(noteDuration), beatValue: 4 }).addTickables([staveNote]);
       new Formatter().joinVoices([voice]).format([voice], staveWidth - (compact ? 74 : 150), { context });
       voice.draw(context, targetStave);
@@ -86,7 +93,7 @@ export function StaffPrompt({ note, compact = false, noteDuration }: StaffPrompt
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [compact, note, noteDuration]);
+  }, [compact, note, noteDuration, wrong]);
 
   return (
     <div ref={frameRef} className={compact ? "staff staff-compact" : "staff"} aria-label={`谱面 ${formatTargetNoteLabel(note)}`}>

@@ -1,5 +1,5 @@
 import { BarChart3 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -15,7 +15,6 @@ import {
   buildNoteStats,
   buildPracticeSessionStats,
   filterLongTermReviews,
-  isQualifiedReview,
 } from "../domain/stats";
 import type { NoteName, PracticeGroupId, PracticeSessionRecord, ReviewRecord, Staff, TargetNote } from "../domain/types";
 import { StatsRangeStaff, type StaffHeatNote } from "./StatsRangeStaff";
@@ -25,13 +24,14 @@ interface StatsViewProps {
   sessions?: PracticeSessionRecord[];
 }
 
-type RangeKey = "7" | "30" | "all";
+type RangeKey = "1" | "7" | "30" | "all";
 type RecognitionTimeGrouping = "day" | "practice-session";
 
 const EMPTY_SESSIONS: PracticeSessionRecord[] = [];
-const HEATMAP_WEEK_COUNT = 12;
+const ALL_STATS_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => group.id);
+const HEATMAP_WEEK_COUNT = 53;
 const RECOGNITION_CHART_ANIMATION_MS = 180;
-const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+const WEEKDAY_LABELS = ["周一", "", "周三", "", "周五", "", "周日"];
 const NOTE_ORDER: Record<NoteName, number> = {
   C: 0,
   D: 1,
@@ -131,6 +131,7 @@ function filterByRange(reviews: ReviewRecord[], range: RangeKey): ReviewRecord[]
 }
 
 function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const daily = buildDailyStats(reviews);
   const byDate = new Map(daily.map((day) => [day.date, day]));
   const today = new Date();
@@ -148,34 +149,51 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
       const date = new Date(weekStart);
       date.setDate(weekStart.getDate() + dayOffset);
       const key = formatDateKey(date);
-      return { isFuture: date.getTime() > todayStart.getTime(), key, stat: byDate.get(key) };
-    });
+      return { date, key, stat: byDate.get(key) };
+    }).filter((day) => day.date.getTime() <= todayStart.getTime());
   });
+
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) {
+      return;
+    }
+
+    const scrollToLatest = (): void => {
+      scroll.scrollLeft = scroll.scrollWidth - scroll.clientWidth;
+    };
+    scrollToLatest();
+    const observer = new ResizeObserver(scrollToLatest);
+    observer.observe(scroll);
+    return () => observer.disconnect();
+  }, [days.length]);
 
   return (
     <div className="heatmap-shell" aria-label="练习热力图">
       <div className="heatmap-weekdays" aria-hidden="true">
-        {WEEKDAY_LABELS.map((label) => (
-          <span key={label}>{label}</span>
+        {WEEKDAY_LABELS.map((label, index) => (
+          <span key={`${index}-${label}`}>{label ? <span className="heatmap-weekday-label">{label}</span> : null}</span>
         ))}
       </div>
-      <div className="heatmap-scroll">
-        <div className="heatmap-months" aria-hidden="true">
-          {weekStarts.map((weekStart, index) => (
-            <span className="heatmap-month" key={formatDateKey(weekStart)}>
-              {monthLabelForWeek(weekStart, index)}
-            </span>
-          ))}
-        </div>
-        <div className="heatmap">
-          {days.map((day) => (
-            <div
-              aria-label={`${day.key}: ${day.isFuture ? "未到日期" : `${day.stat?.completedReviews ?? 0} 次`}`}
-              className={`heat-cell heat-${day.stat?.heatLevel ?? 0}${day.isFuture ? " heat-future" : ""}`}
-              key={day.key}
-              title={`${day.key}: ${day.isFuture ? "未到日期" : day.stat?.completedReviews ?? 0}`}
-            />
-          ))}
+      <div className="heatmap-scroll" ref={scrollRef}>
+        <div className="heatmap-track">
+          <div className="heatmap-months" aria-hidden="true">
+            {weekStarts.map((weekStart, index) => (
+              <span className="heatmap-month" key={formatDateKey(weekStart)}>
+                {monthLabelForWeek(weekStart, index)}
+              </span>
+            ))}
+          </div>
+          <div className="heatmap">
+            {days.map((day) => (
+              <div
+                aria-label={`${day.key}: ${day.stat?.completedReviews ?? 0} 次`}
+                className={`heat-cell heat-${day.stat?.heatLevel ?? 0}`}
+                key={day.key}
+                title={`${day.key}: ${day.stat?.completedReviews ?? 0}`}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -184,30 +202,18 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
 
 export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps): JSX.Element {
   const [range, setRange] = useState<RangeKey>("30");
-  const [groupFilter, setGroupFilter] = useState<PracticeGroupId[]>([]);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<PracticeGroupId[]>(ALL_STATS_GROUP_IDS);
   const [recognitionTimeGrouping, setRecognitionTimeGrouping] = useState<RecognitionTimeGrouping>("practice-session");
-  const [chartGroupFilter, setChartGroupFilter] = useState<PracticeGroupId[] | null>(null);
 
   const longTermReviews = useMemo(() => filterLongTermReviews(reviews), [reviews]);
-  const filteredReviews = useMemo(() => filterByRange(longTermReviews, range), [longTermReviews, range]);
-  const chartGroupIdsWithData = useMemo(() => {
-    const groupIds = new Set<PracticeGroupId>();
-    for (const review of filteredReviews) {
-      if (isQualifiedReview(review)) {
-        groupIds.add(review.groupId);
-      }
-    }
-    return PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => group.id).filter((groupId) => groupIds.has(groupId));
-  }, [filteredReviews]);
-  const activeChartGroupIds = chartGroupFilter ?? chartGroupIdsWithData;
-  const chartFilteredReviews = useMemo(() => {
-    const activeGroups = new Set(activeChartGroupIds);
-    return filteredReviews.filter((review) => activeGroups.has(review.groupId));
-  }, [activeChartGroupIds, filteredReviews]);
+  const filteredReviews = useMemo(() => {
+    const activeGroups = new Set(selectedGroupIds);
+    return filterByRange(longTermReviews, range).filter((review) => activeGroups.has(review.groupId));
+  }, [longTermReviews, range, selectedGroupIds]);
   const recognitionTimeStats = useMemo(() => {
     const source =
       recognitionTimeGrouping === "day"
-        ? buildDailyStats(chartFilteredReviews).map((day) => ({
+        ? buildDailyStats(filteredReviews).map((day) => ({
             key: day.date,
             label: formatShortDate(day.date),
             tooltipLabel: formatShortDate(day.date),
@@ -216,7 +222,7 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
             medianMs: day.medianMs,
             p90Ms: day.p90Ms,
           }))
-        : buildPracticeSessionStats(chartFilteredReviews, sessions).map((session) => {
+        : buildPracticeSessionStats(filteredReviews, sessions).map((session) => {
             const startedAt = formatShortDateTime(session.startedAt);
             return {
               key: session.sessionId,
@@ -235,19 +241,21 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
       median: stat.medianMs === undefined ? undefined : Number((stat.medianMs / 1000).toFixed(2)),
       p90: stat.p90Ms === undefined ? undefined : Number((stat.p90Ms / 1000).toFixed(2)),
     }));
-  }, [chartFilteredReviews, recognitionTimeGrouping, sessions]);
-  const noteStats = useMemo(
-    () => buildNoteStats(filteredReviews, groupFilter),
-    [filteredReviews, groupFilter],
-  );
+  }, [filteredReviews, recognitionTimeGrouping, sessions]);
+  const noteStats = useMemo(() => {
+    if (selectedGroupIds.length === 0) {
+      return [];
+    }
+    return buildNoteStats(filteredReviews, selectedGroupIds);
+  }, [filteredReviews, selectedGroupIds]);
   const rangeStaffNotes = useMemo(() => {
-    const activeGroups = groupFilter.length > 0 ? new Set(groupFilter) : undefined;
+    const activeGroups = new Set(selectedGroupIds);
     const statsByNoteId = new Map(noteStats.map((stat) => [stat.targetNoteId, stat]));
     return PRACTICE_GROUPS_LOW_TO_HIGH.flatMap((group) => group.notes)
-      .filter((note) => !activeGroups || activeGroups.has(note.groupId))
+      .filter((note) => activeGroups.has(note.groupId))
       .sort(compareRangeStaffNotes)
       .map((note) => ({ note, stat: statsByNoteId.get(note.id) }));
-  }, [groupFilter, noteStats]);
+  }, [noteStats, selectedGroupIds]);
   const errorStaffNotes = useMemo<StaffHeatNote[]>(
     () => rangeStaffNotes.map(({ note, stat }) => ({ note, value: stat?.errorCount ?? 0 })),
     [rangeStaffNotes],
@@ -257,10 +265,11 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
     [rangeStaffNotes],
   );
 
-  function toggleChartGroup(groupId: PracticeGroupId): void {
-    setChartGroupFilter((current) => {
-      const base = current ?? chartGroupIdsWithData;
-      return base.includes(groupId) ? base.filter((id) => id !== groupId) : [...base, groupId];
+  function toggleGroup(groupId: PracticeGroupId, checked: boolean): void {
+    setSelectedGroupIds((current) => {
+      const next = checked ? [...current, groupId] : current.filter((id) => id !== groupId);
+      const selected = new Set(next);
+      return ALL_STATS_GROUP_IDS.filter((id) => selected.has(id));
     });
   }
 
@@ -273,87 +282,68 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
         <BarChart3 size={24} />
       </div>
 
-      <div className="toolbar">
-        <div className="segmented">
-          <button className={range === "7" ? "active" : ""} onClick={() => setRange("7")}>
-            7 天
-          </button>
-          <button className={range === "30" ? "active" : ""} onClick={() => setRange("30")}>
-            30 天
-          </button>
-          <button className={range === "all" ? "active" : ""} onClick={() => setRange("all")}>
-            全部
-          </button>
+      <div className="panel heatmap-panel stats-heatmap-panel">
+        <div className="panel-heading">
+          <h2>练习量</h2>
         </div>
-      </div>
-
-      <div className="group-filter">
-        {PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => {
-          const checked = groupFilter.includes(group.id);
-          return (
-            <label className={checked ? "choice choice-active" : "choice"} key={group.id}>
-              <input
-                checked={checked}
-                type="checkbox"
-                onChange={(event) => {
-                  setGroupFilter((current) =>
-                    event.target.checked ? [...current, group.id] : current.filter((id) => id !== group.id),
-                  );
-                }}
-              />
-              <span>{group.label}</span>
-            </label>
-          );
-        })}
+        <HeatMap reviews={longTermReviews} />
       </div>
 
       <div className="stats-main-grid">
         <div className="stats-left-column">
-          <div className="panel heatmap-panel">
-            <div className="panel-heading">
-              <h2>练习量</h2>
+          <div className="stats-filter-row">
+            <div className="group-filter stats-group-filter" aria-label="统计分组筛选">
+              {PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => {
+                const checked = selectedGroupIds.includes(group.id);
+                return (
+                  <label className={checked ? "choice choice-active" : "choice"} key={group.id}>
+                    <input
+                      checked={checked}
+                      type="checkbox"
+                      onChange={(event) => toggleGroup(group.id, event.target.checked)}
+                    />
+                    <span>{group.label}</span>
+                  </label>
+                );
+              })}
             </div>
-            <HeatMap reviews={longTermReviews} />
           </div>
 
           <div className="panel chart-panel">
             <div className="panel-heading">
               <h2>识别时长</h2>
-              <div className="segmented" aria-label="识别时长分组">
-                <button
-                  className={recognitionTimeGrouping === "day" ? "active" : ""}
-                  onClick={() => setRecognitionTimeGrouping("day")}
-                >
-                  按天
-                </button>
-                <button
-                  className={recognitionTimeGrouping === "practice-session" ? "active" : ""}
-                  onClick={() => setRecognitionTimeGrouping("practice-session")}
-                >
-                  按练习会话
-                </button>
-              </div>
-            </div>
-            <div className="chart-group-filter" aria-label="识别时长组筛选">
-              {PRACTICE_GROUPS_LOW_TO_HIGH.map((group) => {
-                const active = activeChartGroupIds.includes(group.id);
-                const hasData = chartGroupIdsWithData.includes(group.id);
-                return (
+              <div className="chart-panel-actions">
+                <div className="toolbar stats-range-filter">
+                  <div className="segmented" aria-label="统计天数筛选">
+                    <button className={range === "1" ? "active" : ""} onClick={() => setRange("1")}>
+                      1 天
+                    </button>
+                    <button className={range === "7" ? "active" : ""} onClick={() => setRange("7")}>
+                      7 天
+                    </button>
+                    <button className={range === "30" ? "active" : ""} onClick={() => setRange("30")}>
+                      30 天
+                    </button>
+                    <button className={range === "all" ? "active" : ""} onClick={() => setRange("all")}>
+                      全部
+                    </button>
+                  </div>
+                </div>
+                <div className="segmented" aria-label="识别时长分组">
                   <button
-                    className={[
-                      active ? "active" : "",
-                      hasData ? "" : "group-empty",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    key={group.id}
-                    title={hasData ? group.label : `${group.label} 暂无数据`}
-                    onClick={() => toggleChartGroup(group.id)}
+                    className={recognitionTimeGrouping === "day" ? "active" : ""}
+                    onClick={() => setRecognitionTimeGrouping("day")}
                   >
-                    {group.label}
+                    按天
                   </button>
-                );
-              })}
+                  <button
+                    className={recognitionTimeGrouping === "practice-session" ? "active" : ""}
+                    onClick={() => setRecognitionTimeGrouping("practice-session")}
+                  >
+                    按练习会话
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="chart-box">
               {recognitionTimeStats.length === 0 ? (

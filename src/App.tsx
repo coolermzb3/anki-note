@@ -1,9 +1,9 @@
 import { BarChart3, Dumbbell, Settings } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { preloadPianoSamples } from "./audio/piano";
 import { getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
 import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord } from "./domain/types";
-import { PracticeView } from "./components/PracticeView";
+import { PracticeView, type PracticeNavigationExitRequest, type PracticeNavigationExitTarget } from "./components/PracticeView";
 import { SettingsView } from "./components/SettingsView";
 import { StatsView } from "./components/StatsView";
 
@@ -20,6 +20,8 @@ export function App(): JSX.Element {
   const [view, setView] = useState<View>("practice");
   const [data, setData] = useState<AppData | null>(null);
   const [practiceRunning, setPracticeRunning] = useState(false);
+  const [practiceExitRequest, setPracticeExitRequest] = useState<PracticeNavigationExitRequest | null>(null);
+  const practiceExitRequestIdRef = useRef(0);
 
   const refresh = useCallback(async (): Promise<void> => {
     const [{ settings, sessions, reviews }, backupState] = await Promise.all([loadAllData(), getBackupState()]);
@@ -32,6 +34,28 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     preloadPianoSamples();
+  }, []);
+
+  const selectView = useCallback(
+    (nextView: View): void => {
+      if (practiceRunning && view === "practice" && nextView !== view) {
+        if (!practiceExitRequest) {
+          practiceExitRequestIdRef.current += 1;
+          setPracticeExitRequest({
+            id: practiceExitRequestIdRef.current,
+            targetView: nextView,
+          });
+        }
+        return;
+      }
+      setView(nextView);
+    },
+    [practiceExitRequest, practiceRunning, view],
+  );
+
+  const handleNavigationExitComplete = useCallback((targetView: PracticeNavigationExitTarget): void => {
+    setPracticeExitRequest(null);
+    setView(targetView);
   }, []);
 
   useEffect(() => {
@@ -59,15 +83,15 @@ export function App(): JSX.Element {
   return (
     <div className="app-shell">
       <nav className="app-nav" aria-label="主导航">
-        <button className={view === "practice" ? "active" : ""} onClick={() => setView("practice")}>
+        <button className={view === "practice" ? "active" : ""} onClick={() => selectView("practice")}>
           <Dumbbell size={18} />
           练习
         </button>
-        <button className={view === "stats" ? "active" : ""} disabled={practiceRunning} onClick={() => setView("stats")}>
+        <button className={view === "stats" ? "active" : ""} onClick={() => selectView("stats")}>
           <BarChart3 size={18} />
           统计
         </button>
-        <button className={view === "settings" ? "active" : ""} disabled={practiceRunning} onClick={() => setView("settings")}>
+        <button className={view === "settings" ? "active" : ""} onClick={() => selectView("settings")}>
           <Settings size={18} />
           设置
         </button>
@@ -78,7 +102,9 @@ export function App(): JSX.Element {
           <PracticeView
             settings={data.settings}
             reviews={data.reviews}
+            navigationExitRequest={practiceExitRequest}
             onDataChanged={refresh}
+            onNavigationExitComplete={handleNavigationExitComplete}
             onOpenStats={() => setView("stats")}
             onRunningChange={setPracticeRunning}
             onSettingsSaved={(settings) => setData((current) => (current ? { ...current, settings } : current))}
