@@ -2,6 +2,8 @@ import { BarChart3, Dumbbell, Settings } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { preloadPianoSamples } from "./audio/piano";
 import { getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
+import { IndexedDbMaintenancePanel } from "./debug/IndexedDbMaintenancePanel";
+import { installIndexedDbMaintenanceDebug } from "./debug/indexedDbMaintenance";
 import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord } from "./domain/types";
 import { PracticeView, type PracticeNavigationExitRequest, type PracticeNavigationExitTarget } from "./components/PracticeView";
 import { SettingsView } from "./components/SettingsView";
@@ -34,6 +36,13 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     preloadPianoSamples();
+  }, []);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return undefined;
+    }
+    return installIndexedDbMaintenanceDebug();
   }, []);
 
   const selectView = useCallback(
@@ -75,6 +84,11 @@ export function App(): JSX.Element {
       .then((keys) => Promise.all(keys.filter((key) => key.startsWith("anki-note-")).map((key) => caches.delete(key))))
       .catch(() => undefined);
   }, []);
+
+  const showIndexedDbMaintenance = import.meta.env.DEV && new URLSearchParams(window.location.search).get("debug") === "indexeddb";
+  if (showIndexedDbMaintenance) {
+    return <IndexedDbMaintenancePanel />;
+  }
 
   if (!data) {
     return <div className="loading">加载中</div>;

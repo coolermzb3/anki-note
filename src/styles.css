@@ -144,6 +144,32 @@ h3 {
   place-items: center;
 }
 
+.debug-maintenance {
+  width: min(1100px, calc(100vw - 48px));
+  margin: 32px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.debug-maintenance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.debug-maintenance textarea {
+  width: 100%;
+  min-height: 65vh;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: 13px/1.5 "Cascadia Code", Consolas, monospace;
+  padding: 12px;
+  resize: vertical;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
