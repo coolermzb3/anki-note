@@ -248,6 +248,55 @@ describe("file backup side effects", () => {
     await expect(db.settings.get("default")).resolves.toMatchObject({ dataSetId: "dataset-backup" });
   });
 
+  it("imports newer backup data before practice when no conflict guard exists", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData({
+      dataSetId: "dataset-shared",
+      reviewEndedAt: "2026-07-04T10:00:02.000+08:00",
+    });
+    await seedBackupDirectory(directory, {
+      dataSetId: "dataset-shared",
+      reviewEndedAt: "2026-07-05T10:00:02.000+08:00",
+    });
+    await rememberDirectory(directory);
+
+    await expect(syncBackupBeforePractice({ requestPermission: true })).resolves.toBe("synced-up");
+
+    await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-backup" }]);
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      dataConflictBeforeBackup: false,
+      syncRequiredBeforeBackup: false,
+    });
+  });
+
+  it("does not import newer backup data before practice while a conflict guard exists", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData({
+      dataSetId: "dataset-shared",
+      reviewEndedAt: "2026-07-04T10:00:02.000+08:00",
+    });
+    await seedBackupDirectory(directory, {
+      dataSetId: "dataset-shared",
+      reviewEndedAt: "2026-07-05T10:00:02.000+08:00",
+    });
+    await db.backupStates.put({
+      id: "default",
+      schemaVersion: 1,
+      directoryHandle: directory.handle(),
+      directoryName: directory.name,
+      syncRequiredBeforeBackup: true,
+      lastError: "备份目录已有更新，请先导入备份。",
+    });
+
+    await expect(syncBackupBeforePractice({ requestPermission: true })).resolves.toBe("data-conflict");
+
+    await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-browser" }]);
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      dataConflictBeforeBackup: true,
+      syncRequiredBeforeBackup: true,
+    });
+  });
+
   it("does not import over browser data when a backup write finds divergence", async () => {
     const directory = new MemoryDirectoryHandle("backup");
     await seedBrowserData();

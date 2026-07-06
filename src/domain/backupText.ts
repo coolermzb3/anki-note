@@ -73,7 +73,7 @@ export function formatBackupConflictDetail(
     return backupText.messages.dataConflictBeforeBackup;
   }
   const browserSummary = formatBackupDataSummary(
-    "浏览器数据",
+    "　浏览器数据",
     backupState.conflictBrowserFirstReviewAt,
     backupState.conflictBrowserLastReviewAt,
     backupState.conflictBrowserReviewCount,
@@ -84,5 +84,5 @@ export function formatBackupConflictDetail(
     backupState.conflictBackupLastReviewAt,
     backupState.conflictBackupReviewCount,
   );
-  return `${backupText.messages.dataConflictBeforeBackup} ${browserSummary}；${backupSummary}。`;
+  return `${backupText.messages.dataConflictBeforeBackup}\n${browserSummary}\n${backupSummary}`;
 }

@@ -335,10 +335,6 @@ export function App(): JSX.Element {
     ) {
       return;
     }
-    if (backupSyncRequired(data.backupState)) {
-      setBackupReminderVisible(true);
-      return;
-    }
     void runPracticeBackupCheck({ requestPermission: false });
   }, [
     data !== null,

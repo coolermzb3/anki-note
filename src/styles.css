@@ -230,6 +230,7 @@ main {
 .backup-reminder span {
   color: var(--muted);
   font-size: 13px;
+  white-space: pre-line;
 }
 
 .backup-reminder-actions {
@@ -924,6 +925,7 @@ main {
 .status-line {
   color: var(--muted);
   padding: 14px 0;
+  white-space: pre-line;
 }
 
 .status-line.warning {
