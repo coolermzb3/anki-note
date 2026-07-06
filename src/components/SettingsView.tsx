@@ -8,8 +8,9 @@ import {
   type BackupDirectorySelectionResult,
 } from "../data/backup";
 import { db, getBackupState } from "../data/db";
-import { backupText, formatBackupConflictDetail } from "../domain/backupText";
+import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "../domain/backupText";
 import type { AppSettings, BackupState } from "../domain/types";
+import { BackupConflictActionContent } from "./BackupConflictActionContent";
 
 type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
 
@@ -46,6 +47,7 @@ export function SettingsView({
     backupState.dataConflictBeforeBackup ?? backupState.syncRequiredBeforeBackup ?? storedBackupState.restoreRequiredBeforeBackup,
   );
   const hasBackupSnapshot = Boolean(backupBlockedUntilSync || backupState.lastSeenBackupVersion);
+  const backupConflictSummaries = backupBlockedUntilSync ? getBackupConflictDataSummaries(backupState) : null;
 
   async function saveSettings(next: AppSettings): Promise<void> {
     await db.settings.put(next);
@@ -146,6 +148,7 @@ export function SettingsView({
         </div>
         <div className="action-row">
           <button
+            className={backupBlockedUntilSync ? "backup-decision-button backup-directory-choice-button" : undefined}
             disabled={!supportsFileBackups() || busy}
             onClick={() =>
               void runBusy(async () => {
@@ -154,10 +157,24 @@ export function SettingsView({
               }, backupText.messages.directorySelected)
             }
           >
-            <FolderOpen size={18} />
-            {backupText.labels.chooseDirectory}
+            {backupBlockedUntilSync ? (
+              <span className="backup-action-heading">
+                <FolderOpen size={18} />
+                <span>{backupText.labels.chooseDirectory}</span>
+              </span>
+            ) : (
+              <>
+                <FolderOpen size={18} />
+                {backupText.labels.chooseDirectory}
+              </>
+            )}
           </button>
           <button
+            className={
+              backupBlockedUntilSync
+                ? `backup-decision-button${backupConflictSummaries?.highlighted === "backup" ? " primary" : ""}`
+                : undefined
+            }
             disabled={!backupState.directoryHandle || !hasBackupSnapshot || busy}
             onClick={() => {
               if (!backupState.directoryHandle) {
@@ -168,11 +185,22 @@ export function SettingsView({
               }
             }}
           >
-            <Upload size={18} />
-            {backupBlockedUntilSync ? backupText.labels.keepBackupData : backupText.labels.importBackup}
+            {backupBlockedUntilSync ? (
+              <BackupConflictActionContent
+                icon={<Upload size={18} />}
+                label={backupText.labels.keepBackupData}
+                summary={backupConflictSummaries!.backup}
+              />
+            ) : (
+              <>
+                <Upload size={18} />
+                {backupText.labels.importBackup}
+              </>
+            )}
           </button>
           {backupBlockedUntilSync ? (
             <button
+              className={`backup-decision-button${backupConflictSummaries?.highlighted === "browser" ? " primary" : ""}`}
               disabled={!backupState.directoryHandle || busy}
               onClick={() => {
                 if (!window.confirm(backupText.messages.backupDirectoryWillBeReplaced)) {
@@ -181,8 +209,11 @@ export function SettingsView({
                 void runBusy(writeBrowserDataToBackupDirectory, backupText.messages.browserDataWrittenToBackup);
               }}
             >
-              <Download size={18} />
-              {backupText.labels.keepBrowserData}
+              <BackupConflictActionContent
+                icon={<Download size={18} />}
+                label={backupText.labels.keepBrowserData}
+                summary={backupConflictSummaries!.browser}
+              />
             </button>
           ) : null}
         </div>

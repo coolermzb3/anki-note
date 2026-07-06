@@ -13,8 +13,9 @@ import {
 import { getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
 import { IndexedDbMaintenancePanel } from "./debug/IndexedDbMaintenancePanel";
 import { installIndexedDbMaintenanceDebug } from "./debug/indexedDbMaintenance";
-import { backupText, formatBackupConflictDetail } from "./domain/backupText";
+import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "./domain/backupText";
 import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord } from "./domain/types";
+import { BackupConflictActionContent } from "./components/BackupConflictActionContent";
 import {
   PracticeView,
   type PracticeNavigationExitRequest,
@@ -438,6 +439,8 @@ export function App(): JSX.Element {
   const backupReminderState = getBackupReminderState(data);
   const showBackupReminder = (backupReminderVisible && backupReminderState.showReminder) || backupReminderMessage !== null;
   const hasBrowserPracticeData = data.sessions.length > 0 || data.reviews.length > 0;
+  const backupConflictSummaries =
+    backupReminderState.kind === "data-conflict" ? getBackupConflictDataSummaries(data.backupState) : null;
 
   return (
     <div className="app-shell">
@@ -462,7 +465,7 @@ export function App(): JSX.Element {
         </button>
       </nav>
 
-      <main>
+      <main className={showBackupReminder && !practiceRunning ? "has-backup-reminder" : undefined}>
         {showBackupReminder && !practiceRunning ? (
           <div className="backup-reminder" role="status">
             <div>
@@ -488,21 +491,41 @@ export function App(): JSX.Element {
                 </button>
               ) : null}
               {backupReminderState.kind === "data-conflict" ? (
-                <button className="primary" disabled={backupReminderBusy} onClick={() => void runBackupReminderAction("keep-backup-data")}>
-                  <Upload size={18} />
-                  {backupText.labels.keepBackupData}
+                <button
+                  className={`backup-decision-button${backupConflictSummaries?.highlighted === "backup" ? " primary" : ""}`}
+                  disabled={backupReminderBusy}
+                  onClick={() => void runBackupReminderAction("keep-backup-data")}
+                >
+                  <BackupConflictActionContent
+                    icon={<Upload size={18} />}
+                    label={backupText.labels.keepBackupData}
+                    summary={backupConflictSummaries!.backup}
+                  />
                 </button>
               ) : null}
               {backupReminderState.kind === "data-conflict" ? (
-                <button disabled={backupReminderBusy} onClick={() => void runBackupReminderAction("write-browser-data")}>
-                  <Download size={18} />
-                  {backupText.labels.keepBrowserData}
+                <button
+                  className={`backup-decision-button${backupConflictSummaries?.highlighted === "browser" ? " primary" : ""}`}
+                  disabled={backupReminderBusy}
+                  onClick={() => void runBackupReminderAction("write-browser-data")}
+                >
+                  <BackupConflictActionContent
+                    icon={<Download size={18} />}
+                    label={backupText.labels.keepBrowserData}
+                    summary={backupConflictSummaries!.browser}
+                  />
                 </button>
               ) : null}
               {backupReminderState.kind === "data-conflict" ? (
-                <button disabled={backupReminderBusy} onClick={() => void runBackupReminderAction("choose-directory")}>
-                  <FolderOpen size={18} />
-                  {backupText.labels.chooseEmptyDirectory}
+                <button
+                  className="backup-decision-button backup-directory-choice-button"
+                  disabled={backupReminderBusy}
+                  onClick={() => void runBackupReminderAction("choose-directory")}
+                >
+                  <span className="backup-action-heading">
+                    <FolderOpen size={18} />
+                    <span>{backupText.labels.chooseEmptyDirectory}</span>
+                  </span>
                 </button>
               ) : null}
               {backupReminderState.kind === "needs-directory" ? (

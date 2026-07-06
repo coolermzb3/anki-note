@@ -5,6 +5,9 @@ export const backupText = {
     chooseDirectory: "选择目录",
     chooseEmptyDirectory: "选择空目录",
     close: "关闭",
+    conflictCount: "条数",
+    conflictEnd: "截止",
+    conflictStart: "起始",
     importBackup: "导入备份",
     keepBackupData: "保留备份目录数据",
     keepBrowserData: "保留浏览器数据",
@@ -26,7 +29,8 @@ export const backupText = {
     browserOnlyNeedsDirectory: "练习记录只保存在当前浏览器，设置目录后可以导入和迁移数据。",
     directorySelected: "已选择备份目录",
     emptyBackupDirectory: "备份目录还没有可导入的数据，先练习一次后会自动备份。",
-    dataConflictBeforeBackup: "备份目录与当前浏览器数据不一致。请选择保留哪份数据，或改选空目录以保留两边。",
+    dataConflictBeforeBackup:
+      "备份目录与当前浏览器数据不一致。请选择保留哪份数据，或改选空目录以保留两边（备份目录数据保留，浏览器数据进入新的空目录）。",
     importSuccessDetail: "当前浏览器已使用备份目录中的数据。",
     browserDataWrittenToBackup: "已用当前浏览器数据写入备份目录。",
   },
@@ -47,16 +51,121 @@ function formatBackupTime(value?: string): string {
   return value ? new Date(value).toLocaleString() : "未知";
 }
 
-function formatBackupDataSummary(label: string, firstReviewAt?: string, lastReviewAt?: string, reviewCount?: number): string {
-  const range =
-    firstReviewAt || lastReviewAt
-      ? `${formatBackupTime(firstReviewAt)} - ${formatBackupTime(lastReviewAt)}`
-      : "无";
-  return `${label}：起止 ${range}，条数 ${reviewCount ?? 0}`;
+export interface BackupConflictDataSummary {
+  firstReviewAt: string;
+  lastReviewAt: string;
+  reviewCount: number;
+}
+
+export interface BackupConflictDataSummaries {
+  backup: BackupConflictDataSummary;
+  browser: BackupConflictDataSummary;
+  highlighted: "backup" | "browser" | null;
+}
+
+type BackupConflictSummarySource = Pick<
+  BackupState,
+  | "conflictBackupFirstReviewAt"
+  | "conflictBackupLastReviewAt"
+  | "conflictBackupReviewCount"
+  | "conflictBrowserFirstReviewAt"
+  | "conflictBrowserLastReviewAt"
+  | "conflictBrowserReviewCount"
+>;
+
+function formatBackupDataSummary(
+  firstReviewAt?: string,
+  lastReviewAt?: string,
+  reviewCount?: number,
+): BackupConflictDataSummary {
+  return {
+    firstReviewAt: formatBackupTime(firstReviewAt),
+    lastReviewAt: formatBackupTime(lastReviewAt),
+    reviewCount: reviewCount ?? 0,
+  };
+}
+
+function compareBackupTime(a?: string, b?: string): number {
+  if (!a && !b) {
+    return 0;
+  }
+  if (!a) {
+    return -1;
+  }
+  if (!b) {
+    return 1;
+  }
+  const parsedA = Date.parse(a);
+  const parsedB = Date.parse(b);
+  if (Number.isFinite(parsedA) && Number.isFinite(parsedB)) {
+    return parsedA - parsedB;
+  }
+  return a.localeCompare(b);
+}
+
+function backupDataCovers({
+  firstReviewAt,
+  lastReviewAt,
+  reviewCount,
+  otherFirstReviewAt,
+  otherLastReviewAt,
+  otherReviewCount,
+}: {
+  firstReviewAt?: string;
+  lastReviewAt?: string;
+  otherFirstReviewAt?: string;
+  otherLastReviewAt?: string;
+  otherReviewCount?: number;
+  reviewCount?: number;
+}): boolean {
+  if (!firstReviewAt || !lastReviewAt || !otherFirstReviewAt || !otherLastReviewAt) {
+    return false;
+  }
+  return (
+    compareBackupTime(firstReviewAt, otherFirstReviewAt) <= 0 &&
+    compareBackupTime(lastReviewAt, otherLastReviewAt) >= 0 &&
+    (reviewCount ?? 0) >= (otherReviewCount ?? 0)
+  );
+}
+
+export function getBackupConflictDataSummaries(
+  backupState: BackupConflictSummarySource,
+): BackupConflictDataSummaries {
+  const backup = formatBackupDataSummary(
+    backupState.conflictBackupFirstReviewAt,
+    backupState.conflictBackupLastReviewAt,
+    backupState.conflictBackupReviewCount,
+  );
+  const browser = formatBackupDataSummary(
+    backupState.conflictBrowserFirstReviewAt,
+    backupState.conflictBrowserLastReviewAt,
+    backupState.conflictBrowserReviewCount,
+  );
+  const backupCoversBrowser = backupDataCovers({
+    firstReviewAt: backupState.conflictBackupFirstReviewAt,
+    lastReviewAt: backupState.conflictBackupLastReviewAt,
+    otherFirstReviewAt: backupState.conflictBrowserFirstReviewAt,
+    otherLastReviewAt: backupState.conflictBrowserLastReviewAt,
+    otherReviewCount: backupState.conflictBrowserReviewCount,
+    reviewCount: backupState.conflictBackupReviewCount,
+  });
+  const browserCoversBackup = backupDataCovers({
+    firstReviewAt: backupState.conflictBrowserFirstReviewAt,
+    lastReviewAt: backupState.conflictBrowserLastReviewAt,
+    otherFirstReviewAt: backupState.conflictBackupFirstReviewAt,
+    otherLastReviewAt: backupState.conflictBackupLastReviewAt,
+    otherReviewCount: backupState.conflictBackupReviewCount,
+    reviewCount: backupState.conflictBrowserReviewCount,
+  });
+  return {
+    backup,
+    browser,
+    highlighted: backupCoversBrowser === browserCoversBackup ? null : backupCoversBrowser ? "backup" : "browser",
+  };
 }
 
 export function formatBackupConflictDetail(
-  backupState: Pick<
+  _backupState: Pick<
     BackupState,
     | "conflictBackupFirstReviewAt"
     | "conflictBackupLastReviewAt"
@@ -66,23 +175,5 @@ export function formatBackupConflictDetail(
     | "conflictBrowserReviewCount"
   >,
 ): string {
-  if (
-    backupState.conflictBrowserReviewCount === undefined &&
-    backupState.conflictBackupReviewCount === undefined
-  ) {
-    return backupText.messages.dataConflictBeforeBackup;
-  }
-  const browserSummary = formatBackupDataSummary(
-    "　浏览器数据",
-    backupState.conflictBrowserFirstReviewAt,
-    backupState.conflictBrowserLastReviewAt,
-    backupState.conflictBrowserReviewCount,
-  );
-  const backupSummary = formatBackupDataSummary(
-    "备份目录数据",
-    backupState.conflictBackupFirstReviewAt,
-    backupState.conflictBackupLastReviewAt,
-    backupState.conflictBackupReviewCount,
-  );
-  return `${backupText.messages.dataConflictBeforeBackup}\n${browserSummary}\n${backupSummary}`;
+  return backupText.messages.dataConflictBeforeBackup;
 }
