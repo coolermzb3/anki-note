@@ -27,18 +27,19 @@
 
 Windows 本机可直接双击 `start.bat`。
 
-也可以用 npm 启动：
+也可以用 pnpm 启动：
 
 ```bash
-npm install
-npm run dev
+corepack enable pnpm
+pnpm install
+pnpm run dev
 ```
 
 ## 常用命令
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 ```
 
 ## 部署
