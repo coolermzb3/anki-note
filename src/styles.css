@@ -240,6 +240,28 @@ main {
   gap: 8px;
 }
 
+.backup-toast {
+  position: fixed;
+  top: 18px;
+  left: calc(86px + (100vw - 86px) / 2);
+  z-index: 10;
+  width: min(420px, calc(100vw - 126px));
+  border: 1px solid rgba(54, 132, 99, 0.38);
+  border-radius: 8px;
+  background: #f1fbf6;
+  box-shadow: 0 14px 32px rgba(40, 61, 50, 0.16);
+  color: var(--text);
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  transform: translateX(-50%);
+}
+
+.backup-toast span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .practice-shell,
 .settings-shell {
   width: min(1120px, calc(100vw - 86px));
@@ -1042,6 +1064,12 @@ main {
 
   .backup-reminder-actions {
     justify-content: flex-start;
+  }
+
+  .backup-toast {
+    top: 76px;
+    left: 50%;
+    width: calc(100% - 32px);
   }
 
   .prompt-stage {

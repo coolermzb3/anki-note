@@ -6,6 +6,25 @@ function latestReview(reviews: ReviewRecord[]): ReviewRecord | undefined {
   return [...reviews].sort((a, b) => b.endedAt.localeCompare(a.endedAt))[0];
 }
 
+function latestTimestamp(values: Array<string | undefined>): string | undefined {
+  return values.filter((value): value is string => Boolean(value)).sort((a, b) => b.localeCompare(a))[0];
+}
+
+export function getBackupDataModifiedAt(
+  settings: AppSettings,
+  sessions: PracticeSessionRecord[],
+  reviews: ReviewRecord[],
+): string {
+  return (
+    latestTimestamp([
+      settings.firstReviewAt,
+      settings.createdAt,
+      ...sessions.flatMap((session) => [session.endedAt, session.startedAt]),
+      ...reviews.flatMap((review) => [review.endedAt, review.answeredAt, review.startedAt]),
+    ]) ?? settings.createdAt
+  );
+}
+
 export function buildBackupSnapshot(
   settings: AppSettings,
   sessions: PracticeSessionRecord[],
@@ -44,6 +63,7 @@ export function buildBackupSnapshot(
       createdAt: settings.createdAt,
       firstReviewAt: settings.firstReviewAt,
       settings,
+      dataModifiedAt: getBackupDataModifiedAt(settings, sessions, reviews),
       lastBackupAt: backupAt,
       lastReviewId: latestReview(reviews)?.id,
       dates: [...dates].sort((a, b) => a.localeCompare(b)),

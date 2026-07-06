@@ -1,96 +1,24 @@
-export type BackupSyncBlockReason = "empty-browser" | "dataset-mismatch" | "unseen-backup" | "backup-updated";
+export type BackupDataStatus = "needs-directory" | "ready" | "browser-only" | "backup-only" | "diverged";
 
-export type BackupSyncState =
-  | {
-      kind: "unsupported";
-      canWriteBackup: false;
-      showReminder: false;
-    }
-  | {
-      kind: "needs-directory";
-      canWriteBackup: false;
-      showReminder: boolean;
-    }
-  | {
-      kind: "ready";
-      canWriteBackup: true;
-      showReminder: false;
-    }
-  | {
-      kind: "sync-before-backup";
-      canWriteBackup: false;
-      showReminder: true;
-      confirmBeforeSync: boolean;
-      reason: BackupSyncBlockReason;
-    };
-
-export interface BackupSyncStateInput {
-  supportsFileBackups: boolean;
+export interface BackupDataStatusInput {
   hasDirectoryHandle: boolean;
-  reminderSuppressedToday: boolean;
-  hasBrowserPracticeData: boolean;
+  hasBrowserData: boolean;
   hasBackupManifest: boolean;
-  backupMatchesBrowserDataSet: boolean;
-  hasLastSeenBackupVersion: boolean;
-  backupVersionMatchesLastSeen: boolean;
+  dataConsistent: boolean;
 }
 
-export function deriveBackupSyncState(input: BackupSyncStateInput): BackupSyncState {
-  if (!input.supportsFileBackups) {
-    return { kind: "unsupported", canWriteBackup: false, showReminder: false };
-  }
-
+export function deriveBackupDataStatus(input: BackupDataStatusInput): BackupDataStatus {
   if (!input.hasDirectoryHandle) {
-    return {
-      kind: "needs-directory",
-      canWriteBackup: false,
-      showReminder: !input.reminderSuppressedToday,
-    };
+    return "needs-directory";
   }
 
   if (!input.hasBackupManifest) {
-    return { kind: "ready", canWriteBackup: true, showReminder: false };
+    return input.hasBrowserData ? "browser-only" : "ready";
   }
 
-  if (!input.hasBrowserPracticeData) {
-    return {
-      kind: "sync-before-backup",
-      canWriteBackup: false,
-      showReminder: true,
-      confirmBeforeSync: false,
-      reason: "empty-browser",
-    };
+  if (!input.hasBrowserData) {
+    return "backup-only";
   }
 
-  if (!input.backupMatchesBrowserDataSet) {
-    return {
-      kind: "sync-before-backup",
-      canWriteBackup: false,
-      showReminder: true,
-      confirmBeforeSync: true,
-      reason: "dataset-mismatch",
-    };
-  }
-
-  if (!input.hasLastSeenBackupVersion) {
-    return {
-      kind: "sync-before-backup",
-      canWriteBackup: false,
-      showReminder: true,
-      confirmBeforeSync: true,
-      reason: "unseen-backup",
-    };
-  }
-
-  if (!input.backupVersionMatchesLastSeen) {
-    return {
-      kind: "sync-before-backup",
-      canWriteBackup: false,
-      showReminder: true,
-      confirmBeforeSync: true,
-      reason: "backup-updated",
-    };
-  }
-
-  return { kind: "ready", canWriteBackup: true, showReminder: false };
+  return input.dataConsistent ? "ready" : "diverged";
 }

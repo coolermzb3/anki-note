@@ -108,8 +108,18 @@ export interface BackupState {
   schemaVersion: 1;
   directoryHandle?: FileSystemDirectoryHandle;
   directoryName?: string;
+  dataConflictBeforeBackup?: boolean;
   syncRequiredBeforeBackup?: boolean;
+  conflictBrowserModifiedAt?: string;
+  conflictBackupModifiedAt?: string;
+  conflictBrowserFirstReviewAt?: string;
+  conflictBrowserLastReviewAt?: string;
+  conflictBrowserReviewCount?: number;
+  conflictBackupFirstReviewAt?: string;
+  conflictBackupLastReviewAt?: string;
+  conflictBackupReviewCount?: number;
   lastSeenBackupVersion?: string;
+  backupDataModifiedAt?: string;
   lastBackupAt?: string;
   lastBackupReviewId?: string;
   lastError?: string;
@@ -122,6 +132,7 @@ export interface BackupManifest {
   createdAt: string;
   firstReviewAt?: string;
   settings?: AppSettings;
+  dataModifiedAt?: string;
   lastBackupAt: string;
   lastReviewId?: string;
   dates: string[];

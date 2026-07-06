@@ -2,7 +2,7 @@ import { BarChart3, Pause, Play, RotateCcw, SlidersHorizontal, Square, Volume2 }
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playPianoNote, playTargetNote, unlockAudio } from "../audio/piano";
 import { db, deletePracticeSessionWithReviews, resolveQueueStrategy, saveReview } from "../data/db";
-import { writeBackupNow } from "../data/backup";
+import { writeBackupIfSafe, writeBackupNow } from "../data/backup";
 import { createUuid } from "../domain/id";
 import {
   ANSWER_BUTTONS,
@@ -41,12 +41,18 @@ interface PracticeViewProps {
   onSettingsSaved: (settings: AppSettings) => void;
   onDataChanged: () => Promise<void>;
   onOpenStats: () => void;
-  onBeforePracticeStart: () => Promise<boolean>;
+  onBeforePracticeStart: () => Promise<PracticeStartPreflightResult>;
   onPracticeFinished: () => void;
   onRunningChange: (running: boolean) => void;
 }
 
 export type PracticeNavigationExitTarget = "practice" | "stats" | "settings";
+
+export interface PracticeStartPreflightResult {
+  proceed: boolean;
+  reviews?: ReviewRecord[];
+  settings?: AppSettings;
+}
 
 export interface PracticeNavigationExitRequest {
   id: number;
@@ -188,20 +194,24 @@ export function PracticeView({
     return () => onRunningChange(false);
   }, [onRunningChange, phase]);
 
+  const applySettingsSnapshot = useCallback((nextSettings: AppSettings): void => {
+    setMode(nextSettings.defaultMode);
+    setPromptDisplayMode(nextSettings.promptDisplayMode ?? "staff-page");
+    setPromptNoteDuration(nextSettings.promptNoteDuration ?? "quarter");
+    setEnabledGroupIds(nextSettings.enabledGroupIds);
+    setFixedCount(nextSettings.fixedCount);
+    setFixedDurationSeconds(nextSettings.fixedDurationSeconds);
+    setAutoPlayTarget(nextSettings.autoPlayTarget);
+    setIncludeLedgerVariants(nextSettings.includeLedgerVariants ?? true);
+    setQueueStrategy(resolveQueueStrategy(nextSettings));
+    setDrillNoteNames(nextSettings.drillNoteNames ?? ["C"]);
+  }, []);
+
   useEffect(() => {
     if (phase === "setup") {
-      setMode(settings.defaultMode);
-      setPromptDisplayMode(settings.promptDisplayMode ?? "staff-page");
-      setPromptNoteDuration(settings.promptNoteDuration ?? "quarter");
-      setEnabledGroupIds(settings.enabledGroupIds);
-      setFixedCount(settings.fixedCount);
-      setFixedDurationSeconds(settings.fixedDurationSeconds);
-      setAutoPlayTarget(settings.autoPlayTarget);
-      setIncludeLedgerVariants(settings.includeLedgerVariants ?? true);
-      setQueueStrategy(resolveQueueStrategy(settings));
-      setDrillNoteNames(settings.drillNoteNames ?? ["C"]);
+      applySettingsSnapshot(settings);
     }
-  }, [phase, settings]);
+  }, [applySettingsSnapshot, phase, settings]);
 
   const enabledNotes = useMemo(
     () => getNotesForGroups(enabledGroupIds, includeLedgerVariants),
@@ -370,7 +380,7 @@ export function PracticeView({
       }
       lastBackupCompletedRef.current = nextCompletedCount;
       lastBackupAtRef.current = now;
-      await writeBackupNow().catch(() => undefined);
+      await writeBackupIfSafe();
     },
     [mode],
   );
@@ -650,21 +660,34 @@ export function PracticeView({
       return;
     }
     void unlockAudio().catch(() => undefined);
-    if (!(await onBeforePracticeStart())) {
+    const preflightResult = await onBeforePracticeStart();
+    if (!preflightResult.proceed) {
       return;
     }
-    const nextSettings = await persistConfig();
+    if (preflightResult.settings) {
+      applySettingsSnapshot(preflightResult.settings);
+    }
+    const nextSettings = preflightResult.settings ?? (await persistConfig());
+    const nextMode = nextSettings.defaultMode;
+    const nextQueueStrategy = resolveQueueStrategy(nextSettings);
+    const nextSchedulerReviews = preflightResult.reviews ? filterLongTermReviews(preflightResult.reviews) : schedulerReviews;
+    const nextEnabledNotes = getNotesForGroups(nextSettings.enabledGroupIds, nextSettings.includeLedgerVariants);
+    const nextQueueNotes =
+      nextQueueStrategy === "note-drill" ? getDrillNotes(nextEnabledNotes, nextSettings.drillNoteNames) : nextEnabledNotes;
+    if (nextQueueNotes.length === 0) {
+      return;
+    }
     const startedAt = new Date().toISOString();
     const nextSession: PracticeSessionRecord = {
       id: newSessionId(),
       schemaVersion: 1,
-      mode,
-      enabledGroupIds,
-      fixedCount: mode === "fixed-count" ? fixedCount : undefined,
-      fixedDurationSeconds: mode === "fixed-duration" ? fixedDurationSeconds : undefined,
-      queueStrategy,
-      drillNoteNames,
-      focusedTraining: queueStrategy === "focused",
+      mode: nextMode,
+      enabledGroupIds: nextSettings.enabledGroupIds,
+      fixedCount: nextMode === "fixed-count" ? nextSettings.fixedCount : undefined,
+      fixedDurationSeconds: nextMode === "fixed-duration" ? nextSettings.fixedDurationSeconds : undefined,
+      queueStrategy: nextQueueStrategy,
+      drillNoteNames: nextSettings.drillNoteNames,
+      focusedTraining: nextQueueStrategy === "focused",
       startedAt,
       completedCount: 0,
       interruptedCount: 0,
@@ -688,40 +711,32 @@ export function PracticeView({
     setSummary(null);
     setIsPaused(false);
     setPhase("running");
-    const nextEnabledNotes = getNotesForGroups(nextSettings.enabledGroupIds, nextSettings.includeLedgerVariants);
     if (nextSettings.promptDisplayMode === "staff-page") {
       startStaffPage({
         sourceNotes: nextEnabledNotes,
-        sourceReviews: schedulerReviews,
-        sourceQueueStrategy: nextSettings.queueStrategy,
+        sourceReviews: nextSchedulerReviews,
+        sourceQueueStrategy: nextQueueStrategy,
         sourceDrillNoteNames: nextSettings.drillNoteNames,
         nextCompletedCount: 0,
       });
     } else {
       const firstNote =
-        nextSettings.queueStrategy === "melody"
-          ? drawMelodyNote(nextEnabledNotes, mode === "fixed-count" ? fixedCount : undefined)
+        nextQueueStrategy === "melody"
+          ? drawMelodyNote(nextEnabledNotes, nextMode === "fixed-count" ? nextSettings.fixedCount : undefined)
           : selectNextNote({
               notes: nextEnabledNotes,
-              reviews: schedulerReviews,
-              queueStrategy: nextSettings.queueStrategy,
+              reviews: nextSchedulerReviews,
+              queueStrategy: nextQueueStrategy,
               drillNoteNames: nextSettings.drillNoteNames,
             });
       startPrompt(firstNote);
     }
   }, [
-    enabledGroupIds,
-    fixedCount,
-    fixedDurationSeconds,
-    drillNoteNames,
+    applySettingsSnapshot,
     drawMelodyNote,
-    includeLedgerVariants,
-    mode,
     onBeforePracticeStart,
     persistConfig,
-    promptDisplayMode,
     queueNotes.length,
-    queueStrategy,
     schedulerReviews,
     startPrompt,
     startStaffPage,

@@ -1,14 +1,25 @@
-import { BarChart3, BellOff, Dumbbell, FolderOpen, Settings, Upload, X } from "lucide-react";
+import { BarChart3, BellOff, Download, Dumbbell, FolderOpen, Settings, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { preloadPianoSamples } from "./audio/piano";
-import { chooseBackupDirectory, preflightBackupDirectory, restoreBackupFromDirectory, supportsFileBackups } from "./data/backup";
+import {
+  type BackupBeforePracticeResult,
+  chooseBackupDirectory,
+  restoreBackupFromDirectory,
+  supportsFileBackups,
+  syncBackupBeforePractice,
+  writeBrowserDataToBackupDirectory,
+} from "./data/backup";
 import { getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
 import { IndexedDbMaintenancePanel } from "./debug/IndexedDbMaintenancePanel";
 import { installIndexedDbMaintenanceDebug } from "./debug/indexedDbMaintenance";
-import { backupText } from "./domain/backupText";
-import { deriveBackupSyncState, type BackupSyncState } from "./domain/backupSync";
+import { backupText, formatBackupConflictDetail } from "./domain/backupText";
 import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord } from "./domain/types";
-import { PracticeView, type PracticeNavigationExitRequest, type PracticeNavigationExitTarget } from "./components/PracticeView";
+import {
+  PracticeView,
+  type PracticeNavigationExitRequest,
+  type PracticeNavigationExitTarget,
+  type PracticeStartPreflightResult,
+} from "./components/PracticeView";
 import { SettingsView } from "./components/SettingsView";
 import { StatsView } from "./components/StatsView";
 
@@ -23,7 +34,18 @@ interface AppData {
   backupState: BackupState;
 }
 
+interface PracticeBackupCheckResult {
+  latestData?: AppData;
+  proceed: boolean;
+  result: BackupBeforePracticeResult;
+}
+
 type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
+type BackupReminderState =
+  | { kind: "none"; showReminder: false }
+  | { kind: "needs-directory"; showReminder: boolean }
+  | { kind: "data-conflict"; showReminder: true };
+type BackupReminderAction = "choose-directory" | "keep-backup-data" | "write-browser-data";
 
 function todayKey(): string {
   const now = new Date();
@@ -40,29 +62,31 @@ function isBackupReminderSuppressedToday(): boolean {
   }
 }
 
-function syncRequiredBeforeBackup(backupState: BackupState): boolean {
+function backupSyncRequired(backupState: BackupState): boolean {
   const stored = backupState as StoredBackupState;
-  return Boolean(backupState.syncRequiredBeforeBackup ?? stored.restoreRequiredBeforeBackup);
+  return Boolean(backupState.dataConflictBeforeBackup ?? backupState.syncRequiredBeforeBackup ?? stored.restoreRequiredBeforeBackup);
 }
 
 function isUserAbort(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-function getBackupSyncState(data: AppData): BackupSyncState {
-  const backupState = data.backupState;
-  const syncRequired = syncRequiredBeforeBackup(backupState);
-  const hasKnownBackupVersion = Boolean(backupState.lastSeenBackupVersion);
-  return deriveBackupSyncState({
-    supportsFileBackups: supportsFileBackups(),
-    hasDirectoryHandle: Boolean(backupState.directoryHandle),
-    reminderSuppressedToday: isBackupReminderSuppressedToday(),
-    hasBrowserPracticeData: data.sessions.length > 0 || data.reviews.length > 0,
-    hasBackupManifest: syncRequired || hasKnownBackupVersion,
-    backupMatchesBrowserDataSet: !syncRequired,
-    hasLastSeenBackupVersion: hasKnownBackupVersion && !syncRequired,
-    backupVersionMatchesLastSeen: !syncRequired,
-  });
+function getBackupReminderState(data: AppData): BackupReminderState {
+  if (!supportsFileBackups()) {
+    return { kind: "none", showReminder: false };
+  }
+  if (backupSyncRequired(data.backupState)) {
+    return { kind: "data-conflict", showReminder: true };
+  }
+  if (!data.backupState.directoryHandle) {
+    return { kind: "needs-directory", showReminder: !isBackupReminderSuppressedToday() };
+  }
+  return { kind: "none", showReminder: false };
+}
+
+async function loadFreshAppData(): Promise<AppData> {
+  const [{ settings, sessions, reviews }, backupState] = await Promise.all([loadAllData(), getBackupState()]);
+  return { settings, sessions, reviews, backupState };
 }
 
 export function App(): JSX.Element {
@@ -71,21 +95,27 @@ export function App(): JSX.Element {
   const [practiceRunning, setPracticeRunning] = useState(false);
   const [backupReminderBusy, setBackupReminderBusy] = useState(false);
   const [backupReminderMessage, setBackupReminderMessage] = useState<{ detail: string; title: string } | null>(null);
+  const [backupToastMessage, setBackupToastMessage] = useState<{ detail: string; title: string } | null>(null);
   const [backupReminderVisible, setBackupReminderVisible] = useState(false);
   const [practiceExitRequest, setPracticeExitRequest] = useState<PracticeNavigationExitRequest | null>(null);
   const practiceExitRequestIdRef = useRef(0);
-  const backupReminderMessageTimerRef = useRef<number | null>(null);
+  const backupToastMessageTimerRef = useRef<number | null>(null);
+  const practiceBackupCheckInFlightRef = useRef<Promise<PracticeBackupCheckResult> | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const [{ settings, sessions, reviews }, backupState] = await Promise.all([loadAllData(), getBackupState()]);
-    setData({ settings, sessions, reviews, backupState });
+    setData(await loadFreshAppData());
   }, []);
+
+  const refreshBackupState = useCallback(async (): Promise<void> => {
+    const backupState = await getBackupState();
+    setData((current) => (current ? { ...current, backupState } : current));
+  }, []);
+  const hasBackupDirectory = Boolean(data?.backupState.directoryHandle);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       await recoverAbandonedSessions();
-      await preflightBackupDirectory().catch(() => undefined);
       if (!cancelled) {
         await refresh();
       }
@@ -104,13 +134,14 @@ export function App(): JSX.Element {
       return;
     }
     if (!backupReminderMessage) {
-      setBackupReminderVisible(getBackupSyncState(data).showReminder);
+      setBackupReminderVisible(getBackupReminderState(data).showReminder);
     }
   }, [
     backupReminderMessage,
     data !== null,
-    data?.backupState.directoryHandle,
+    hasBackupDirectory,
     data?.backupState.lastSeenBackupVersion,
+    data?.backupState.dataConflictBeforeBackup,
     data?.backupState.syncRequiredBeforeBackup,
     data?.sessions.length,
     data?.reviews.length,
@@ -118,8 +149,8 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     return () => {
-      if (backupReminderMessageTimerRef.current !== null) {
-        window.clearTimeout(backupReminderMessageTimerRef.current);
+      if (backupToastMessageTimerRef.current !== null) {
+        window.clearTimeout(backupToastMessageTimerRef.current);
       }
     };
   }, []);
@@ -154,18 +185,21 @@ export function App(): JSX.Element {
   }, []);
 
   const showBackupReminderMessage = useCallback((title: string, detail: string, autoHide: boolean): void => {
-    if (backupReminderMessageTimerRef.current !== null) {
-      window.clearTimeout(backupReminderMessageTimerRef.current);
+    if (autoHide) {
+      if (backupToastMessageTimerRef.current !== null) {
+        window.clearTimeout(backupToastMessageTimerRef.current);
+      }
+      setBackupReminderMessage(null);
+      setBackupReminderVisible(false);
+      setBackupToastMessage({ detail, title });
+      backupToastMessageTimerRef.current = window.setTimeout(() => {
+        setBackupToastMessage(null);
+        backupToastMessageTimerRef.current = null;
+      }, 2500);
+      return;
     }
     setBackupReminderMessage({ detail, title });
     setBackupReminderVisible(true);
-    if (autoHide) {
-      backupReminderMessageTimerRef.current = window.setTimeout(() => {
-        setBackupReminderMessage(null);
-        setBackupReminderVisible(false);
-        backupReminderMessageTimerRef.current = null;
-      }, 2500);
-    }
   }, []);
 
   const suppressBackupReminderToday = useCallback((): void => {
@@ -178,65 +212,155 @@ export function App(): JSX.Element {
   }, []);
 
   const showBackupReminderAfterPractice = useCallback((): void => {
-    if (data && getBackupSyncState(data).showReminder) {
+    if (data && getBackupReminderState(data).showReminder) {
       setBackupReminderVisible(true);
     }
   }, [data]);
 
-  const preflightBeforePracticeStart = useCallback(async (): Promise<boolean> => {
-    try {
-      const result = await preflightBackupDirectory({ requestPermission: true });
-      if (result !== "skipped") {
-        await refresh();
+  const runPracticeBackupCheck = useCallback(
+    async ({ requestPermission }: { requestPermission: boolean }): Promise<PracticeBackupCheckResult> => {
+      while (practiceBackupCheckInFlightRef.current) {
+        const inFlightResult = await practiceBackupCheckInFlightRef.current;
+        if (!requestPermission || inFlightResult.result !== "skipped") {
+          return inFlightResult;
+        }
       }
-      if (result === "imported") {
-        showBackupReminderMessage(backupText.titles.importSuccess, backupText.messages.importSuccessDetail, true);
-        return false;
-      }
-      if (result === "import-required") {
-        setBackupReminderVisible(true);
-        return window.confirm(backupText.messages.importRequiredBeforeBackup);
-      }
-    } catch (error) {
-      showBackupReminderMessage(
-        error instanceof Error ? error.message : String(error),
-        backupText.messages.backupPermissionOrDirectoryHint,
-        false,
-      );
-    }
-    return true;
-  }, [refresh, showBackupReminderMessage]);
 
-  const runBackupReminderAction = useCallback(async (): Promise<void> => {
+      const checkPromise = (async (): Promise<PracticeBackupCheckResult> => {
+        try {
+          const result = await syncBackupBeforePractice({ requestPermission });
+          if (result === "needs-directory") {
+            setBackupReminderVisible(true);
+            return { proceed: true, result };
+          }
+          if (result === "data-conflict") {
+            await refreshBackupState();
+            setBackupReminderVisible(true);
+            return { proceed: false, result };
+          }
+          if (result === "synced-up") {
+            const latestData = await loadFreshAppData();
+            setData(latestData);
+            showBackupReminderMessage(backupText.titles.importSuccess, backupText.messages.backupDirectoryAutoImported, true);
+            return { latestData, proceed: true, result };
+          }
+          if (result === "synced-down") {
+            await refreshBackupState();
+            return { proceed: true, result };
+          }
+          if (result === "ready") {
+            await refreshBackupState();
+            return { proceed: true, result };
+          }
+          return { proceed: true, result };
+        } catch (error) {
+          if (!requestPermission || isUserAbort(error)) {
+            return { proceed: true, result: "skipped" };
+          }
+          showBackupReminderMessage(
+            error instanceof Error ? error.message : String(error),
+            backupText.messages.backupPermissionOrDirectoryHint,
+            false,
+          );
+          return { proceed: false, result: "skipped" };
+        }
+      })();
+
+      practiceBackupCheckInFlightRef.current = checkPromise;
+      try {
+        return await checkPromise;
+      } finally {
+        if (practiceBackupCheckInFlightRef.current === checkPromise) {
+          practiceBackupCheckInFlightRef.current = null;
+        }
+      }
+    },
+    [refreshBackupState, showBackupReminderMessage],
+  );
+
+  const preflightBeforePracticeStart = useCallback(async (): Promise<PracticeStartPreflightResult> => {
+    const checkResult = await runPracticeBackupCheck({ requestPermission: true });
+    if (!checkResult.proceed) {
+      return { proceed: false };
+    }
+    if (checkResult.result !== "synced-up") {
+      return { proceed: true };
+    }
+    const latestData = checkResult.latestData ?? (await loadFreshAppData());
+    setData(latestData);
+    return { proceed: true, reviews: latestData.reviews, settings: latestData.settings };
+  }, [runPracticeBackupCheck]);
+
+  useEffect(() => {
+    if (
+      !data ||
+      view !== "practice" ||
+      practiceRunning ||
+      !hasBackupDirectory
+    ) {
+      return;
+    }
+    if (backupSyncRequired(data.backupState)) {
+      setBackupReminderVisible(true);
+      return;
+    }
+    void runPracticeBackupCheck({ requestPermission: false });
+  }, [
+    data !== null,
+    hasBackupDirectory,
+    data?.backupState.lastSeenBackupVersion,
+    data?.backupState.dataConflictBeforeBackup,
+    data?.backupState.syncRequiredBeforeBackup,
+    practiceRunning,
+    runPracticeBackupCheck,
+    view,
+  ]);
+
+  const runBackupReminderAction = useCallback(async (action: BackupReminderAction): Promise<void> => {
     if (!data || backupReminderBusy) {
       return;
     }
 
-    const syncState = getBackupSyncState(data);
+    const reminderState = getBackupReminderState(data);
     setBackupReminderBusy(true);
     setBackupReminderMessage(null);
     try {
-      if (syncState.kind === "needs-directory") {
-        await chooseBackupDirectory();
+      if (action === "choose-directory") {
+        const result = await chooseBackupDirectory();
+        const latestBackupState = await getBackupState();
         await refresh();
+        if (result === "diverged") {
+          showBackupReminderMessage(backupText.titles.dataConflict, formatBackupConflictDetail(latestBackupState), false);
+          return;
+        }
+        if (result === "synced-up") {
+          showBackupReminderMessage(backupText.titles.importSuccess, backupText.messages.importSuccessDetail, true);
+        }
         return;
       }
 
-      if (syncState.kind === "sync-before-backup") {
+      if (reminderState.kind === "data-conflict" && action === "keep-backup-data") {
         if (!data.backupState.directoryHandle) {
-          return;
-        }
-        if (syncState.confirmBeforeSync && !window.confirm(backupText.messages.browserDataWillBeReplaced)) {
           return;
         }
         await restoreBackupFromDirectory(data.backupState.directoryHandle);
         await refresh();
         showBackupReminderMessage(backupText.titles.importSuccess, backupText.messages.importSuccessDetail, true);
+        return;
+      }
+
+      if (reminderState.kind === "data-conflict" && action === "write-browser-data") {
+        if (!window.confirm(backupText.messages.backupDirectoryWillBeReplaced)) {
+          return;
+        }
+        await writeBrowserDataToBackupDirectory();
+        await refresh();
+        showBackupReminderMessage(backupText.titles.backupWritten, backupText.messages.browserDataWrittenToBackup, true);
       }
     } catch (error) {
       if (isUserAbort(error)) {
         setBackupReminderMessage(null);
-        setBackupReminderVisible(syncState.showReminder);
+        setBackupReminderVisible(reminderState.showReminder);
         return;
       }
       showBackupReminderMessage(
@@ -280,12 +404,18 @@ export function App(): JSX.Element {
     return <div className="loading">加载中</div>;
   }
 
-  const backupSyncState = getBackupSyncState(data);
-  const showBackupReminder = (backupReminderVisible && backupSyncState.showReminder) || backupReminderMessage !== null;
+  const backupReminderState = getBackupReminderState(data);
+  const showBackupReminder = (backupReminderVisible && backupReminderState.showReminder) || backupReminderMessage !== null;
   const hasBrowserPracticeData = data.sessions.length > 0 || data.reviews.length > 0;
 
   return (
     <div className="app-shell">
+      {backupToastMessage ? (
+        <div className="backup-toast" role="status" aria-live="polite">
+          <strong>{backupToastMessage.title}</strong>
+          <span>{backupToastMessage.detail}</span>
+        </div>
+      ) : null}
       <nav className="app-nav" aria-label="主导航">
         <button className={view === "practice" ? "active" : ""} onClick={() => selectView("practice")}>
           <Dumbbell size={18} />
@@ -307,28 +437,44 @@ export function App(): JSX.Element {
             <div>
               <strong>
                 {backupReminderMessage?.title ??
-                  (backupSyncState.kind === "sync-before-backup"
-                    ? backupText.titles.importRequired
+                  (backupReminderState.kind === "data-conflict"
+                    ? backupText.titles.dataConflict
                     : backupText.titles.chooseDirectorySuggestion)}
               </strong>
               <span>
                 {backupReminderMessage
                   ? backupReminderMessage.detail
-                  : backupSyncState.kind === "sync-before-backup"
-                    ? backupText.messages.importRequiredBeforeBackup
+                  : backupReminderState.kind === "data-conflict"
+                    ? formatBackupConflictDetail(data.backupState)
                     : backupText.messages.browserOnlyNeedsDirectory}
               </span>
             </div>
             <div className="backup-reminder-actions">
-              {backupSyncState.kind === "needs-directory" || backupSyncState.kind === "sync-before-backup" ? (
-                <button className="primary" disabled={backupReminderBusy} onClick={() => void runBackupReminderAction()}>
-                  {backupSyncState.kind === "sync-before-backup" ? <Upload size={18} /> : <FolderOpen size={18} />}
-                  {backupSyncState.kind === "sync-before-backup"
-                    ? backupText.labels.importBackup
-                    : backupText.labels.chooseDirectory}
+              {backupReminderState.kind === "needs-directory" ? (
+                <button className="primary" disabled={backupReminderBusy} onClick={() => void runBackupReminderAction("choose-directory")}>
+                  <FolderOpen size={18} />
+                  {backupText.labels.chooseDirectory}
                 </button>
               ) : null}
-              {backupSyncState.kind === "needs-directory" ? (
+              {backupReminderState.kind === "data-conflict" ? (
+                <button className="primary" disabled={backupReminderBusy} onClick={() => void runBackupReminderAction("keep-backup-data")}>
+                  <Download size={18} />
+                  {backupText.labels.keepBackupData}
+                </button>
+              ) : null}
+              {backupReminderState.kind === "data-conflict" ? (
+                <button disabled={backupReminderBusy} onClick={() => void runBackupReminderAction("write-browser-data")}>
+                  <Upload size={18} />
+                  {backupText.labels.keepBrowserData}
+                </button>
+              ) : null}
+              {backupReminderState.kind === "data-conflict" ? (
+                <button disabled={backupReminderBusy} onClick={() => void runBackupReminderAction("choose-directory")}>
+                  <FolderOpen size={18} />
+                  {backupText.labels.chooseEmptyDirectory}
+                </button>
+              ) : null}
+              {backupReminderState.kind === "needs-directory" ? (
                 <button onClick={suppressBackupReminderToday}>
                   <BellOff size={18} />
                   {backupText.labels.suppressToday}

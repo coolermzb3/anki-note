@@ -1,8 +1,14 @@
-import { DatabaseBackup, FolderOpen, Upload } from "lucide-react";
+import { DatabaseBackup, Download, FolderOpen, Upload } from "lucide-react";
 import { useState } from "react";
-import { chooseBackupDirectory, restoreBackupFromDirectory, supportsFileBackups } from "../data/backup";
-import { db } from "../data/db";
-import { backupText } from "../domain/backupText";
+import {
+  chooseBackupDirectory,
+  restoreBackupFromDirectory,
+  supportsFileBackups,
+  writeBrowserDataToBackupDirectory,
+  type BackupDirectorySelectionResult,
+} from "../data/backup";
+import { db, getBackupState } from "../data/db";
+import { backupText, formatBackupConflictDetail } from "../domain/backupText";
 import type { AppSettings, BackupState } from "../domain/types";
 
 type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
@@ -36,7 +42,9 @@ export function SettingsView({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const storedBackupState = backupState as StoredBackupState;
-  const backupBlockedUntilSync = Boolean(backupState.syncRequiredBeforeBackup ?? storedBackupState.restoreRequiredBeforeBackup);
+  const backupBlockedUntilSync = Boolean(
+    backupState.dataConflictBeforeBackup ?? backupState.syncRequiredBeforeBackup ?? storedBackupState.restoreRequiredBeforeBackup,
+  );
   const hasBackupSnapshot = Boolean(backupBlockedUntilSync || backupState.lastSeenBackupVersion);
 
   async function saveSettings(next: AppSettings): Promise<void> {
@@ -44,12 +52,22 @@ export function SettingsView({
     onSettingsSaved(next);
   }
 
-  async function runBusy(action: () => Promise<void>, doneMessage: string): Promise<void> {
+  function describeDirectorySelection(result: BackupDirectorySelectionResult, selectedBackupState: BackupState): string {
+    if (result === "diverged") {
+      return formatBackupConflictDetail(selectedBackupState);
+    }
+    if (result === "synced-up") {
+      return backupText.messages.importSuccessDetail;
+    }
+    return backupText.messages.directorySelected;
+  }
+
+  async function runBusy(action: () => Promise<string | void>, doneMessage: string): Promise<void> {
     setBusy(true);
     setMessage(null);
     try {
-      await action();
-      setMessage(doneMessage);
+      const resultMessage = await action();
+      setMessage(resultMessage ?? doneMessage);
       await onDataChanged();
     } catch (error) {
       if (isUserAbort(error)) {
@@ -118,8 +136,8 @@ export function SettingsView({
             </span>
           </div>
           <div>
-            <strong>最近备份</strong>
-            <span>{backupState.lastBackupAt ? new Date(backupState.lastBackupAt).toLocaleString() : "-"}</span>
+            <strong>数据更新</strong>
+            <span>{backupState.backupDataModifiedAt ? new Date(backupState.backupDataModifiedAt).toLocaleString() : "-"}</span>
           </div>
           <div>
             <strong>状态</strong>
@@ -129,7 +147,12 @@ export function SettingsView({
         <div className="action-row">
           <button
             disabled={!supportsFileBackups() || busy}
-            onClick={() => void runBusy(chooseBackupDirectory, backupText.messages.directorySelected)}
+            onClick={() =>
+              void runBusy(async () => {
+                const result = await chooseBackupDirectory();
+                return describeDirectorySelection(result, await getBackupState());
+              }, backupText.messages.directorySelected)
+            }
           >
             <FolderOpen size={18} />
             {backupText.labels.chooseDirectory}
@@ -145,12 +168,26 @@ export function SettingsView({
               }
             }}
           >
-            <Upload size={18} />
-            {backupText.labels.importBackup}
+            <Download size={18} />
+            {backupBlockedUntilSync ? backupText.labels.keepBackupData : backupText.labels.importBackup}
           </button>
+          {backupBlockedUntilSync ? (
+            <button
+              disabled={!backupState.directoryHandle || busy}
+              onClick={() => {
+                if (!window.confirm(backupText.messages.backupDirectoryWillBeReplaced)) {
+                  return;
+                }
+                void runBusy(writeBrowserDataToBackupDirectory, backupText.messages.browserDataWrittenToBackup);
+              }}
+            >
+              <Upload size={18} />
+              {backupText.labels.keepBrowserData}
+            </button>
+          ) : null}
         </div>
         {backupBlockedUntilSync ? (
-          <div className="status-line warning">{backupText.messages.importRequiredBeforeBackup}</div>
+          <div className="status-line warning">{formatBackupConflictDetail(backupState)}</div>
         ) : backupState.directoryHandle && !hasBackupSnapshot ? (
           <div className="status-line">{backupText.messages.emptyBackupDirectory}</div>
         ) : backupState.directoryHandle ? (
