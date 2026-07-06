@@ -1,4 +1,5 @@
 import { buildBackupSnapshot, getBackupManifestVersion } from "../domain/backupSnapshot";
+import { backupText } from "../domain/backupText";
 import { deriveBackupSyncState } from "../domain/backupSync";
 import { normalizePracticeGroupIds } from "../domain/notes";
 import type { AppSettings, BackupDayFile, BackupManifest, BackupSnapshot, BackupState, PracticeSessionRecord, ReviewRecord } from "../domain/types";
@@ -13,6 +14,8 @@ import {
 } from "./db";
 
 type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
+
+export type BackupPreflightResult = "import-required" | "imported" | "ready" | "skipped";
 
 function cleanBackupState(state: BackupState): BackupState {
   const { restoreRequiredBeforeBackup: _restoreRequiredBeforeBackup, ...currentState } = state as StoredBackupState;
@@ -66,6 +69,21 @@ async function ensureReadWritePermission(handle: FileSystemDirectoryHandle): Pro
   return (await handle.requestPermission(descriptor)) === "granted";
 }
 
+async function hasReadWritePermission(handle: FileSystemDirectoryHandle, requestPermission: boolean): Promise<boolean> {
+  if (!handle.queryPermission || !handle.requestPermission) {
+    return true;
+  }
+  const descriptor = { mode: "readwrite" as const };
+  const current = await handle.queryPermission(descriptor);
+  if (current === "granted") {
+    return true;
+  }
+  if (!requestPermission) {
+    return false;
+  }
+  return (await handle.requestPermission(descriptor)) === "granted";
+}
+
 async function writeJson(directory: FileSystemDirectoryHandle, filename: string, value: unknown): Promise<void> {
   const handle = await directory.getFileHandle(filename, { create: true });
   const writable = await handle.createWritable();
@@ -102,17 +120,98 @@ export function supportsFileBackups(): boolean {
   return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
 }
 
+export async function preflightBackupDirectory({
+  requestPermission = false,
+}: {
+  requestPermission?: boolean;
+} = {}): Promise<BackupPreflightResult> {
+  const state = await getBackupState();
+  if (!state.directoryHandle) {
+    return "skipped";
+  }
+  if (syncRequiredBeforeBackup(state)) {
+    return "import-required";
+  }
+  if (!(await hasReadWritePermission(state.directoryHandle, requestPermission))) {
+    return "skipped";
+  }
+
+  const [{ settings, sessions, reviews }, existingManifest] = await Promise.all([
+    loadAllData(),
+    readBackupManifestIfExists(state.directoryHandle),
+  ]);
+  if (!existingManifest) {
+    return "ready";
+  }
+
+  const hasBrowserPracticeData = sessions.length > 0 || reviews.length > 0;
+  if (!hasBrowserPracticeData) {
+    const snapshot = await readBackupSnapshot(state.directoryHandle);
+    await replaceAllData(snapshot.settings, snapshot.sessions, snapshot.reviews);
+    await db.backupStates.put({
+      ...cleanBackupState(state),
+      syncRequiredBeforeBackup: false,
+      lastSeenBackupVersion: getBackupManifestVersion(snapshot.manifest),
+      lastBackupAt: snapshot.manifest.lastBackupAt,
+      lastBackupReviewId: snapshot.manifest.lastReviewId,
+      lastError: undefined,
+    });
+    return "imported";
+  }
+
+  const backupSyncState = deriveBackupSyncState(
+    makeBackupSyncInput({
+      supportsFileBackups: true,
+      hasDirectoryHandle: true,
+      settings,
+      sessions,
+      reviews,
+      backupManifest: existingManifest,
+      lastSeenBackupVersion: state.lastSeenBackupVersion,
+    }),
+  );
+  if (backupSyncState.canWriteBackup) {
+    return "ready";
+  }
+
+  await db.backupStates.put({
+    ...cleanBackupState(state),
+    syncRequiredBeforeBackup: true,
+    lastSeenBackupVersion: undefined,
+    lastError: backupText.messages.backupDirectoryChanged,
+  });
+  return "import-required";
+}
+
 export async function chooseBackupDirectory(): Promise<void> {
   if (!window.showDirectoryPicker) {
-    throw new Error("当前浏览器不支持选择备份目录。");
+    throw new Error(backupText.errors.unsupportedDirectoryPicker);
   }
   const handle = await window.showDirectoryPicker({ id: "anki-note-backup", mode: "readwrite" });
   const granted = await ensureReadWritePermission(handle);
   if (!granted) {
-    throw new Error("未获得备份目录写入权限。");
+    throw new Error(backupText.errors.writePermissionDenied);
   }
   const state = await getBackupState();
   const [{ settings, sessions, reviews }, existingManifest] = await Promise.all([loadAllData(), readBackupManifestIfExists(handle)]);
+  const hasBrowserPracticeData = sessions.length > 0 || reviews.length > 0;
+  if (existingManifest && !hasBrowserPracticeData) {
+    const snapshot = await readBackupSnapshot(handle);
+    await replaceAllData(snapshot.settings, snapshot.sessions, snapshot.reviews);
+    await db.backupStates.put({
+      ...cleanBackupState(state),
+      id: "default",
+      schemaVersion: 1,
+      directoryHandle: handle,
+      directoryName: handle.name,
+      syncRequiredBeforeBackup: false,
+      lastSeenBackupVersion: getBackupManifestVersion(snapshot.manifest),
+      lastBackupAt: snapshot.manifest.lastBackupAt,
+      lastBackupReviewId: snapshot.manifest.lastReviewId,
+      lastError: undefined,
+    });
+    return;
+  }
   const backupVersion = existingManifest ? getBackupManifestVersion(existingManifest) : undefined;
   const backupSyncState = deriveBackupSyncState(
     makeBackupSyncInput({
@@ -127,7 +226,7 @@ export async function chooseBackupDirectory(): Promise<void> {
   );
   const requiresSync = backupSyncState.kind === "sync-before-backup";
   const initialBackup =
-    !existingManifest && (sessions.length > 0 || reviews.length > 0)
+    !existingManifest && hasBrowserPracticeData
       ? buildBackupSnapshot(settings, sessions, reviews, new Date().toISOString())
       : null;
   if (initialBackup) {
@@ -154,14 +253,14 @@ export async function writeBackupNow(): Promise<void> {
     return;
   }
   if (syncRequiredBeforeBackup(state)) {
-    throw new Error("请先导入备份；导入前不会向这个目录写入新备份。");
+    throw new Error(backupText.messages.importRequiredBeforeBackup);
   }
 
   const now = new Date().toISOString();
   try {
     const granted = await ensureReadWritePermission(state.directoryHandle);
     if (!granted) {
-      throw new Error("备份目录权限已失效。");
+      throw new Error(backupText.errors.permissionExpired);
     }
     const { settings, sessions, reviews } = await loadAllData();
     const existingManifest = await readBackupManifestIfExists(state.directoryHandle);
@@ -181,9 +280,9 @@ export async function writeBackupNow(): Promise<void> {
         ...cleanBackupState(state),
         syncRequiredBeforeBackup: true,
         lastSeenBackupVersion: undefined,
-        lastError: "备份目录已有更新，请先导入备份。",
+        lastError: backupText.messages.backupDirectoryChanged,
       });
-      throw new Error("备份目录已有更新，请先导入备份。");
+      throw new Error(backupText.messages.backupDirectoryChanged);
     }
     const snapshot = buildBackupSnapshot(settings, sessions, reviews, now);
     await writeBackupSnapshot(state.directoryHandle, snapshot);
@@ -245,11 +344,11 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
 export async function restoreBackupFromDirectory(directory: FileSystemDirectoryHandle): Promise<void> {
   const granted = await ensureReadWritePermission(directory);
   if (!granted) {
-    throw new Error("未获得备份目录读取权限。");
+    throw new Error(backupText.errors.readPermissionDenied);
   }
   const manifest = await readBackupManifestIfExists(directory);
   if (!manifest) {
-    throw new Error("备份目录还没有可导入的数据，先练习一次后会自动备份。");
+    throw new Error(backupText.messages.emptyBackupDirectory);
   }
   const snapshot = await readBackupSnapshot(directory);
   await replaceAllData(snapshot.settings, snapshot.sessions, snapshot.reviews);

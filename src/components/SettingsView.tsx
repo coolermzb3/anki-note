@@ -2,6 +2,7 @@ import { DatabaseBackup, FolderOpen, Upload } from "lucide-react";
 import { useState } from "react";
 import { chooseBackupDirectory, restoreBackupFromDirectory, supportsFileBackups } from "../data/backup";
 import { db } from "../data/db";
+import { backupText } from "../domain/backupText";
 import type { AppSettings, BackupState } from "../domain/types";
 
 type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
@@ -112,7 +113,9 @@ export function SettingsView({
         <div className="backup-status">
           <div>
             <strong>备份目录</strong>
-            <span title={backupState.directoryName}>{backupState.directoryName ? truncateStart(backupState.directoryName) : "未选择"}</span>
+            <span title={backupState.directoryName}>
+              {backupState.directoryName ? truncateStart(backupState.directoryName) : backupText.status.unselected}
+            </span>
           </div>
           <div>
             <strong>最近备份</strong>
@@ -120,16 +123,16 @@ export function SettingsView({
           </div>
           <div>
             <strong>状态</strong>
-            <span>{backupState.lastError ?? "正常"}</span>
+            <span>{backupState.lastError ?? backupText.status.normal}</span>
           </div>
         </div>
         <div className="action-row">
           <button
             disabled={!supportsFileBackups() || busy}
-            onClick={() => void runBusy(chooseBackupDirectory, "已选择备份目录")}
+            onClick={() => void runBusy(chooseBackupDirectory, backupText.messages.directorySelected)}
           >
             <FolderOpen size={18} />
-            选择目录
+            {backupText.labels.chooseDirectory}
           </button>
           <button
             disabled={!backupState.directoryHandle || !hasBackupSnapshot || busy}
@@ -137,24 +140,24 @@ export function SettingsView({
               if (!backupState.directoryHandle) {
                 return;
               }
-              if (!hasBrowserPracticeData || window.confirm("导入备份会替换当前浏览器内练习数据。继续？")) {
-                void runBusy(() => restoreBackupFromDirectory(backupState.directoryHandle!), "已导入备份");
+              if (!hasBrowserPracticeData || window.confirm(backupText.messages.browserDataWillBeReplaced)) {
+                void runBusy(() => restoreBackupFromDirectory(backupState.directoryHandle!), backupText.titles.importSuccess);
               }
             }}
           >
             <Upload size={18} />
-            导入备份
+            {backupText.labels.importBackup}
           </button>
         </div>
         {backupBlockedUntilSync ? (
-          <div className="status-line warning">请先导入备份；导入前不会向这个目录写入新备份。</div>
+          <div className="status-line warning">{backupText.messages.importRequiredBeforeBackup}</div>
         ) : backupState.directoryHandle && !hasBackupSnapshot ? (
-          <div className="status-line">备份目录还没有可导入的数据，先练习一次后会自动备份。</div>
+          <div className="status-line">{backupText.messages.emptyBackupDirectory}</div>
         ) : backupState.directoryHandle ? (
-          <div className="status-line">自动备份已启用，练习结束后会写入备份目录。</div>
+          <div className="status-line">{backupText.messages.backupEnabled}</div>
         ) : null}
         {message ? <div className="status-line">{message}</div> : null}
-        {!supportsFileBackups() ? <div className="status-line">当前浏览器不支持 File System Access。</div> : null}
+        {!supportsFileBackups() ? <div className="status-line">{backupText.status.unsupportedFileSystemAccess}</div> : null}
       </div>
     </section>
   );

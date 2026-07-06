@@ -1,10 +1,11 @@
 import { BarChart3, BellOff, Dumbbell, FolderOpen, Settings, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { preloadPianoSamples } from "./audio/piano";
-import { chooseBackupDirectory, restoreBackupFromDirectory, supportsFileBackups } from "./data/backup";
+import { chooseBackupDirectory, preflightBackupDirectory, restoreBackupFromDirectory, supportsFileBackups } from "./data/backup";
 import { getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
 import { IndexedDbMaintenancePanel } from "./debug/IndexedDbMaintenancePanel";
 import { installIndexedDbMaintenanceDebug } from "./debug/indexedDbMaintenance";
+import { backupText } from "./domain/backupText";
 import { deriveBackupSyncState, type BackupSyncState } from "./domain/backupSync";
 import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord } from "./domain/types";
 import { PracticeView, type PracticeNavigationExitRequest, type PracticeNavigationExitTarget } from "./components/PracticeView";
@@ -81,7 +82,17 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    void recoverAbandonedSessions().then(refresh);
+    let cancelled = false;
+    void (async () => {
+      await recoverAbandonedSessions();
+      await preflightBackupDirectory().catch(() => undefined);
+      if (!cancelled) {
+        await refresh();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
 
   useEffect(() => {
@@ -172,6 +183,30 @@ export function App(): JSX.Element {
     }
   }, [data]);
 
+  const preflightBeforePracticeStart = useCallback(async (): Promise<boolean> => {
+    try {
+      const result = await preflightBackupDirectory({ requestPermission: true });
+      if (result !== "skipped") {
+        await refresh();
+      }
+      if (result === "imported") {
+        showBackupReminderMessage(backupText.titles.importSuccess, backupText.messages.importSuccessDetail, true);
+        return false;
+      }
+      if (result === "import-required") {
+        setBackupReminderVisible(true);
+        return window.confirm(backupText.messages.importRequiredBeforeBackup);
+      }
+    } catch (error) {
+      showBackupReminderMessage(
+        error instanceof Error ? error.message : String(error),
+        backupText.messages.backupPermissionOrDirectoryHint,
+        false,
+      );
+    }
+    return true;
+  }, [refresh, showBackupReminderMessage]);
+
   const runBackupReminderAction = useCallback(async (): Promise<void> => {
     if (!data || backupReminderBusy) {
       return;
@@ -191,12 +226,12 @@ export function App(): JSX.Element {
         if (!data.backupState.directoryHandle) {
           return;
         }
-        if (syncState.confirmBeforeSync && !window.confirm("导入备份会替换当前浏览器内练习数据。继续？")) {
+        if (syncState.confirmBeforeSync && !window.confirm(backupText.messages.browserDataWillBeReplaced)) {
           return;
         }
         await restoreBackupFromDirectory(data.backupState.directoryHandle);
         await refresh();
-        showBackupReminderMessage("已导入备份", "当前浏览器已使用备份目录中的数据。", true);
+        showBackupReminderMessage(backupText.titles.importSuccess, backupText.messages.importSuccessDetail, true);
       }
     } catch (error) {
       if (isUserAbort(error)) {
@@ -206,7 +241,7 @@ export function App(): JSX.Element {
       }
       showBackupReminderMessage(
         error instanceof Error ? error.message : String(error),
-        "请检查备份目录权限，或在设置页重新选择目录。",
+        backupText.messages.backupPermissionOrDirectoryHint,
         false,
       );
     } finally {
@@ -272,32 +307,36 @@ export function App(): JSX.Element {
             <div>
               <strong>
                 {backupReminderMessage?.title ??
-                  (backupSyncState.kind === "sync-before-backup" ? "请先导入备份" : "建议设置备份目录")}
+                  (backupSyncState.kind === "sync-before-backup"
+                    ? backupText.titles.importRequired
+                    : backupText.titles.chooseDirectorySuggestion)}
               </strong>
               <span>
                 {backupReminderMessage
                   ? backupReminderMessage.detail
                   : backupSyncState.kind === "sync-before-backup"
-                    ? "继续练习产生的新数据只会暂存在当前浏览器内，导入备份时会被备份目录数据替换。"
-                    : "练习记录只保存在当前浏览器，设置目录后可以导入和迁移数据。"}
+                    ? backupText.messages.importRequiredBeforeBackup
+                    : backupText.messages.browserOnlyNeedsDirectory}
               </span>
             </div>
             <div className="backup-reminder-actions">
               {backupSyncState.kind === "needs-directory" || backupSyncState.kind === "sync-before-backup" ? (
                 <button className="primary" disabled={backupReminderBusy} onClick={() => void runBackupReminderAction()}>
                   {backupSyncState.kind === "sync-before-backup" ? <Upload size={18} /> : <FolderOpen size={18} />}
-                  {backupSyncState.kind === "sync-before-backup" ? "导入备份" : "选择目录"}
+                  {backupSyncState.kind === "sync-before-backup"
+                    ? backupText.labels.importBackup
+                    : backupText.labels.chooseDirectory}
                 </button>
               ) : null}
               {backupSyncState.kind === "needs-directory" ? (
                 <button onClick={suppressBackupReminderToday}>
                   <BellOff size={18} />
-                  今日不再提醒
+                  {backupText.labels.suppressToday}
                 </button>
               ) : null}
-              <button title="关闭" onClick={() => setBackupReminderVisible(false)}>
+              <button title={backupText.labels.close} onClick={() => setBackupReminderVisible(false)}>
                 <X size={18} />
-                稍后
+                {backupText.labels.dismiss}
               </button>
             </div>
           </div>
@@ -310,6 +349,7 @@ export function App(): JSX.Element {
             onDataChanged={refresh}
             onNavigationExit={handleNavigationExit}
             onOpenStats={() => setView("stats")}
+            onBeforePracticeStart={preflightBeforePracticeStart}
             onPracticeFinished={showBackupReminderAfterPractice}
             onRunningChange={setPracticeRunning}
             onSettingsSaved={(settings) => setData((current) => (current ? { ...current, settings } : current))}

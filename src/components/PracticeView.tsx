@@ -41,6 +41,7 @@ interface PracticeViewProps {
   onSettingsSaved: (settings: AppSettings) => void;
   onDataChanged: () => Promise<void>;
   onOpenStats: () => void;
+  onBeforePracticeStart: () => Promise<boolean>;
   onPracticeFinished: () => void;
   onRunningChange: (running: boolean) => void;
 }
@@ -136,6 +137,7 @@ export function PracticeView({
   onSettingsSaved,
   onDataChanged,
   onOpenStats,
+  onBeforePracticeStart,
   onPracticeFinished,
   onRunningChange,
 }: PracticeViewProps): JSX.Element {
@@ -648,6 +650,9 @@ export function PracticeView({
       return;
     }
     void unlockAudio().catch(() => undefined);
+    if (!(await onBeforePracticeStart())) {
+      return;
+    }
     const nextSettings = await persistConfig();
     const startedAt = new Date().toISOString();
     const nextSession: PracticeSessionRecord = {
@@ -712,6 +717,7 @@ export function PracticeView({
     drawMelodyNote,
     includeLedgerVariants,
     mode,
+    onBeforePracticeStart,
     persistConfig,
     promptDisplayMode,
     queueNotes.length,
