@@ -95,3 +95,19 @@ _Avoid_: Easy mistake, wrong note
 **Recognition trend**:
 Recent movement in recognition time for a target note or practice group. The first statistics view uses trends to show whether recognition is getting faster, slower, or staying similar.
 _Avoid_: Progress chart, learning curve
+
+**Browser data store**:
+The practice records and settings stored inside one browser origin, such as the published site or the local development server. Browser data stores are separate even when they point at the same backup directory.
+_Avoid_: Local data, device data
+
+**Backup directory**:
+A user-selected file-system folder that stores a portable backup snapshot for the learner's practice data. A backup directory may be shared by multiple browser data stores only through guarded backup import.
+_Avoid_: Sync folder, database folder
+
+**Backup snapshot**:
+A complete file-system backup of practice records and settings at one point in time. A backup snapshot is used as a guarded recovery and transfer point, not as a merge log.
+_Avoid_: Incremental sync, cloud copy
+
+**Backup import**:
+The action that brings a backup snapshot from the backup directory into the current browser data store. Backup import replaces the current browser data store; it does not merge divergent browser data stores.
+_Avoid_: Restore, sync, merge

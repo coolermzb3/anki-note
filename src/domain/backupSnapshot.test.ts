@@ -49,6 +49,7 @@ describe("backup snapshot", () => {
     );
 
     expect(snapshot.manifest.dates).toEqual(["2026-07-04", "2026-07-05"]);
+    expect(snapshot.manifest.snapshotId).toEqual(expect.any(String));
     expect(snapshot.manifest.settings).toEqual(settings);
     expect(snapshot.days["2026-07-04"].sessions).toHaveLength(1);
     expect(snapshot.days["2026-07-05"].reviews).toHaveLength(1);

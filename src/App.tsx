@@ -1,17 +1,17 @@
-import { BarChart3, BellOff, Dumbbell, FolderOpen, Settings, X } from "lucide-react";
+import { BarChart3, BellOff, Dumbbell, FolderOpen, Settings, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { preloadPianoSamples } from "./audio/piano";
-import { supportsFileBackups } from "./data/backup";
+import { chooseBackupDirectory, restoreBackupFromDirectory, supportsFileBackups } from "./data/backup";
 import { getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
 import { IndexedDbMaintenancePanel } from "./debug/IndexedDbMaintenancePanel";
 import { installIndexedDbMaintenanceDebug } from "./debug/indexedDbMaintenance";
+import { deriveBackupSyncState, type BackupSyncState } from "./domain/backupSync";
 import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord } from "./domain/types";
 import { PracticeView, type PracticeNavigationExitRequest, type PracticeNavigationExitTarget } from "./components/PracticeView";
 import { SettingsView } from "./components/SettingsView";
 import { StatsView } from "./components/StatsView";
 
 type View = "practice" | "stats" | "settings";
-type BackupReminderKind = "choose-directory" | "restore-before-backup";
 
 const BACKUP_REMINDER_SUPPRESSED_DATE_KEY = "anki-note.backupReminderSuppressedDate";
 
@@ -21,6 +21,8 @@ interface AppData {
   reviews: ReviewRecord[];
   backupState: BackupState;
 }
+
+type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
 
 function todayKey(): string {
   const now = new Date();
@@ -37,26 +39,41 @@ function isBackupReminderSuppressedToday(): boolean {
   }
 }
 
-function getBackupReminderKind(backupState: BackupState): BackupReminderKind | null {
-  if (!supportsFileBackups()) {
-    return null;
-  }
-  if (backupState.restoreRequiredBeforeBackup) {
-    return "restore-before-backup";
-  }
-  if (!backupState.directoryHandle && !isBackupReminderSuppressedToday()) {
-    return "choose-directory";
-  }
-  return null;
+function syncRequiredBeforeBackup(backupState: BackupState): boolean {
+  const stored = backupState as StoredBackupState;
+  return Boolean(backupState.syncRequiredBeforeBackup ?? stored.restoreRequiredBeforeBackup);
+}
+
+function isUserAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function getBackupSyncState(data: AppData): BackupSyncState {
+  const backupState = data.backupState;
+  const syncRequired = syncRequiredBeforeBackup(backupState);
+  const hasKnownBackupVersion = Boolean(backupState.lastSeenBackupVersion);
+  return deriveBackupSyncState({
+    supportsFileBackups: supportsFileBackups(),
+    hasDirectoryHandle: Boolean(backupState.directoryHandle),
+    reminderSuppressedToday: isBackupReminderSuppressedToday(),
+    hasBrowserPracticeData: data.sessions.length > 0 || data.reviews.length > 0,
+    hasBackupManifest: syncRequired || hasKnownBackupVersion,
+    backupMatchesBrowserDataSet: !syncRequired,
+    hasLastSeenBackupVersion: hasKnownBackupVersion && !syncRequired,
+    backupVersionMatchesLastSeen: !syncRequired,
+  });
 }
 
 export function App(): JSX.Element {
   const [view, setView] = useState<View>("practice");
   const [data, setData] = useState<AppData | null>(null);
   const [practiceRunning, setPracticeRunning] = useState(false);
+  const [backupReminderBusy, setBackupReminderBusy] = useState(false);
+  const [backupReminderMessage, setBackupReminderMessage] = useState<{ detail: string; title: string } | null>(null);
   const [backupReminderVisible, setBackupReminderVisible] = useState(false);
   const [practiceExitRequest, setPracticeExitRequest] = useState<PracticeNavigationExitRequest | null>(null);
   const practiceExitRequestIdRef = useRef(0);
+  const backupReminderMessageTimerRef = useRef<number | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
     const [{ settings, sessions, reviews }, backupState] = await Promise.all([loadAllData(), getBackupState()]);
@@ -75,8 +92,26 @@ export function App(): JSX.Element {
     if (!data) {
       return;
     }
-    setBackupReminderVisible(getBackupReminderKind(data.backupState) !== null);
-  }, [data !== null, data?.backupState.directoryHandle, data?.backupState.restoreRequiredBeforeBackup]);
+    if (!backupReminderMessage) {
+      setBackupReminderVisible(getBackupSyncState(data).showReminder);
+    }
+  }, [
+    backupReminderMessage,
+    data !== null,
+    data?.backupState.directoryHandle,
+    data?.backupState.lastSeenBackupVersion,
+    data?.backupState.syncRequiredBeforeBackup,
+    data?.sessions.length,
+    data?.reviews.length,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (backupReminderMessageTimerRef.current !== null) {
+        window.clearTimeout(backupReminderMessageTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
@@ -107,10 +142,20 @@ export function App(): JSX.Element {
     setView(targetView);
   }, []);
 
-  const openBackupSettings = useCallback((): void => {
-    setBackupReminderVisible(false);
-    selectView("settings");
-  }, [selectView]);
+  const showBackupReminderMessage = useCallback((title: string, detail: string, autoHide: boolean): void => {
+    if (backupReminderMessageTimerRef.current !== null) {
+      window.clearTimeout(backupReminderMessageTimerRef.current);
+    }
+    setBackupReminderMessage({ detail, title });
+    setBackupReminderVisible(true);
+    if (autoHide) {
+      backupReminderMessageTimerRef.current = window.setTimeout(() => {
+        setBackupReminderMessage(null);
+        setBackupReminderVisible(false);
+        backupReminderMessageTimerRef.current = null;
+      }, 2500);
+    }
+  }, []);
 
   const suppressBackupReminderToday = useCallback((): void => {
     try {
@@ -122,10 +167,52 @@ export function App(): JSX.Element {
   }, []);
 
   const showBackupReminderAfterPractice = useCallback((): void => {
-    if (data && getBackupReminderKind(data.backupState) !== null) {
+    if (data && getBackupSyncState(data).showReminder) {
       setBackupReminderVisible(true);
     }
   }, [data]);
+
+  const runBackupReminderAction = useCallback(async (): Promise<void> => {
+    if (!data || backupReminderBusy) {
+      return;
+    }
+
+    const syncState = getBackupSyncState(data);
+    setBackupReminderBusy(true);
+    setBackupReminderMessage(null);
+    try {
+      if (syncState.kind === "needs-directory") {
+        await chooseBackupDirectory();
+        await refresh();
+        return;
+      }
+
+      if (syncState.kind === "sync-before-backup") {
+        if (!data.backupState.directoryHandle) {
+          return;
+        }
+        if (syncState.confirmBeforeSync && !window.confirm("导入备份会替换当前浏览器内练习数据。继续？")) {
+          return;
+        }
+        await restoreBackupFromDirectory(data.backupState.directoryHandle);
+        await refresh();
+        showBackupReminderMessage("已导入备份", "当前浏览器已使用备份目录中的数据。", true);
+      }
+    } catch (error) {
+      if (isUserAbort(error)) {
+        setBackupReminderMessage(null);
+        setBackupReminderVisible(syncState.showReminder);
+        return;
+      }
+      showBackupReminderMessage(
+        error instanceof Error ? error.message : String(error),
+        "请检查备份目录权限，或在设置页重新选择目录。",
+        false,
+      );
+    } finally {
+      setBackupReminderBusy(false);
+    }
+  }, [backupReminderBusy, data, refresh, showBackupReminderMessage]);
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) {
@@ -158,7 +245,8 @@ export function App(): JSX.Element {
     return <div className="loading">加载中</div>;
   }
 
-  const backupReminderKind = backupReminderVisible ? getBackupReminderKind(data.backupState) : null;
+  const backupSyncState = getBackupSyncState(data);
+  const showBackupReminder = (backupReminderVisible && backupSyncState.showReminder) || backupReminderMessage !== null;
   const hasBrowserPracticeData = data.sessions.length > 0 || data.reviews.length > 0;
 
   return (
@@ -179,22 +267,29 @@ export function App(): JSX.Element {
       </nav>
 
       <main>
-        {backupReminderKind && !practiceRunning ? (
+        {showBackupReminder && !practiceRunning ? (
           <div className="backup-reminder" role="status">
             <div>
-              <strong>{backupReminderKind === "restore-before-backup" ? "建议先恢复备份" : "建议设置备份目录"}</strong>
+              <strong>
+                {backupReminderMessage?.title ??
+                  (backupSyncState.kind === "sync-before-backup" ? "请先导入备份" : "建议设置备份目录")}
+              </strong>
               <span>
-                {backupReminderKind === "restore-before-backup"
-                  ? "检测到该目录已有备份，恢复前不会向这个目录写入新备份。"
-                  : "练习记录只保存在当前浏览器，设置目录后可以恢复和迁移数据。"}
+                {backupReminderMessage
+                  ? backupReminderMessage.detail
+                  : backupSyncState.kind === "sync-before-backup"
+                    ? "继续练习产生的新数据只会暂存在当前浏览器内，导入备份时会被备份目录数据替换。"
+                    : "练习记录只保存在当前浏览器，设置目录后可以导入和迁移数据。"}
               </span>
             </div>
             <div className="backup-reminder-actions">
-              <button className="primary" onClick={openBackupSettings}>
-                <FolderOpen size={18} />
-                {backupReminderKind === "restore-before-backup" ? "去恢复" : "去设置"}
-              </button>
-              {backupReminderKind === "choose-directory" ? (
+              {backupSyncState.kind === "needs-directory" || backupSyncState.kind === "sync-before-backup" ? (
+                <button className="primary" disabled={backupReminderBusy} onClick={() => void runBackupReminderAction()}>
+                  {backupSyncState.kind === "sync-before-backup" ? <Upload size={18} /> : <FolderOpen size={18} />}
+                  {backupSyncState.kind === "sync-before-backup" ? "导入备份" : "选择目录"}
+                </button>
+              ) : null}
+              {backupSyncState.kind === "needs-directory" ? (
                 <button onClick={suppressBackupReminderToday}>
                   <BellOff size={18} />
                   今日不再提醒

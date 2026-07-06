@@ -1,3 +1,4 @@
+import { createUuid } from "./id";
 import { localDateKey } from "./stats";
 import type { AppSettings, BackupDayFile, BackupSnapshot, PracticeSessionRecord, ReviewRecord } from "./types";
 
@@ -38,6 +39,7 @@ export function buildBackupSnapshot(
   return {
     manifest: {
       schemaVersion: 1,
+      snapshotId: createUuid(),
       dataSetId: settings.dataSetId,
       createdAt: settings.createdAt,
       firstReviewAt: settings.firstReviewAt,
@@ -48,4 +50,11 @@ export function buildBackupSnapshot(
     },
     days,
   };
+}
+
+export function getBackupManifestVersion(manifest: BackupSnapshot["manifest"]): string {
+  if (manifest.snapshotId) {
+    return `snapshot:${manifest.snapshotId}`;
+  }
+  return `legacy:${manifest.dataSetId}:${manifest.lastBackupAt}:${manifest.lastReviewId ?? ""}:${manifest.dates.join(",")}`;
 }

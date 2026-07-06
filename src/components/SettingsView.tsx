@@ -1,8 +1,21 @@
-import { DatabaseBackup, FolderOpen, RefreshCcw, Save, Upload } from "lucide-react";
+import { DatabaseBackup, FolderOpen, Upload } from "lucide-react";
 import { useState } from "react";
-import { chooseBackupDirectory, restoreBackupFromDirectory, supportsFileBackups, writeBackupNow } from "../data/backup";
+import { chooseBackupDirectory, restoreBackupFromDirectory, supportsFileBackups } from "../data/backup";
 import { db } from "../data/db";
 import type { AppSettings, BackupState } from "../domain/types";
+
+type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
+
+function truncateStart(value: string, maxLength = 24): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `...${value.slice(-(maxLength - 3))}`;
+}
+
+function isUserAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
 
 interface SettingsViewProps {
   settings: AppSettings;
@@ -21,7 +34,9 @@ export function SettingsView({
 }: SettingsViewProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const backupBlockedUntilRestore = Boolean(backupState.restoreRequiredBeforeBackup);
+  const storedBackupState = backupState as StoredBackupState;
+  const backupBlockedUntilSync = Boolean(backupState.syncRequiredBeforeBackup ?? storedBackupState.restoreRequiredBeforeBackup);
+  const hasBackupSnapshot = Boolean(backupBlockedUntilSync || backupState.lastSeenBackupVersion);
 
   async function saveSettings(next: AppSettings): Promise<void> {
     await db.settings.put(next);
@@ -36,6 +51,10 @@ export function SettingsView({
       setMessage(doneMessage);
       await onDataChanged();
     } catch (error) {
+      if (isUserAbort(error)) {
+        setMessage(null);
+        return;
+      }
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
@@ -93,7 +112,7 @@ export function SettingsView({
         <div className="backup-status">
           <div>
             <strong>备份目录</strong>
-            <span>{backupState.directoryName ?? "未选择"}</span>
+            <span title={backupState.directoryName}>{backupState.directoryName ? truncateStart(backupState.directoryName) : "未选择"}</span>
           </div>
           <div>
             <strong>最近备份</strong>
@@ -113,33 +132,26 @@ export function SettingsView({
             选择目录
           </button>
           <button
-            disabled={!backupState.directoryHandle || backupBlockedUntilRestore || busy}
-            onClick={() => void runBusy(writeBackupNow, "已备份")}
-          >
-            <Save size={18} />
-            立即备份
-          </button>
-          <button
-            disabled={!backupState.directoryHandle || busy}
+            disabled={!backupState.directoryHandle || !hasBackupSnapshot || busy}
             onClick={() => {
               if (!backupState.directoryHandle) {
                 return;
               }
-              if (!hasBrowserPracticeData || window.confirm("恢复会替换当前浏览器内练习数据。继续？")) {
-                void runBusy(() => restoreBackupFromDirectory(backupState.directoryHandle!), "已恢复备份");
+              if (!hasBrowserPracticeData || window.confirm("导入备份会替换当前浏览器内练习数据。继续？")) {
+                void runBusy(() => restoreBackupFromDirectory(backupState.directoryHandle!), "已导入备份");
               }
             }}
           >
             <Upload size={18} />
-            恢复
-          </button>
-          <button disabled={busy} onClick={() => void runBusy(onDataChanged, "已刷新")}>
-            <RefreshCcw size={18} />
-            刷新
+            导入备份
           </button>
         </div>
-        {backupBlockedUntilRestore ? (
-          <div className="status-line warning">检测到该目录已有备份，恢复前不会向这个目录写入新备份。</div>
+        {backupBlockedUntilSync ? (
+          <div className="status-line warning">请先导入备份；导入前不会向这个目录写入新备份。</div>
+        ) : backupState.directoryHandle && !hasBackupSnapshot ? (
+          <div className="status-line">备份目录还没有可导入的数据，先练习一次后会自动备份。</div>
+        ) : backupState.directoryHandle ? (
+          <div className="status-line">自动备份已启用，练习结束后会写入备份目录。</div>
         ) : null}
         {message ? <div className="status-line">{message}</div> : null}
         {!supportsFileBackups() ? <div className="status-line">当前浏览器不支持 File System Access。</div> : null}

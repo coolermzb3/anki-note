@@ -108,7 +108,8 @@ export interface BackupState {
   schemaVersion: 1;
   directoryHandle?: FileSystemDirectoryHandle;
   directoryName?: string;
-  restoreRequiredBeforeBackup?: boolean;
+  syncRequiredBeforeBackup?: boolean;
+  lastSeenBackupVersion?: string;
   lastBackupAt?: string;
   lastBackupReviewId?: string;
   lastError?: string;
@@ -116,6 +117,7 @@ export interface BackupState {
 
 export interface BackupManifest {
   schemaVersion: 1;
+  snapshotId?: string;
   dataSetId: string;
   createdAt: string;
   firstReviewAt?: string;
