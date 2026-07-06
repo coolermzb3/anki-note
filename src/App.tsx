@@ -4,6 +4,7 @@ import { preloadPianoSamples } from "./audio/piano";
 import {
   type BackupBeforePracticeResult,
   chooseBackupDirectory,
+  refreshBackupConflictDetails,
   restoreBackupFromDirectory,
   supportsFileBackups,
   syncBackupBeforePractice,
@@ -65,6 +66,10 @@ function isBackupReminderSuppressedToday(): boolean {
 function backupSyncRequired(backupState: BackupState): boolean {
   const stored = backupState as StoredBackupState;
   return Boolean(backupState.dataConflictBeforeBackup ?? backupState.syncRequiredBeforeBackup ?? stored.restoreRequiredBeforeBackup);
+}
+
+function backupConflictDetailsMissing(backupState: BackupState): boolean {
+  return backupState.conflictBrowserReviewCount === undefined && backupState.conflictBackupReviewCount === undefined;
 }
 
 function isUserAbort(error: unknown): boolean {
@@ -216,6 +221,36 @@ export function App(): JSX.Element {
       setBackupReminderVisible(true);
     }
   }, [data]);
+
+  useEffect(() => {
+    if (
+      !data ||
+      !hasBackupDirectory ||
+      !backupSyncRequired(data.backupState) ||
+      !backupConflictDetailsMissing(data.backupState)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    void refreshBackupConflictDetails()
+      .then((updated) => {
+        if (updated && !cancelled) {
+          void refreshBackupState();
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    data !== null,
+    hasBackupDirectory,
+    data?.backupState.dataConflictBeforeBackup,
+    data?.backupState.syncRequiredBeforeBackup,
+    data?.backupState.conflictBrowserReviewCount,
+    data?.backupState.conflictBackupReviewCount,
+    refreshBackupState,
+  ]);
 
   const runPracticeBackupCheck = useCallback(
     async ({ requestPermission }: { requestPermission: boolean }): Promise<PracticeBackupCheckResult> => {
@@ -458,13 +493,13 @@ export function App(): JSX.Element {
               ) : null}
               {backupReminderState.kind === "data-conflict" ? (
                 <button className="primary" disabled={backupReminderBusy} onClick={() => void runBackupReminderAction("keep-backup-data")}>
-                  <Download size={18} />
+                  <Upload size={18} />
                   {backupText.labels.keepBackupData}
                 </button>
               ) : null}
               {backupReminderState.kind === "data-conflict" ? (
                 <button disabled={backupReminderBusy} onClick={() => void runBackupReminderAction("write-browser-data")}>
-                  <Upload size={18} />
+                  <Download size={18} />
                   {backupText.labels.keepBrowserData}
                 </button>
               ) : null}

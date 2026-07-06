@@ -68,6 +68,10 @@ function explicitDataConflict(state: BackupState): boolean {
   return Boolean(state.dataConflictBeforeBackup ?? state.syncRequiredBeforeBackup ?? stored.restoreRequiredBeforeBackup);
 }
 
+function conflictDetailsMissing(state: BackupState): boolean {
+  return state.conflictBrowserReviewCount === undefined && state.conflictBackupReviewCount === undefined;
+}
+
 function hasBrowserData(sessions: PracticeSessionRecord[], reviews: ReviewRecord[]): boolean {
   return sessions.length > 0 || reviews.length > 0;
 }
@@ -330,6 +334,9 @@ export async function syncBackupBeforePractice({
     return "needs-directory";
   }
   if (explicitDataConflict(state)) {
+    if (conflictDetailsMissing(state)) {
+      await refreshBackupConflictDetails({ requestPermission });
+    }
     return "data-conflict";
   }
   if (!(await hasReadWritePermission(state.directoryHandle, requestPermission))) {
@@ -353,6 +360,23 @@ export async function syncBackupBeforePractice({
 
   await saveReadyBackupState(state, state.directoryHandle, inspection.manifest);
   return "ready";
+}
+
+export async function refreshBackupConflictDetails({
+  requestPermission = false,
+}: {
+  requestPermission?: boolean;
+} = {}): Promise<boolean> {
+  const state = await getBackupState();
+  if (!state.directoryHandle || !explicitDataConflict(state) || !conflictDetailsMissing(state)) {
+    return false;
+  }
+  if (!(await hasReadWritePermission(state.directoryHandle, requestPermission))) {
+    return false;
+  }
+  const inspection = await inspectBackupStatus(state.directoryHandle, state);
+  await saveDivergedBackupState(state, state.directoryHandle, inspection);
+  return true;
 }
 
 export async function writeBackupNow(): Promise<void> {

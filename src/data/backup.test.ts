@@ -5,7 +5,7 @@ import { makeReview } from "../domain/testFactories";
 import type { AppSettings, BackupDayFile, BackupManifest, BackupState, PracticeSessionRecord, ReviewRecord } from "../domain/types";
 import { backupText } from "../domain/backupText";
 import { db, makeDefaultSettings } from "./db";
-import { syncBackupBeforePractice, writeBackupIfSafe, writeBackupNow, writeBackupSnapshot } from "./backup";
+import { refreshBackupConflictDetails, syncBackupBeforePractice, writeBackupIfSafe, writeBackupNow, writeBackupSnapshot } from "./backup";
 
 class MemoryFileHandle {
   readonly kind = "file";
@@ -274,6 +274,30 @@ describe("file backup side effects", () => {
     await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-browser" }]);
     await expect(db.backupStates.get("default")).resolves.toMatchObject({
       dataConflictBeforeBackup: true,
+      syncRequiredBeforeBackup: true,
+    });
+  });
+
+  it("fills conflict summaries for legacy conflict states", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData();
+    await seedBackupDirectory(directory);
+    await db.backupStates.put({
+      id: "default",
+      schemaVersion: 1,
+      directoryHandle: directory.handle(),
+      directoryName: directory.name,
+      syncRequiredBeforeBackup: true,
+      lastError: "备份目录已有更新，请先导入备份。",
+    });
+
+    await expect(refreshBackupConflictDetails()).resolves.toBe(true);
+
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      conflictBackupReviewCount: 1,
+      conflictBrowserReviewCount: 1,
+      dataConflictBeforeBackup: true,
+      lastError: backupText.messages.dataConflictBeforeBackup,
       syncRequiredBeforeBackup: true,
     });
   });

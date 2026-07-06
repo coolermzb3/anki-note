@@ -168,7 +168,7 @@ export function SettingsView({
               }
             }}
           >
-            <Download size={18} />
+            <Upload size={18} />
             {backupBlockedUntilSync ? backupText.labels.keepBackupData : backupText.labels.importBackup}
           </button>
           {backupBlockedUntilSync ? (
@@ -181,7 +181,7 @@ export function SettingsView({
                 void runBusy(writeBrowserDataToBackupDirectory, backupText.messages.browserDataWrittenToBackup);
               }}
             >
-              <Upload size={18} />
+              <Download size={18} />
               {backupText.labels.keepBrowserData}
             </button>
           ) : null}
