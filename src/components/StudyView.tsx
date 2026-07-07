@@ -1,9 +1,9 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { type MutableRefObject, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Formatter, Renderer, Stave, StaveConnector, StaveNote, Voice } from "vexflow";
 import { playTargetNote, startTargetNote, type SustainedPianoNote } from "../audio/piano";
-import { ALL_NOTES, formatTargetNoteLabel, noteToVexKey } from "../domain/notes";
-import type { NoteName, Staff, TargetNote } from "../domain/types";
+import { formatTargetNoteLabel, getNotesForGroups, noteToVexKey } from "../domain/notes";
+import type { AppSettings, NoteName, Staff, TargetNote } from "../domain/types";
+import { GlobalRangeControls } from "./GlobalRangeControls";
 
 const NOTE_COLUMNS_BY_KEY: Array<{ answerNumber: string; noteName: NoteName }> = [
   { answerNumber: "1", noteName: "C" },
@@ -24,30 +24,14 @@ const STUDY_COLUMN_ORDER_OPTIONS = [
 type StudyColumnOrderId = (typeof STUDY_COLUMN_ORDER_OPTIONS)[number]["id"];
 type StudyColumnDefinition = (typeof NOTE_COLUMNS_BY_KEY)[number];
 
-const SLIDES = [
-  {
-    id: "single-spelling",
-    title: "F1-G6 音符位置",
-    description: " ",
-    includeLedgerVariants: false,
-  },
-  {
-    id: "ledger-variants",
-    title: "F1-G6 音符位置(含重叠区高低音谱号)",
-    description: " ",
-    includeLedgerVariants: true,
-  },
-] as const;
-
 const NOTE_DURATION = "w";
 const NEUTRAL_COLOR = "#211c18";
 const MUTED_COLOR = "#766b5f";
 const ACTIVE_COLOR = "#2f8f5f";
 const ACTIVE_FILL = "rgba(47, 143, 95, 0.16)";
+const TRANSPARENT_NOTE_COLOR = "rgba(0, 0, 0, 0)";
 const KEY_FLASH_MS = 360;
 const NOTE_FLASH_MS = 260;
-const SLIDE_ANIMATION_MS = 280;
-const DRAG_SWITCH_PX = 52;
 const NOTE_NAME_ORDER: Record<NoteName, number> = {
   C: 0,
   D: 1,
@@ -103,13 +87,6 @@ const COMMON_STUDY_MAP_HEIGHT =
   Math.max(STUDY_MAP_LAYOUT.clefGap.default, STUDY_MAP_LAYOUT.clefGap.withLedgerVariants) +
   STAVE_RENDER_HEIGHT;
 
-type SlideDirection = "next" | "previous";
-interface StudyTransition {
-  direction: SlideDirection;
-  fromIndex: number;
-  toIndex: number;
-}
-
 interface HeldColumnPlayback {
   cancelled: boolean;
   noteName: NoteName;
@@ -132,7 +109,11 @@ interface StudyNoteMapProps {
   label: string;
   onPlayColumn: (noteName: NoteName) => void;
   onPlayNote: (note: TargetNote) => void;
-  onSwipe: (direction: "next" | "previous") => void;
+}
+
+interface StudyViewProps {
+  settings: AppSettings;
+  onSettingsSaved: (settings: AppSettings) => void | Promise<void>;
 }
 
 interface StudyMapMetrics {
@@ -174,16 +155,14 @@ function getStudyColumnDefinitions(orderId: StudyColumnOrderId, isReversed: bool
   });
 }
 
-function getStudyColumns(includeLedgerVariants: boolean, columnDefinitions: StudyColumnDefinition[]): StudyColumn[] {
+function getStudyColumns(notes: TargetNote[], columnDefinitions: StudyColumnDefinition[]): StudyColumn[] {
   return columnDefinitions.map((column) => {
-    const notes = ALL_NOTES.filter(
-      (note) => note.noteName === column.noteName && (includeLedgerVariants || !note.isLedgerVariant),
-    ).sort(comparePitch);
+    const columnNotes = notes.filter((note) => note.noteName === column.noteName).sort(comparePitch);
     return {
       ...column,
-      bassNotes: notes.filter((note) => note.staff === "bass"),
-      notes,
-      trebleNotes: notes.filter((note) => note.staff === "treble"),
+      bassNotes: columnNotes.filter((note) => note.staff === "bass"),
+      notes: columnNotes,
+      trebleNotes: columnNotes.filter((note) => note.staff === "treble"),
     };
   });
 }
@@ -206,15 +185,16 @@ function makeChord(
   highlightedNoteId: string | undefined,
 ): StaveNote {
   const columnHighlighted = notes.some((note) => highlightedNoteNames?.has(note.noteName) ?? false);
+  const hasNotes = notes.length > 0;
   const chord = new StaveNote({
     clef: staff,
     duration: NOTE_DURATION,
-    keys: notes.map(noteToVexKey),
+    keys: hasNotes ? notes.map(noteToVexKey) : [staff === "treble" ? "b/4" : "d/3"],
   });
-  const baseColor = columnHighlighted ? ACTIVE_COLOR : NEUTRAL_COLOR;
+  const baseColor = hasNotes ? (columnHighlighted ? ACTIVE_COLOR : NEUTRAL_COLOR) : TRANSPARENT_NOTE_COLOR;
   chord.setStyle({ fillStyle: baseColor, strokeStyle: baseColor });
   chord.setLedgerLineStyle({ fillStyle: baseColor, strokeStyle: baseColor });
-  if (!columnHighlighted && highlightedNoteId) {
+  if (hasNotes && !columnHighlighted && highlightedNoteId) {
     notes.forEach((note, index) => {
       if (note.id === highlightedNoteId) {
         chord.setKeyStyle(index, { fillStyle: ACTIVE_COLOR, strokeStyle: ACTIVE_COLOR });
@@ -332,14 +312,12 @@ function addLabelHotspot({
   metrics,
   noteName,
   onPlayColumn,
-  skipClickRef,
   svg,
 }: {
   layout: StudyColumnLayout;
   metrics: StudyMapMetrics;
   noteName: NoteName;
   onPlayColumn: (noteName: NoteName) => void;
-  skipClickRef: MutableRefObject<boolean>;
   svg: SVGSVGElement;
 }): void {
   const hotspot = document.createElementNS("http://www.w3.org/2000/svg", "rect");
@@ -353,9 +331,7 @@ function addLabelHotspot({
   hotspot.setAttribute("aria-label", `播放 ${noteName} 列`);
   hotspot.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (!skipClickRef.current) {
-      onPlayColumn(noteName);
-    }
+    onPlayColumn(noteName);
   });
   hotspot.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -371,7 +347,6 @@ function addNoteHotspot({
   onPlayNote,
   radius,
   showHitArea,
-  skipClickRef,
   svg,
   x,
   y,
@@ -380,7 +355,6 @@ function addNoteHotspot({
   onPlayNote: (note: TargetNote) => void;
   radius: number;
   showHitArea: boolean;
-  skipClickRef: MutableRefObject<boolean>;
   svg: SVGSVGElement;
   x: number;
   y: number;
@@ -395,9 +369,7 @@ function addNoteHotspot({
   hotspot.setAttribute("aria-label", `播放 ${formatTargetNoteLabel(note)}`);
   hotspot.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (!skipClickRef.current) {
-      onPlayNote(note);
-    }
+    onPlayNote(note);
   });
   hotspot.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -413,14 +385,12 @@ function addNoteHotspots({
   highlightedNoteId,
   notes,
   onPlayNote,
-  skipClickRef,
   svg,
 }: {
   chord: StaveNote;
   highlightedNoteId?: string;
   notes: TargetNote[];
   onPlayNote: (note: TargetNote) => void;
-  skipClickRef: MutableRefObject<boolean>;
   svg: SVGSVGElement;
 }): void {
   const ys = chord.getYs();
@@ -435,7 +405,6 @@ function addNoteHotspots({
       onPlayNote,
       radius: noteHeadHitRadius(chord, index),
       showHitArea: note.id === highlightedNoteId,
-      skipClickRef,
       svg,
       x,
       y,
@@ -451,12 +420,9 @@ function StudyNoteMap({
   label,
   onPlayColumn,
   onPlayNote,
-  onSwipe,
 }: StudyNoteMapProps): JSX.Element {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const rendererTargetRef = useRef<HTMLDivElement | null>(null);
-  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
-  const skipClickRef = useRef(false);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -538,7 +504,6 @@ function StudyNoteMap({
           metrics,
           noteName: column.noteName,
           onPlayColumn,
-          skipClickRef,
           svg,
         });
         addNoteHotspots({
@@ -546,7 +511,6 @@ function StudyNoteMap({
           highlightedNoteId,
           notes: column.trebleNotes,
           onPlayNote,
-          skipClickRef,
           svg,
         });
         addNoteHotspots({
@@ -554,7 +518,6 @@ function StudyNoteMap({
           highlightedNoteId,
           notes: column.bassNotes,
           onPlayNote,
-          skipClickRef,
           svg,
         });
       });
@@ -566,48 +529,14 @@ function StudyNoteMap({
     return () => observer.disconnect();
   }, [columns, highlightedNoteId, highlightedNoteNames, includeLedgerVariants, onPlayColumn, onPlayNote]);
 
-  function handlePointerDown(event: PointerEvent<HTMLDivElement>): void {
-    if (event.button !== 0) {
-      return;
-    }
-    dragStartRef.current = { x: event.clientX, y: event.clientY };
-  }
-
-  function finishPointerDrag(event: PointerEvent<HTMLDivElement>): void {
-    const dragStart = dragStartRef.current;
-    dragStartRef.current = null;
-    if (!dragStart) {
-      return;
-    }
-    const deltaX = event.clientX - dragStart.x;
-    const deltaY = event.clientY - dragStart.y;
-    if (Math.abs(deltaX) < DRAG_SWITCH_PX || Math.abs(deltaX) < Math.abs(deltaY) * 1.2) {
-      return;
-    }
-    skipClickRef.current = true;
-    onSwipe(deltaX < 0 ? "next" : "previous");
-    window.setTimeout(() => {
-      skipClickRef.current = false;
-    }, 180);
-  }
-
   return (
-    <div
-      ref={frameRef}
-      className="study-map"
-      aria-label={label}
-      onPointerCancel={() => {
-        dragStartRef.current = null;
-      }}
-      onPointerDown={handlePointerDown}
-      onPointerUp={finishPointerDrag}
-    >
+    <div ref={frameRef} className="study-map" aria-label={label}>
       <div ref={rendererTargetRef} className="study-map-renderer" />
     </div>
   );
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
+function isFormControlTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement;
 }
 
@@ -626,46 +555,25 @@ function collectHighlightedNoteNames(heldColumns: Map<string, HeldColumnPlayback
   return noteNames;
 }
 
-export function StudyView(): JSX.Element {
-  const [activeIndex, setActiveIndex] = useState(0);
+export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.Element {
   const [columnOrderId, setColumnOrderId] = useState<StudyColumnOrderId>("circle");
   const [isColumnOrderReversed, setIsColumnOrderReversed] = useState(false);
   const [highlightedNoteNames, setHighlightedNoteNames] = useState<ReadonlySet<NoteName>>(() => new Set());
   const [highlightedNoteId, setHighlightedNoteId] = useState<string | undefined>();
-  const [transition, setTransition] = useState<StudyTransition | null>(null);
   const columnFlashTimerRef = useRef<number | undefined>();
   const flashedColumnRef = useRef<NoteName | undefined>();
   const noteFlashTimerRef = useRef<number | undefined>();
-  const slideTimerRef = useRef<number | undefined>();
   const heldColumnsRef = useRef(new Map<string, HeldColumnPlayback>());
-  const activeSlide = SLIDES[activeIndex];
   const columnDefinitions = useMemo(
     () => getStudyColumnDefinitions(columnOrderId, isColumnOrderReversed),
     [columnOrderId, isColumnOrderReversed],
   );
-  const slideColumns = useMemo(
-    () => SLIDES.map((slide) => getStudyColumns(slide.includeLedgerVariants, columnDefinitions)),
-    [columnDefinitions],
+  const studyNotes = useMemo(
+    () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
+    [settings.enabledGroupIds, settings.includeLedgerVariants],
   );
-  const columns = slideColumns[activeIndex];
-
-  const switchSlide = useCallback((nextIndex: number, direction: SlideDirection): void => {
-    if (nextIndex === activeIndex) {
-      return;
-    }
-    window.clearTimeout(slideTimerRef.current);
-    setTransition({ direction, fromIndex: activeIndex, toIndex: nextIndex });
-    setActiveIndex(nextIndex);
-    slideTimerRef.current = window.setTimeout(() => setTransition(null), SLIDE_ANIMATION_MS);
-  }, [activeIndex]);
-
-  const showPrevious = useCallback((): void => {
-    switchSlide(activeIndex === 0 ? SLIDES.length - 1 : activeIndex - 1, "previous");
-  }, [activeIndex, switchSlide]);
-
-  const showNext = useCallback((): void => {
-    switchSlide((activeIndex + 1) % SLIDES.length, "next");
-  }, [activeIndex, switchSlide]);
+  const columns = useMemo(() => getStudyColumns(studyNotes, columnDefinitions), [columnDefinitions, studyNotes]);
+  const showInterStaffLedger = studyNotes.some((note) => note.isLedgerVariant);
 
   const flashColumn = useCallback((noteName: NoteName): void => {
     window.clearTimeout(columnFlashTimerRef.current);
@@ -767,14 +675,13 @@ export function StudyView(): JSX.Element {
     return () => {
       window.clearTimeout(columnFlashTimerRef.current);
       window.clearTimeout(noteFlashTimerRef.current);
-      window.clearTimeout(slideTimerRef.current);
       releaseAllHeldColumns();
     };
   }, [releaseAllHeldColumns]);
 
   useEffect(() => {
     releaseAllHeldColumns();
-  }, [activeIndex, columnDefinitions, releaseAllHeldColumns]);
+  }, [columns, releaseAllHeldColumns]);
 
   useEffect(() => {
     function releaseForFocusLoss(): void {
@@ -797,17 +704,7 @@ export function StudyView(): JSX.Element {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
-      if (isEditableTarget(event.target)) {
-        return;
-      }
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        showPrevious();
-        return;
-      }
-      if (event.key === "ArrowRight") {
-        event.preventDefault();
-        showNext();
+      if (isFormControlTarget(event.target)) {
         return;
       }
       const column = NOTE_COLUMNS_BY_KEY.find((candidate) => candidate.answerNumber === event.key);
@@ -833,111 +730,65 @@ export function StudyView(): JSX.Element {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [releaseHeldColumn, showNext, showPrevious, startHeldColumn]);
+  }, [releaseHeldColumn, startHeldColumn]);
 
   return (
     <section className="study-shell">
+      <GlobalRangeControls settings={settings} onSettingsSaved={onSettingsSaved} />
       <div className="study-header">
         <div className="study-title">
           <h1>学习</h1>
-          <p>{activeSlide.description}</p>
         </div>
-        <div className="study-controls" aria-label="学习页显示设置">
-          <div className="study-control-block">
-            <span className="control-label">顺序</span>
-            <div className="segmented study-order-options">
-              {STUDY_COLUMN_ORDER_OPTIONS.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={columnOrderId === option.id ? "active" : ""}
-                  onClick={() => setColumnOrderId(option.id)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
+      </div>
+      <div className="study-controls" aria-label="学习页显示设置">
+        <div className="study-control-block">
+          <span className="control-label">顺序</span>
+          <div className="segmented study-order-options">
+            {STUDY_COLUMN_ORDER_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={columnOrderId === option.id ? "active" : ""}
+                onClick={() => setColumnOrderId(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
-          <div className="study-control-block">
-            <span className="control-label">方向</span>
-            <div className="segmented study-direction-options">
-              <button
-                type="button"
-                className={!isColumnOrderReversed ? "active" : ""}
-                onClick={() => setIsColumnOrderReversed(false)}
-              >
-                正序
-              </button>
-              <button
-                type="button"
-                className={isColumnOrderReversed ? "active" : ""}
-                onClick={() => setIsColumnOrderReversed(true)}
-              >
-                倒序
-              </button>
-            </div>
+        </div>
+        <div className="study-control-block">
+          <span className="control-label">方向</span>
+          <div className="segmented study-direction-options">
+            <button
+              type="button"
+              className={!isColumnOrderReversed ? "active" : ""}
+              onClick={() => setIsColumnOrderReversed(false)}
+            >
+              正序
+            </button>
+            <button
+              type="button"
+              className={isColumnOrderReversed ? "active" : ""}
+              onClick={() => setIsColumnOrderReversed(true)}
+            >
+              倒序
+            </button>
           </div>
         </div>
       </div>
-      <div className="study-carousel" aria-label="学习页音位图">
-        <button className="study-arrow" aria-label="上一张" onClick={showPrevious}>
-          <ChevronLeft size={22} />
-        </button>
+      <div className="study-map-frame" aria-label="学习页音位图">
         <figure className="study-figure">
-          {(transition ? [transition.fromIndex, transition.toIndex] : [activeIndex]).map((slideIndex) => {
-            const slide = SLIDES[slideIndex];
-            const transitionRole =
-              transition === null
-                ? "active"
-                : slideIndex === transition.fromIndex
-                  ? `exit-${transition.direction}`
-                  : `enter-${transition.direction}`;
-            return (
-              <div
-                key={`${slide.id}-${transitionRole}`}
-                className={`study-slide ${transitionRole}`}
-                aria-hidden={slideIndex !== activeIndex}
-              >
-                <figcaption>{slide.title}</figcaption>
-                <StudyNoteMap
-                  columns={slideColumns[slideIndex]}
-                  highlightedNoteId={slideIndex === activeIndex ? highlightedNoteId : undefined}
-                  highlightedNoteNames={slideIndex === activeIndex ? highlightedNoteNames : undefined}
-                  includeLedgerVariants={slide.includeLedgerVariants}
-                  label={slide.title}
-                  onPlayColumn={playColumn}
-                  onPlayNote={playNote}
-                  onSwipe={(direction) => {
-                    if (direction === "next") {
-                      showNext();
-                    } else {
-                      showPrevious();
-                    }
-                  }}
-                />
-              </div>
-            );
-          })}
-        </figure>
-        <button className="study-arrow" aria-label="下一张" onClick={showNext}>
-          <ChevronRight size={22} />
-        </button>
-      </div>
-      <div className="study-dots" aria-label="学习图切换">
-        {SLIDES.map((slide, index) => (
-          <button
-            key={slide.id}
-            className={index === activeIndex ? "study-dot active" : "study-dot"}
-            aria-label={slide.title}
-            aria-current={index === activeIndex ? "true" : undefined}
-            onClick={() => {
-              if (index === activeIndex) {
-                return;
-              }
-              switchSlide(index, index > activeIndex ? "next" : "previous");
-            }}
+          <figcaption>F1-G6 音符位置</figcaption>
+          <StudyNoteMap
+            columns={columns}
+            highlightedNoteId={highlightedNoteId}
+            highlightedNoteNames={highlightedNoteNames}
+            includeLedgerVariants={showInterStaffLedger}
+            label="F1-G6 音符位置"
+            onPlayColumn={playColumn}
+            onPlayNote={playNote}
           />
-        ))}
+        </figure>
       </div>
     </section>
   );

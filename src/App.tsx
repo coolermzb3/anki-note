@@ -10,7 +10,7 @@ import {
   syncBackupBeforePractice,
   writeBrowserDataToBackupDirectory,
 } from "./data/backup";
-import { getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
+import { db, getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
 import { IndexedDbMaintenancePanel } from "./debug/IndexedDbMaintenancePanel";
 import { installIndexedDbMaintenanceDebug } from "./debug/indexedDbMaintenance";
 import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "./domain/backupText";
@@ -111,6 +111,11 @@ export function App(): JSX.Element {
 
   const refresh = useCallback(async (): Promise<void> => {
     setData(await loadFreshAppData());
+  }, []);
+
+  const saveSettings = useCallback(async (settings: AppSettings): Promise<void> => {
+    setData((current) => (current ? { ...current, settings } : current));
+    await db.settings.put(settings);
   }, []);
 
   const refreshBackupState = useCallback(async (): Promise<void> => {
@@ -563,18 +568,25 @@ export function App(): JSX.Element {
             onBeforePracticeStart={preflightBeforePracticeStart}
             onPracticeFinished={showBackupReminderAfterPractice}
             onRunningChange={setPracticeRunning}
-            onSettingsSaved={(settings) => setData((current) => (current ? { ...current, settings } : current))}
+            onSettingsSaved={saveSettings}
           />
         ) : null}
-        {view === "stats" ? <StatsView reviews={data.reviews} sessions={data.sessions} /> : null}
-        {view === "study" ? <StudyView /> : null}
+        {view === "stats" ? (
+          <StatsView
+            settings={data.settings}
+            reviews={data.reviews}
+            sessions={data.sessions}
+            onSettingsSaved={saveSettings}
+          />
+        ) : null}
+        {view === "study" ? <StudyView settings={data.settings} onSettingsSaved={saveSettings} /> : null}
         {view === "settings" ? (
           <SettingsView
             backupState={data.backupState}
             hasBrowserPracticeData={hasBrowserPracticeData}
             settings={data.settings}
             onDataChanged={refresh}
-            onSettingsSaved={(settings) => setData((current) => (current ? { ...current, settings } : current))}
+            onSettingsSaved={saveSettings}
           />
         ) : null}
       </main>

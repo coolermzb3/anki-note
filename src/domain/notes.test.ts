@@ -12,7 +12,7 @@ import {
 } from "./notes";
 
 describe("notes", () => {
-  it("builds the natural-note cards from F1 through G6 with split ledger variants", () => {
+  it("builds the natural-note cards from F1 through G6 with inter-staff ledger spellings", () => {
     expect(ALL_NOTES).toHaveLength(48);
     expect(ALL_NOTES[0].id).toBe("F1");
     expect(ALL_NOTES.map((note) => note.id)).toContain("F1");
@@ -32,7 +32,7 @@ describe("notes", () => {
     expect(DEFAULT_ENABLED_GROUPS).toEqual(["G3-F4"]);
   });
 
-  it("keeps overlap variants in their pitch-range practice groups", () => {
+  it("keeps inter-staff ledger spellings in their pitch-range practice groups", () => {
     expect(PRACTICE_GROUPS.find((group) => group.id === "F1-F2")?.notes).toHaveLength(8);
     expect(PRACTICE_GROUPS.find((group) => group.id === "G2-F3")?.notes).toHaveLength(9);
     expect(PRACTICE_GROUPS.find((group) => group.id === "G3-F4")?.notes).toHaveLength(14);
@@ -40,7 +40,7 @@ describe("notes", () => {
     expect(PRACTICE_GROUPS.find((group) => group.id === "G5-G6")?.notes).toHaveLength(8);
   });
 
-  it("can exclude the added ledger variants from enabled practice groups", () => {
+  it("can exclude the added inter-staff ledger spellings from enabled practice groups", () => {
     expect(getNotesForGroups(["G4-F5"])).toHaveLength(9);
     expect(getNotesForGroups(["G4-F5"], false).map((note) => note.id)).toEqual([
       "G4",
@@ -53,7 +53,7 @@ describe("notes", () => {
     ]);
   });
 
-  it("labels ledger variants by pitch and staff", () => {
+  it("labels inter-staff ledger spellings by pitch and staff", () => {
     expect(formatTargetNoteLabel(getNoteById("E3"))).toBe("E3 · 低音谱号");
     expect(formatTargetNoteLabel(getNoteById("E3-treble"))).toBe("E3 · 高音谱号");
     expect(formatTargetNoteLabel(getNoteById("C2"))).toBe("C2");
@@ -62,6 +62,7 @@ describe("notes", () => {
   it("normalizes persisted group ids to the current low-to-high groups", () => {
     expect(normalizePracticeGroupIds(["C2-B2", "C4-B4", "C6-B6"])).toEqual(["F1-F2", "G3-F4", "G5-G6"]);
     expect(normalizePracticeGroupIds(["G4-F5", "F1-F2"])).toEqual(["F1-F2", "G4-F5"]);
+    expect(normalizePracticeGroupIds([])).toEqual(["G3-F4"]);
     expect(normalizePracticeGroupIds(["unknown"])).toEqual(["G3-F4"]);
   });
 

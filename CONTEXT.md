@@ -9,19 +9,23 @@ A flashcard whose answer is one of the seven natural piano note names, without s
 _Avoid_: Piano card, note card
 
 **Target note**:
-The exact card prompt shown to the learner, including its pitch, octave, and staff placement when a pitch has both treble-staff and bass-staff variants. The target note determines the staff position and audio pitch, but the learner answers only its natural note name.
+The exact card prompt shown to the learner, including its pitch, octave, and staff placement when a pitch has both treble-staff and bass-staff spellings. The target note determines the staff position and audio pitch, but the learner answers only its natural note name.
 _Avoid_: Correct pitch
 
+**Inter-staff ledger spelling**:
+One of the treble-staff or bass-staff notations for pitches E3 through A4, the range written in the ledger-line space between the treble and bass staves on the grand staff. The UI labels this option as `谱表间加线`.
+_Avoid_: Generic ledger note, overlapping grand staff, double clef
+
 **Practice range**:
-The closed set of notes that may appear as cards in a practice session. The first practice range is F1 through G6, grouped into five contiguous practice groups. Pitches E3 through A4 have two target-note cards so the learner can practice both ledger-line spellings; this added ledger-variant set can be disabled on the start page.
+The closed set of notes that may appear as cards in a practice session. The first practice range is F1 through G6, grouped into five contiguous practice groups. Pitches E3 through A4 have two target-note cards so the learner can practice both inter-staff ledger spellings; this added spelling set can be disabled.
 _Avoid_: Piano range, common range
 
 **Practice group**:
-A contiguous subset of the practice range. The middle groups cover the natural pitches from G through F across neighboring octaves, while the edge groups include the adjacent boundary notes F1 and G6. Groups that overlap E3 through A4 contain extra staff-variant cards. The default enabled group is the middle group G3-F4.
+A contiguous subset of the practice range. The middle groups cover the natural pitches from G through F across neighboring octaves, while the edge groups include the adjacent boundary notes F1 and G6. Groups that include E3 through A4 contain extra inter-staff ledger spelling cards. The default enabled group is the middle group G3-F4.
 _Avoid_: Difficulty level, card group
 
 **Enabled group**:
-A practice group selected by the learner to participate in the current practice queue. The first version does not have locked or unlocked groups; any practice group may be enabled freely.
+A practice group selected by the learner as part of the current app-wide note range. Enabled groups scope practice prompts, statistics filters, and study maps consistently. The first version does not have locked or unlocked groups; any practice group may be enabled freely.
 _Avoid_: Unlocked group, available group
 
 **Practice session**:
@@ -45,7 +49,7 @@ A practice queue strategy that restricts prompts to one or more selected answer 
 _Avoid_: Separate deck, filtered group
 
 **Grand-staff prompt**:
-A card prompt that always shows both treble and bass staves while asking for a single note. Outside the overlap range, notes C4 and above appear on the treble staff and notes B3 and below appear on the bass staff. In the overlap range E3 through A4, each pitch has a treble-staff card and a bass-staff card.
+A card prompt that always shows both treble and bass staves while asking for a single note. Outside the inter-staff ledger range, notes C4 and above appear on the treble staff and notes B3 and below appear on the bass staff. In the inter-staff ledger range E3 through A4, each pitch has a treble-staff card and a bass-staff card.
 _Avoid_: Staff image, sheet image
 
 **Staff-page prompt**:

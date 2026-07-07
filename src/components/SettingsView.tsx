@@ -7,7 +7,7 @@ import {
   writeBrowserDataToBackupDirectory,
   type BackupDirectorySelectionResult,
 } from "../data/backup";
-import { db, getBackupState } from "../data/db";
+import { getBackupState } from "../data/db";
 import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "../domain/backupText";
 import { normalizePianoVolume } from "../domain/settings";
 import type { AppSettings, BackupState } from "../domain/types";
@@ -31,7 +31,7 @@ interface SettingsViewProps {
   settings: AppSettings;
   backupState: BackupState;
   hasBrowserPracticeData: boolean;
-  onSettingsSaved: (settings: AppSettings) => void;
+  onSettingsSaved: (settings: AppSettings) => void | Promise<void>;
   onDataChanged: () => Promise<void>;
 }
 
@@ -61,8 +61,7 @@ export function SettingsView({
   }, [settings.pianoVolume]);
 
   async function saveSettings(next: AppSettings): Promise<void> {
-    onSettingsSaved(next);
-    await db.settings.put(next);
+    await onSettingsSaved(next);
   }
 
   function savePianoVolume(nextVolume: number): void {

@@ -30,6 +30,7 @@ import type {
   TargetNote,
   WrongAnswer,
 } from "../domain/types";
+import { GlobalRangeControls } from "./GlobalRangeControls";
 import { StaffPagePrompt } from "./StaffPagePrompt";
 import { StaffPrompt } from "./StaffPrompt";
 
@@ -38,7 +39,7 @@ interface PracticeViewProps {
   reviews: ReviewRecord[];
   navigationExitRequest?: PracticeNavigationExitRequest | null;
   onNavigationExit?: (targetView: PracticeNavigationExitTarget) => void;
-  onSettingsSaved: (settings: AppSettings) => void;
+  onSettingsSaved: (settings: AppSettings) => void | Promise<void>;
   onDataChanged: () => Promise<void>;
   onOpenStats: () => void;
   onBeforePracticeStart: () => Promise<PracticeStartPreflightResult>;
@@ -155,11 +156,9 @@ export function PracticeView({
   const [promptNoteDuration, setPromptNoteDuration] = useState<PromptNoteDuration>(
     settings.promptNoteDuration ?? "quarter",
   );
-  const [enabledGroupIds, setEnabledGroupIds] = useState<PracticeGroupId[]>(settings.enabledGroupIds);
   const [fixedCount, setFixedCount] = useState(settings.fixedCount);
   const [fixedDurationSeconds, setFixedDurationSeconds] = useState(settings.fixedDurationSeconds);
   const [autoPlayTarget, setAutoPlayTarget] = useState(settings.autoPlayTarget);
-  const [includeLedgerVariants, setIncludeLedgerVariants] = useState(settings.includeLedgerVariants ?? true);
   const [queueStrategy, setQueueStrategy] = useState<PracticeQueueStrategy>(resolveQueueStrategy(settings));
   const [drillNoteNames, setDrillNoteNames] = useState<NoteName[]>(settings.drillNoteNames ?? ["C"]);
   const [session, setSession] = useState<PracticeSessionRecord | null>(null);
@@ -198,11 +197,9 @@ export function PracticeView({
     setMode(nextSettings.defaultMode);
     setPromptDisplayMode(nextSettings.promptDisplayMode ?? "staff-page");
     setPromptNoteDuration(nextSettings.promptNoteDuration ?? "quarter");
-    setEnabledGroupIds(nextSettings.enabledGroupIds);
     setFixedCount(nextSettings.fixedCount);
     setFixedDurationSeconds(nextSettings.fixedDurationSeconds);
     setAutoPlayTarget(nextSettings.autoPlayTarget);
-    setIncludeLedgerVariants(nextSettings.includeLedgerVariants ?? true);
     setQueueStrategy(resolveQueueStrategy(nextSettings));
     setDrillNoteNames(nextSettings.drillNoteNames ?? ["C"]);
   }, []);
@@ -214,12 +211,12 @@ export function PracticeView({
   }, [applySettingsSnapshot, phase, settings]);
 
   const enabledNotes = useMemo(
-    () => getNotesForGroups(enabledGroupIds, includeLedgerVariants),
-    [enabledGroupIds, includeLedgerVariants],
+    () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
+    [settings.enabledGroupIds, settings.includeLedgerVariants],
   );
   const fullPracticeCount = useMemo(
-    () => getNotesForGroups(ALL_GROUP_IDS, includeLedgerVariants).length,
-    [includeLedgerVariants],
+    () => getNotesForGroups(ALL_GROUP_IDS, settings.includeLedgerVariants).length,
+    [settings.includeLedgerVariants],
   );
   const fixedCountPresets = useMemo(() => Array.from(new Set([10, 20, fullPracticeCount])), [fullPracticeCount]);
   const queueNotes = useMemo(
@@ -227,6 +224,31 @@ export function PracticeView({
     [drillNoteNames, enabledNotes, queueStrategy],
   );
   const schedulerReviews = useMemo(() => filterLongTermReviews(reviews), [reviews]);
+  const setupSettings = useMemo<AppSettings>(
+    () => ({
+      ...settings,
+      autoPlayTarget,
+      defaultMode: mode,
+      drillNoteNames,
+      fixedCount,
+      fixedDurationSeconds,
+      focusedTraining: queueStrategy === "focused",
+      promptDisplayMode,
+      promptNoteDuration,
+      queueStrategy,
+    }),
+    [
+      autoPlayTarget,
+      drillNoteNames,
+      fixedCount,
+      fixedDurationSeconds,
+      mode,
+      promptDisplayMode,
+      promptNoteDuration,
+      queueStrategy,
+      settings,
+    ],
+  );
 
   const toggleDrillNoteName = useCallback((noteName: NoteName, checked: boolean): void => {
     setDrillNoteNames((current) => {
@@ -337,28 +359,23 @@ export function PracticeView({
   const persistConfig = useCallback(async (): Promise<AppSettings> => {
     const nextSettings: AppSettings = {
       ...settings,
-      enabledGroupIds,
       defaultMode: mode,
       promptDisplayMode,
       promptNoteDuration,
       fixedCount,
       fixedDurationSeconds,
       autoPlayTarget,
-      includeLedgerVariants,
       queueStrategy,
       drillNoteNames,
       focusedTraining: queueStrategy === "focused",
     };
-    await db.settings.put(nextSettings);
-    onSettingsSaved(nextSettings);
+    await onSettingsSaved(nextSettings);
     return nextSettings;
   }, [
     autoPlayTarget,
-    enabledGroupIds,
     fixedCount,
     fixedDurationSeconds,
     drillNoteNames,
-    includeLedgerVariants,
     mode,
     onSettingsSaved,
     queueStrategy,
@@ -939,34 +956,13 @@ export function PracticeView({
 
   if (phase === "setup") {
     return (
-      <section className="practice-shell">
+      <section className="practice-shell practice-setup-shell">
+        <GlobalRangeControls settings={setupSettings} onSettingsSaved={onSettingsSaved} />
         <div className="setup-grid">
           <div className="panel setup-panel">
             <div className="panel-heading">
               <h1>单音识谱</h1>
               <p>1=C · 2=D · 3=E · 4=F · 5=G · 6=A · 7=B</p>
-            </div>
-            <div className="control-block">
-              <span className="control-label">启用组</span>
-              <div className="group-grid">
-                {PRACTICE_GROUPS.map((group) => {
-                  const checked = enabledGroupIds.includes(group.id);
-                  return (
-                    <label className={checked ? "choice choice-active" : "choice"} key={group.id}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(event) => {
-                          setEnabledGroupIds((current) =>
-                            event.target.checked ? [...current, group.id] : current.filter((id) => id !== group.id),
-                          );
-                        }}
-                      />
-                      <span>{group.label}</span>
-                    </label>
-                  );
-                })}
-              </div>
             </div>
 
             <div className="control-block">
@@ -1107,21 +1103,6 @@ export function PracticeView({
                 </div>
               </div>
             ) : null}
-
-            <div className="control-block">
-              <span className="control-label">谱号变体</span>
-              <label className={includeLedgerVariants ? "choice choice-active choice-detail" : "choice choice-detail"}>
-                <input
-                  checked={includeLedgerVariants}
-                  type="checkbox"
-                  onChange={(event) => setIncludeLedgerVariants(event.target.checked)}
-                />
-                <div className="choice-body">
-                  <strong>加练双谱号写法</strong>
-                  <span>E3-A4 同时练高音谱号和低音谱号写法</span>
-                </div>
-              </label>
-            </div>
 
             <div className="control-block">
               <span className="control-label">声音</span>

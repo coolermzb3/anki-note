@@ -1,20 +1,22 @@
 import * as echarts from "echarts";
 import type { EChartsOption } from "echarts";
-import { BarChart3 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentTargetNoteIdsForGroups, PRACTICE_GROUPS } from "../domain/notes";
+import { getNotesForGroups } from "../domain/notes";
 import {
   buildDailyStats,
   buildNoteStats,
   buildPracticeSessionStats,
   filterLongTermReviews,
 } from "../domain/stats";
-import type { PracticeGroupId, PracticeSessionRecord, ReviewRecord } from "../domain/types";
+import type { AppSettings, PracticeSessionRecord, ReviewRecord } from "../domain/types";
+import { GlobalRangeControls } from "./GlobalRangeControls";
 import { StatsRangeStaff, type StaffHeatNote } from "./StatsRangeStaff";
 
 interface StatsViewProps {
+  settings: AppSettings;
   reviews: ReviewRecord[];
   sessions?: PracticeSessionRecord[];
+  onSettingsSaved: (settings: AppSettings) => void | Promise<void>;
 }
 
 type RangeKey = "1" | "7" | "30" | "all";
@@ -30,7 +32,6 @@ interface RecognitionTimeChartStat {
 }
 
 const EMPTY_SESSIONS: PracticeSessionRecord[] = [];
-const ALL_STATS_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS.map((group) => group.id);
 const HEATMAP_WEEK_COUNT = 53;
 const RECOGNITION_CHART_COLORS = {
   p10: "#2f7d74",
@@ -354,16 +355,25 @@ function RecognitionTimeChart({ data }: { data: RecognitionTimeChartStat[] }): J
   return <div aria-label="识别时长折线图" className="recognition-time-chart" ref={chartElementRef} role="img" />;
 }
 
-export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps): JSX.Element {
+export function StatsView({
+  settings,
+  reviews,
+  sessions = EMPTY_SESSIONS,
+  onSettingsSaved,
+}: StatsViewProps): JSX.Element {
   const [range, setRange] = useState<RangeKey>("30");
-  const [selectedGroupIds, setSelectedGroupIds] = useState<PracticeGroupId[]>(ALL_STATS_GROUP_IDS);
   const [recognitionTimeGrouping, setRecognitionTimeGrouping] = useState<RecognitionTimeGrouping>("practice-session");
 
   const longTermReviews = useMemo(() => filterLongTermReviews(reviews), [reviews]);
-  const filteredReviews = useMemo(() => {
-    const activeTargetNoteIds = getCurrentTargetNoteIdsForGroups(selectedGroupIds);
-    return filterByRange(longTermReviews, range).filter((review) => activeTargetNoteIds.has(review.targetNoteId));
-  }, [longTermReviews, range, selectedGroupIds]);
+  const activeNotes = useMemo(
+    () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
+    [settings.enabledGroupIds, settings.includeLedgerVariants],
+  );
+  const groupScopedReviews = useMemo(() => {
+    const activeTargetNoteIds = new Set(activeNotes.map((note) => note.id));
+    return longTermReviews.filter((review) => activeTargetNoteIds.has(review.targetNoteId));
+  }, [activeNotes, longTermReviews]);
+  const filteredReviews = useMemo(() => filterByRange(groupScopedReviews, range), [groupScopedReviews, range]);
   const recognitionTimeStats = useMemo(() => {
     const source =
       recognitionTimeGrouping === "day"
@@ -397,18 +407,18 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
     }));
   }, [filteredReviews, recognitionTimeGrouping, sessions]);
   const noteStats = useMemo(() => {
-    if (selectedGroupIds.length === 0) {
+    if (activeNotes.length === 0) {
       return [];
     }
-    return buildNoteStats(filteredReviews, selectedGroupIds);
-  }, [filteredReviews, selectedGroupIds]);
+    const activeTargetNoteIds = new Set(activeNotes.map((note) => note.id));
+    return buildNoteStats(filteredReviews, settings.enabledGroupIds).filter((stat) =>
+      activeTargetNoteIds.has(stat.targetNoteId),
+    );
+  }, [activeNotes, filteredReviews, settings.enabledGroupIds]);
   const rangeStaffNotes = useMemo(() => {
-    const activeGroups = new Set(selectedGroupIds);
     const statsByNoteId = new Map(noteStats.map((stat) => [stat.targetNoteId, stat]));
-    return PRACTICE_GROUPS.flatMap((group) => group.notes)
-      .filter((note) => activeGroups.has(note.groupId))
-      .map((note) => ({ note, stat: statsByNoteId.get(note.id) }));
-  }, [noteStats, selectedGroupIds]);
+    return activeNotes.map((note) => ({ note, stat: statsByNoteId.get(note.id) }));
+  }, [activeNotes, noteStats]);
   const errorStaffNotes = useMemo<StaffHeatNote[]>(
     () => rangeStaffNotes.map(({ note, stat }) => ({ note, value: stat?.errorCount ?? 0 })),
     [rangeStaffNotes],
@@ -418,49 +428,23 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
     [rangeStaffNotes],
   );
 
-  function toggleGroup(groupId: PracticeGroupId, checked: boolean): void {
-    setSelectedGroupIds((current) => {
-      const next = checked ? [...current, groupId] : current.filter((id) => id !== groupId);
-      const selected = new Set(next);
-      return ALL_STATS_GROUP_IDS.filter((id) => selected.has(id));
-    });
-  }
-
   return (
     <section className="stats-shell">
+      <GlobalRangeControls settings={settings} onSettingsSaved={onSettingsSaved} />
       <div className="stats-header">
         <div>
           <h1>统计</h1>
         </div>
-        <BarChart3 size={24} />
       </div>
 
       <div className="panel heatmap-panel stats-heatmap-panel">
         <div className="panel-heading">
           <h2>练习量</h2>
         </div>
-        <HeatMap reviews={longTermReviews} />
+        <HeatMap reviews={groupScopedReviews} />
       </div>
 
       <div className="stats-main-grid">
-        <div className="stats-filter-row">
-          <div className="group-filter stats-group-filter" aria-label="统计分组筛选">
-            {PRACTICE_GROUPS.map((group) => {
-              const checked = selectedGroupIds.includes(group.id);
-              return (
-                <label className={checked ? "choice choice-active" : "choice"} key={group.id}>
-                  <input
-                    checked={checked}
-                    type="checkbox"
-                    onChange={(event) => toggleGroup(group.id, event.target.checked)}
-                  />
-                  <span>{group.label}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-
         <div className="stats-left-column">
           <div className="panel chart-panel">
             <div className="panel-heading">
