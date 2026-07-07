@@ -1,5 +1,6 @@
 import * as Tone from "tone";
 import { noteToToneName } from "../domain/notes";
+import { DEFAULT_PIANO_VOLUME, normalizePianoVolume } from "../domain/settings";
 import type { NoteName, Octave, TargetNote } from "../domain/types";
 
 const PIANO_SAMPLE_BASE_URL = "https://tonejs.github.io/audio/salamander/";
@@ -45,6 +46,7 @@ let sampler: Tone.Sampler | undefined;
 let samplerLoadPromise: Promise<void> | undefined;
 let samplerStatus: SamplerStatus = "idle";
 let fallbackSynth: Tone.PolySynth | undefined;
+let pianoVolume = DEFAULT_PIANO_VOLUME;
 
 function normalizeError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -125,6 +127,10 @@ export function preloadPianoSamples(): void {
   getSampler();
 }
 
+export function setPianoVolume(volume: number): void {
+  pianoVolume = normalizePianoVolume(volume);
+}
+
 export async function unlockAudio(): Promise<void> {
   await Tone.start();
   getSampler({ retryFailed: true });
@@ -135,10 +141,10 @@ export async function playPianoNote(noteName: NoteName, octave: Octave): Promise
   const note = noteToToneName(noteName, octave);
   const sampledPiano = getLoadedSampler();
   if (sampledPiano) {
-    sampledPiano.triggerAttackRelease(note, "8n");
+    sampledPiano.triggerAttackRelease(note, "8n", undefined, pianoVolume);
     return;
   }
-  getFallbackSynth().triggerAttackRelease(note, "8n");
+  getFallbackSynth().triggerAttackRelease(note, "8n", undefined, pianoVolume);
 }
 
 export async function startPianoNote(noteName: NoteName, octave: Octave): Promise<SustainedPianoNote> {
@@ -148,7 +154,7 @@ export async function startPianoNote(noteName: NoteName, octave: Octave): Promis
   let released = false;
 
   if (sampledPiano) {
-    sampledPiano.triggerAttack(note);
+    sampledPiano.triggerAttack(note, undefined, pianoVolume);
     return {
       release: () => {
         if (released) {
@@ -161,7 +167,7 @@ export async function startPianoNote(noteName: NoteName, octave: Octave): Promis
   }
 
   const synth = getFallbackSynth();
-  synth.triggerAttack(note);
+  synth.triggerAttack(note, undefined, pianoVolume);
   return {
     release: () => {
       if (released) {

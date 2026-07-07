@@ -1,5 +1,5 @@
 import { DatabaseBackup, Download, FolderOpen, Upload } from "lucide-react";
-import { useState } from "react";
+import { type WheelEvent, useEffect, useRef, useState } from "react";
 import {
   chooseBackupDirectory,
   restoreBackupFromDirectory,
@@ -9,10 +9,12 @@ import {
 } from "../data/backup";
 import { db, getBackupState } from "../data/db";
 import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "../domain/backupText";
+import { normalizePianoVolume } from "../domain/settings";
 import type { AppSettings, BackupState } from "../domain/types";
 import { BackupConflictActionContent } from "./BackupConflictActionContent";
 
 type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
+const PIANO_VOLUME_STEP = 0.05;
 
 function truncateStart(value: string, maxLength = 24): string {
   if (value.length <= maxLength) {
@@ -42,16 +44,40 @@ export function SettingsView({
 }: SettingsViewProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [pianoVolumeDraft, setPianoVolumeDraft] = useState(() => normalizePianoVolume(settings.pianoVolume));
+  const pianoVolumeRef = useRef(pianoVolumeDraft);
   const storedBackupState = backupState as StoredBackupState;
   const backupBlockedUntilSync = Boolean(
     backupState.dataConflictBeforeBackup ?? backupState.syncRequiredBeforeBackup ?? storedBackupState.restoreRequiredBeforeBackup,
   );
   const hasBackupSnapshot = Boolean(backupBlockedUntilSync || backupState.lastSeenBackupVersion);
   const backupConflictSummaries = backupBlockedUntilSync ? getBackupConflictDataSummaries(backupState) : null;
+  const pianoVolumePercent = Math.round(pianoVolumeDraft * 100);
+
+  useEffect(() => {
+    const nextPianoVolume = normalizePianoVolume(settings.pianoVolume);
+    pianoVolumeRef.current = nextPianoVolume;
+    setPianoVolumeDraft(nextPianoVolume);
+  }, [settings.pianoVolume]);
 
   async function saveSettings(next: AppSettings): Promise<void> {
-    await db.settings.put(next);
     onSettingsSaved(next);
+    await db.settings.put(next);
+  }
+
+  function savePianoVolume(nextVolume: number): void {
+    const normalizedVolume = normalizePianoVolume(nextVolume);
+    if (normalizedVolume === pianoVolumeRef.current) {
+      return;
+    }
+    pianoVolumeRef.current = normalizedVolume;
+    setPianoVolumeDraft(normalizedVolume);
+    void saveSettings({ ...settings, pianoVolume: normalizedVolume });
+  }
+
+  function handlePianoVolumeWheel(event: WheelEvent<HTMLLabelElement>): void {
+    event.preventDefault();
+    savePianoVolume(pianoVolumeRef.current + (event.deltaY < 0 ? PIANO_VOLUME_STEP : -PIANO_VOLUME_STEP));
   }
 
   function describeDirectorySelection(result: BackupDirectorySelectionResult, selectedBackupState: BackupState): string {
@@ -126,6 +152,25 @@ export function SettingsView({
             <option value={500}>500ms</option>
             <option value={800}>800ms</option>
           </select>
+        </div>
+
+        <div className="setting-row">
+          <div>
+            <strong>音量</strong>
+            <span>目标音和学习页音位图播放音量</span>
+          </div>
+          <label className="volume-control" onWheel={handlePianoVolumeWheel}>
+            <input
+              aria-label="音量"
+              max={100}
+              min={0}
+              step={5}
+              type="range"
+              value={pianoVolumePercent}
+              onChange={(event) => savePianoVolume(Number(event.target.value) / 100)}
+            />
+            <span>{pianoVolumePercent}%</span>
+          </label>
         </div>
       </div>
 

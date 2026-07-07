@@ -1284,6 +1284,28 @@ main.has-backup-reminder .setup-grid {
   gap: 4px;
 }
 
+.volume-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 220px;
+}
+
+.volume-control input[type="range"] {
+  accent-color: var(--accent);
+  border: 0;
+  min-height: 28px;
+  padding: 0;
+  width: 160px;
+}
+
+.volume-control span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+  text-align: right;
+}
+
 .toggle {
   position: relative;
   display: inline-flex;
@@ -1488,6 +1510,20 @@ main.has-backup-reminder .setup-grid {
   .chart-panel .segmented button {
     flex: 1;
     min-width: 0;
+  }
+
+  .setting-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .volume-control {
+    width: 100%;
+  }
+
+  .volume-control input[type="range"] {
+    flex: 1 1 auto;
+    width: auto;
   }
 
   .heatmap-weekdays {

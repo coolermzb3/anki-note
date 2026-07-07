@@ -11,6 +11,7 @@ describe("makeDefaultSettings", () => {
       autoPlayTarget: false,
       enabledGroupIds: ["G3-F4"],
       correctDelayMs: 0,
+      pianoVolume: 0.8,
     });
   });
 });

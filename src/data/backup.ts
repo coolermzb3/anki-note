@@ -2,6 +2,7 @@ import { buildBackupSnapshot, getBackupDataModifiedAt, getBackupManifestVersion 
 import { deriveBackupDataStatus, type BackupDataStatus } from "../domain/backupSync";
 import { backupText } from "../domain/backupText";
 import { normalizePracticeGroupIds } from "../domain/notes";
+import { normalizePianoVolume } from "../domain/settings";
 import type {
   AppSettings,
   BackupDayFile,
@@ -496,6 +497,7 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
     queueStrategy: resolveQueueStrategy(baseSettings),
     drillNoteNames: resolveDrillNoteNames(baseSettings),
     focusedTraining: baseSettings.focusedTraining ?? resolveQueueStrategy(baseSettings) === "focused",
+    pianoVolume: normalizePianoVolume(baseSettings.pianoVolume),
     promptDisplayMode: baseSettings.promptDisplayMode ?? "staff-page",
     promptNoteDuration: baseSettings.promptNoteDuration ?? "quarter",
   };

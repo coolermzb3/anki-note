@@ -17,6 +17,7 @@ const settings: AppSettings = {
   fixedDurationSeconds: 180,
   autoPlayTarget: true,
   includeLedgerVariants: true,
+  pianoVolume: 0.8,
   queueStrategy: "adaptive",
   drillNoteNames: ["C"],
   focusedTraining: false,

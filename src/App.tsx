@@ -1,6 +1,6 @@
 import { BarChart3, BellOff, BookOpen, Download, Dumbbell, FolderOpen, Settings, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { preloadPianoSamples } from "./audio/piano";
+import { preloadPianoSamples, setPianoVolume } from "./audio/piano";
 import {
   type BackupBeforePracticeResult,
   chooseBackupDirectory,
@@ -135,6 +135,12 @@ export function App(): JSX.Element {
   useEffect(() => {
     preloadPianoSamples();
   }, []);
+
+  useEffect(() => {
+    if (data) {
+      setPianoVolume(data.settings.pianoVolume);
+    }
+  }, [data]);
 
   useEffect(() => {
     if (!data) {

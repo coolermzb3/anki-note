@@ -1,6 +1,7 @@
 import Dexie, { type Table } from "dexie";
 import { createUuid } from "../domain/id";
 import { DEFAULT_ENABLED_GROUPS, normalizePracticeGroupIds } from "../domain/notes";
+import { DEFAULT_PIANO_VOLUME, normalizePianoVolume } from "../domain/settings";
 import type { AppSettings, BackupState, NoteName, PracticeQueueStrategy, PracticeSessionRecord, ReviewRecord } from "../domain/types";
 
 export class AppDatabase extends Dexie {
@@ -45,6 +46,7 @@ export function makeDefaultSettings(): AppSettings {
     fixedDurationSeconds: 60,
     autoPlayTarget: false,
     includeLedgerVariants: true,
+    pianoVolume: DEFAULT_PIANO_VOLUME,
     queueStrategy: "adaptive",
     drillNoteNames: ["C"],
     focusedTraining: false,
@@ -62,11 +64,14 @@ export async function ensureSettings(): Promise<AppSettings> {
   if (existing) {
     const persistedGroupIds = existing.enabledGroupIds ?? [];
     const enabledGroupIds = normalizePracticeGroupIds(persistedGroupIds);
+    const pianoVolume = normalizePianoVolume(existing.pianoVolume);
     if (
       existing.queueStrategy === undefined ||
       existing.drillNoteNames === undefined ||
       existing.focusedTraining === undefined ||
       existing.includeLedgerVariants === undefined ||
+      existing.pianoVolume === undefined ||
+      existing.pianoVolume !== pianoVolume ||
       existing.promptDisplayMode === undefined ||
       existing.promptNoteDuration === undefined ||
       !sameGroupIds(persistedGroupIds, enabledGroupIds)
@@ -78,6 +83,7 @@ export async function ensureSettings(): Promise<AppSettings> {
         drillNoteNames: resolveDrillNoteNames(existing),
         focusedTraining: existing.focusedTraining ?? resolveQueueStrategy(existing) === "focused",
         includeLedgerVariants: existing.includeLedgerVariants ?? true,
+        pianoVolume,
         promptDisplayMode: existing.promptDisplayMode ?? "staff-page",
         promptNoteDuration: existing.promptNoteDuration ?? "quarter",
       };

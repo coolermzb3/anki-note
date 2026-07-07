@@ -96,6 +96,7 @@ export interface AppSettings {
   fixedDurationSeconds: number;
   autoPlayTarget: boolean;
   includeLedgerVariants: boolean;
+  pianoVolume: number;
   queueStrategy: PracticeQueueStrategy;
   drillNoteNames: NoteName[];
   focusedTraining?: boolean;
