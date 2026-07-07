@@ -9,7 +9,7 @@ import {
   buildPracticeSessionStats,
   filterLongTermReviews,
 } from "../domain/stats";
-import type { NoteName, PracticeGroupId, PracticeSessionRecord, ReviewRecord, Staff, TargetNote } from "../domain/types";
+import type { PracticeGroupId, PracticeSessionRecord, ReviewRecord } from "../domain/types";
 import { StatsRangeStaff, type StaffHeatNote } from "./StatsRangeStaff";
 
 interface StatsViewProps {
@@ -47,28 +47,6 @@ const RECOGNITION_CHART_COLORS = {
 const RECOGNITION_CHART_HANDLE_ICON =
   "path://M11,5 H17 A4,4 0 0 1 21,9 V23 A4,4 0 0 1 17,27 H11 A4,4 0 0 1 7,23 V9 A4,4 0 0 1 11,5 Z M14,-3 V5 M14,27 V35";
 const WEEKDAY_LABELS = ["周一", "", "周三", "", "周五", "", "周日"];
-const NOTE_ORDER: Record<NoteName, number> = {
-  C: 0,
-  D: 1,
-  E: 2,
-  F: 3,
-  G: 4,
-  A: 5,
-  B: 6,
-};
-const STAFF_ORDER: Record<Staff, number> = {
-  bass: 0,
-  treble: 1,
-};
-
-function compareRangeStaffNotes(a: TargetNote, b: TargetNote): number {
-  return (
-    STAFF_ORDER[a.staff] - STAFF_ORDER[b.staff] ||
-    a.octave - b.octave ||
-    NOTE_ORDER[a.noteName] - NOTE_ORDER[b.noteName]
-  );
-}
-
 function formatShortDateTime(iso: string): { label: string; tooltipLabel: string } {
   const date = new Date(iso);
   const shortDate = `${String(date.getFullYear()).slice(2)}/${date.getMonth() + 1}/${date.getDate()}`;
@@ -348,10 +326,21 @@ function RecognitionTimeChart({ data }: { data: RecognitionTimeChartStat[] }): J
 
     const chart = echarts.init(element, null, { renderer: "canvas" });
     chartRef.current = chart;
-    const resizeObserver = new ResizeObserver(() => chart.resize());
-    resizeObserver.observe(element);
+    let resizeFrame = 0;
+    const scheduleResize = (): void => {
+      window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => chart.resize());
+    };
+    const resizeObserver = new ResizeObserver(scheduleResize);
+    const resizeTarget = element.parentElement ?? element;
+    resizeObserver.observe(resizeTarget);
+    if (resizeTarget !== element) {
+      resizeObserver.observe(element);
+    }
+    scheduleResize();
 
     return () => {
+      window.cancelAnimationFrame(resizeFrame);
       resizeObserver.disconnect();
       chart.dispose();
       chartRef.current = null;
@@ -418,7 +407,6 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
     const statsByNoteId = new Map(noteStats.map((stat) => [stat.targetNoteId, stat]));
     return PRACTICE_GROUPS.flatMap((group) => group.notes)
       .filter((note) => activeGroups.has(note.groupId))
-      .sort(compareRangeStaffNotes)
       .map((note) => ({ note, stat: statsByNoteId.get(note.id) }));
   }, [noteStats, selectedGroupIds]);
   const errorStaffNotes = useMemo<StaffHeatNote[]>(
@@ -455,25 +443,25 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
       </div>
 
       <div className="stats-main-grid">
-        <div className="stats-left-column">
-          <div className="stats-filter-row">
-            <div className="group-filter stats-group-filter" aria-label="统计分组筛选">
-              {PRACTICE_GROUPS.map((group) => {
-                const checked = selectedGroupIds.includes(group.id);
-                return (
-                  <label className={checked ? "choice choice-active" : "choice"} key={group.id}>
-                    <input
-                      checked={checked}
-                      type="checkbox"
-                      onChange={(event) => toggleGroup(group.id, event.target.checked)}
-                    />
-                    <span>{group.label}</span>
-                  </label>
-                );
-              })}
-            </div>
+        <div className="stats-filter-row">
+          <div className="group-filter stats-group-filter" aria-label="统计分组筛选">
+            {PRACTICE_GROUPS.map((group) => {
+              const checked = selectedGroupIds.includes(group.id);
+              return (
+                <label className={checked ? "choice choice-active" : "choice"} key={group.id}>
+                  <input
+                    checked={checked}
+                    type="checkbox"
+                    onChange={(event) => toggleGroup(group.id, event.target.checked)}
+                  />
+                  <span>{group.label}</span>
+                </label>
+              );
+            })}
           </div>
+        </div>
 
+        <div className="stats-left-column">
           <div className="panel chart-panel">
             <div className="panel-heading">
               <h2>识别时长</h2>
@@ -528,6 +516,26 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
             <div className="note-heat-stack">
               <div className="note-heat-row">
                 <div className="note-heat-row-heading">
+                  <h3>识别速度</h3>
+                  <div className="range-legend">
+                    <span>
+                      <i className="legend-swatch legend-neutral" />
+                      无记录
+                    </span>
+                    <span>
+                      <i className="legend-swatch legend-blue-light" />
+                      较快
+                    </span>
+                    <span>
+                      <i className="legend-swatch legend-blue-dark" />
+                      较慢
+                    </span>
+                  </div>
+                </div>
+                <StatsRangeStaff label="识别速度音域分布" notes={timeStaffNotes} tone="blue" />
+              </div>
+              <div className="note-heat-row">
+                <div className="note-heat-row-heading">
                   <h3>错误次数</h3>
                   <div className="range-legend">
                     <span>
@@ -545,26 +553,6 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
                   </div>
                 </div>
                 <StatsRangeStaff label="错误次数音域分布" notes={errorStaffNotes} tone="red" />
-              </div>
-              <div className="note-heat-row">
-                <div className="note-heat-row-heading">
-                  <h3>识别时长</h3>
-                  <div className="range-legend">
-                    <span>
-                      <i className="legend-swatch legend-neutral" />
-                      无记录
-                    </span>
-                    <span>
-                      <i className="legend-swatch legend-blue-light" />
-                      较短
-                    </span>
-                    <span>
-                      <i className="legend-swatch legend-blue-dark" />
-                      较长
-                    </span>
-                  </div>
-                </div>
-                <StatsRangeStaff label="识别时长音域分布" notes={timeStaffNotes} tone="blue" />
               </div>
             </div>
           </div>
