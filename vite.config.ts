@@ -12,7 +12,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           music: ["vexflow", "tone"],
-          charts: ["recharts"],
+          charts: ["echarts"],
           storage: ["dexie"],
         },
       },

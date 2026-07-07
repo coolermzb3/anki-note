@@ -1,14 +1,7 @@
+import * as echarts from "echarts";
+import type { EChartsOption } from "echarts";
 import { BarChart3 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { getCurrentTargetNoteIdsForGroups, PRACTICE_GROUPS } from "../domain/notes";
 import {
   buildDailyStats,
@@ -26,11 +19,33 @@ interface StatsViewProps {
 
 type RangeKey = "1" | "7" | "30" | "all";
 type RecognitionTimeGrouping = "day" | "practice-session";
+interface RecognitionTimeChartStat {
+  key: string;
+  label: string;
+  tooltipLabel: string;
+  completedReviews: number;
+  p10?: number;
+  median?: number;
+  p90?: number;
+}
 
 const EMPTY_SESSIONS: PracticeSessionRecord[] = [];
 const ALL_STATS_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS.map((group) => group.id);
 const HEATMAP_WEEK_COUNT = 53;
-const RECOGNITION_CHART_ANIMATION_MS = 180;
+const RECOGNITION_CHART_COLORS = {
+  p10: "#2f7d74",
+  median: "#2b2520",
+  p90: "#c84c3d",
+  grid: "#e5dccf",
+  muted: "#7a6f61",
+  panel: "#fffaf2",
+  rangeFill: "rgba(47, 125, 116, 0.14)",
+  rangeMoveHandle: "rgba(47, 125, 116, 0.45)",
+  rangePreview: "#efe7dc",
+  rangePreviewLine: "#cdbca8",
+};
+const RECOGNITION_CHART_HANDLE_ICON =
+  "path://M11,5 H17 A4,4 0 0 1 21,9 V23 A4,4 0 0 1 17,27 H11 A4,4 0 0 1 7,23 V9 A4,4 0 0 1 11,5 Z M14,-3 V5 M14,27 V35";
 const WEEKDAY_LABELS = ["周一", "", "周三", "", "周五", "", "周日"];
 const NOTE_ORDER: Record<NoteName, number> = {
   C: 0,
@@ -94,29 +109,6 @@ function monthLabelForWeek(weekStart: Date, index: number): string {
   }
 
   return index === 0 ? formatMonthLabel(weekStart) : "";
-}
-
-function RecognitionTimeTick({
-  x = 0,
-  y = 0,
-  payload,
-}: {
-  x?: number;
-  y?: number;
-  payload?: { value: string };
-}): JSX.Element {
-  const lines = String(payload?.value ?? "").split("\n");
-  return (
-    <g transform={`translate(${x},${y})`}>
-      <text fill="#7a6f61" fontSize={11} textAnchor="middle">
-        {lines.map((line, index) => (
-          <tspan dy={index === 0 ? 12 : 13} key={`${line}-${index}`} x={0}>
-            {line}
-          </tspan>
-        ))}
-      </text>
-    </g>
-  );
 }
 
 function filterByRange(reviews: ReviewRecord[], range: RangeKey): ReviewRecord[] {
@@ -198,6 +190,179 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
       </div>
     </div>
   );
+}
+
+function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChartsOption {
+  const dataZoomSliderStyle = {
+    backgroundColor: "rgba(255, 250, 242, 0.92)",
+    borderColor: "#dfd3c4",
+    brushSelect: false,
+    dataBackground: {
+      areaStyle: { color: RECOGNITION_CHART_COLORS.rangePreview },
+      lineStyle: { color: RECOGNITION_CHART_COLORS.rangePreviewLine },
+    },
+    fillerColor: RECOGNITION_CHART_COLORS.rangeFill,
+    handleIcon: RECOGNITION_CHART_HANDLE_ICON,
+    handleSize: 32,
+    handleStyle: {
+      borderColor: RECOGNITION_CHART_COLORS.p10,
+      borderWidth: 1.5,
+      color: RECOGNITION_CHART_COLORS.panel,
+    },
+    moveHandleSize: 18,
+    moveHandleStyle: {
+      color: RECOGNITION_CHART_COLORS.rangeMoveHandle,
+    },
+    selectedDataBackground: {
+      areaStyle: { color: "rgba(47, 125, 116, 0.08)" },
+      lineStyle: { color: RECOGNITION_CHART_COLORS.p10 },
+    },
+    showDetail: false,
+    textStyle: { color: RECOGNITION_CHART_COLORS.muted },
+  };
+
+  return {
+    animation: false,
+    color: [RECOGNITION_CHART_COLORS.p10, RECOGNITION_CHART_COLORS.median, RECOGNITION_CHART_COLORS.p90],
+    dataZoom: [
+      { end: 100, filterMode: "none", start: 0, type: "inside", xAxisIndex: 0 },
+      {
+        ...dataZoomSliderStyle,
+        bottom: 16,
+        end: 100,
+        height: 34,
+        start: 0,
+        type: "slider",
+        xAxisIndex: 0,
+      },
+      { filterMode: "none", type: "inside", yAxisIndex: 0 },
+      {
+        ...dataZoomSliderStyle,
+        filterMode: "none",
+        right: 12,
+        type: "slider",
+        width: 34,
+        yAxisIndex: 0,
+      },
+    ],
+    grid: {
+      bottom: 82,
+      left: 50,
+      right: 66,
+      top: 38,
+    },
+    legend: {
+      icon: "rect",
+      itemGap: 14,
+      itemHeight: 3,
+      itemWidth: 18,
+      right: 16,
+      textStyle: { color: RECOGNITION_CHART_COLORS.muted, fontSize: 13 },
+      top: 4,
+    },
+    series: [
+      {
+        connectNulls: false,
+        data: data.map((stat) => stat.p10 ?? null),
+        name: "P10",
+        showSymbol: false,
+        smooth: true,
+        type: "line",
+      },
+      {
+        connectNulls: false,
+        data: data.map((stat) => stat.median ?? null),
+        lineStyle: { width: 2.5 },
+        name: "中位",
+        showSymbol: false,
+        smooth: true,
+        type: "line",
+      },
+      {
+        connectNulls: false,
+        data: data.map((stat) => stat.p90 ?? null),
+        name: "P90",
+        showSymbol: false,
+        smooth: true,
+        type: "line",
+      },
+    ],
+    tooltip: {
+      axisPointer: { animation: false, type: "line" },
+      enterable: false,
+      extraCssText: "pointer-events: none;",
+      formatter: (params) => {
+        const items = Array.isArray(params) ? params : [params];
+        const firstItem = items[0] as { dataIndex?: number } | undefined;
+        const stat = firstItem?.dataIndex === undefined ? undefined : data[firstItem.dataIndex];
+        const title = stat?.tooltipLabel ?? "";
+        const completed = stat ? `<div style="color:#7a6f61">完成 ${stat.completedReviews} 次</div>` : "";
+        const rows = items
+          .map((item) => {
+            const point = item as { marker?: string; seriesName?: string; value?: number | string | null };
+            if (point.value === null || point.value === undefined || point.value === "") {
+              return "";
+            }
+            return `<div>${point.marker ?? ""}${point.seriesName ?? ""}: ${point.value}s</div>`;
+          })
+          .filter(Boolean)
+          .join("");
+        return `<div><strong>${title}</strong>${completed}${rows}</div>`;
+      },
+      transitionDuration: 0,
+      trigger: "axis",
+    },
+    xAxis: {
+      axisLabel: {
+        color: RECOGNITION_CHART_COLORS.muted,
+        fontSize: 11,
+        hideOverlap: true,
+      },
+      boundaryGap: false,
+      data: data.map((stat) => stat.label),
+      splitLine: { lineStyle: { color: RECOGNITION_CHART_COLORS.grid, type: "dashed" }, show: true },
+      type: "category",
+    },
+    yAxis: {
+      axisLabel: {
+        color: RECOGNITION_CHART_COLORS.muted,
+        fontSize: 11,
+        formatter: "{value}s",
+      },
+      min: 0,
+      splitLine: { lineStyle: { color: RECOGNITION_CHART_COLORS.grid, type: "dashed" } },
+      type: "value",
+    },
+  };
+}
+
+function RecognitionTimeChart({ data }: { data: RecognitionTimeChartStat[] }): JSX.Element {
+  const chartElementRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<echarts.EChartsType | null>(null);
+
+  useEffect(() => {
+    const element = chartElementRef.current;
+    if (!element) {
+      return undefined;
+    }
+
+    const chart = echarts.init(element, null, { renderer: "canvas" });
+    chartRef.current = chart;
+    const resizeObserver = new ResizeObserver(() => chart.resize());
+    resizeObserver.observe(element);
+
+    return () => {
+      resizeObserver.disconnect();
+      chart.dispose();
+      chartRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    chartRef.current?.setOption(makeRecognitionTimeChartOption(data), true);
+  }, [data]);
+
+  return <div aria-label="识别时长折线图" className="recognition-time-chart" ref={chartElementRef} role="img" />;
 }
 
 export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps): JSX.Element {
@@ -349,44 +514,7 @@ export function StatsView({ reviews, sessions = EMPTY_SESSIONS }: StatsViewProps
               {recognitionTimeStats.length === 0 ? (
                 <div className="empty-state">暂无记录</div>
               ) : (
-                <ResponsiveContainer height={280} width="100%">
-                  <LineChart data={recognitionTimeStats} margin={{ bottom: 18, left: 2, right: 8, top: 8 }}>
-                    <CartesianGrid stroke="#e5dccf" strokeDasharray="3 3" />
-                    <XAxis dataKey="label" height={44} interval="preserveStartEnd" minTickGap={16} tick={<RecognitionTimeTick />} />
-                    <YAxis tick={{ fill: "#7a6f61", fontSize: 11 }} unit="s" />
-                    <Tooltip
-                      formatter={(value, name) => [`${value}s`, name]}
-                      labelFormatter={(_, payload) => payload?.[0]?.payload?.tooltipLabel ?? ""}
-                    />
-                    <Line
-                      animationDuration={RECOGNITION_CHART_ANIMATION_MS}
-                      dataKey="p10"
-                      dot={false}
-                      name="P10"
-                      stroke="#2f7d74"
-                      strokeWidth={2}
-                      type="monotone"
-                    />
-                    <Line
-                      animationDuration={RECOGNITION_CHART_ANIMATION_MS}
-                      dataKey="median"
-                      dot={false}
-                      name="中位"
-                      stroke="#2b2520"
-                      strokeWidth={2.5}
-                      type="monotone"
-                    />
-                    <Line
-                      animationDuration={RECOGNITION_CHART_ANIMATION_MS}
-                      dataKey="p90"
-                      dot={false}
-                      name="P90"
-                      stroke="#c84c3d"
-                      strokeWidth={2}
-                      type="monotone"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                <RecognitionTimeChart data={recognitionTimeStats} />
               )}
             </div>
           </div>

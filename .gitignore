@@ -8,4 +8,5 @@ dist/
 /vitest.config.js
 /vitest.config.d.ts
 /backup/
+/demo/chart-interaction-demo.html
 /%SystemDrive%/
