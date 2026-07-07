@@ -37,6 +37,10 @@ interface GetSamplerOptions {
   retryFailed?: boolean;
 }
 
+export interface SustainedPianoNote {
+  release: () => void;
+}
+
 let sampler: Tone.Sampler | undefined;
 let samplerLoadPromise: Promise<void> | undefined;
 let samplerStatus: SamplerStatus = "idle";
@@ -137,6 +141,42 @@ export async function playPianoNote(noteName: NoteName, octave: Octave): Promise
   getFallbackSynth().triggerAttackRelease(note, "8n");
 }
 
+export async function startPianoNote(noteName: NoteName, octave: Octave): Promise<SustainedPianoNote> {
+  await unlockAudio();
+  const note = noteToToneName(noteName, octave);
+  const sampledPiano = getLoadedSampler();
+  let released = false;
+
+  if (sampledPiano) {
+    sampledPiano.triggerAttack(note);
+    return {
+      release: () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        sampledPiano.triggerRelease(note);
+      },
+    };
+  }
+
+  const synth = getFallbackSynth();
+  synth.triggerAttack(note);
+  return {
+    release: () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      synth.triggerRelease(note);
+    },
+  };
+}
+
 export async function playTargetNote(note: TargetNote): Promise<void> {
   await playPianoNote(note.noteName, note.octave);
+}
+
+export async function startTargetNote(note: TargetNote): Promise<SustainedPianoNote> {
+  return startPianoNote(note.noteName, note.octave);
 }

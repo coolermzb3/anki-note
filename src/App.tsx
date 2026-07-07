@@ -1,4 +1,4 @@
-import { BarChart3, BellOff, Download, Dumbbell, FolderOpen, Settings, Upload, X } from "lucide-react";
+import { BarChart3, BellOff, BookOpen, Download, Dumbbell, FolderOpen, Settings, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { preloadPianoSamples } from "./audio/piano";
 import {
@@ -24,8 +24,9 @@ import {
 } from "./components/PracticeView";
 import { SettingsView } from "./components/SettingsView";
 import { StatsView } from "./components/StatsView";
+import { StudyView } from "./components/StudyView";
 
-type View = "practice" | "stats" | "settings";
+type View = PracticeNavigationExitTarget;
 
 const BACKUP_REMINDER_SUPPRESSED_DATE_KEY = "anki-note.backupReminderSuppressedDate";
 
@@ -459,6 +460,10 @@ export function App(): JSX.Element {
           <BarChart3 size={18} />
           统计
         </button>
+        <button className={view === "study" ? "active" : ""} onClick={() => selectView("study")}>
+          <BookOpen size={18} />
+          学习
+        </button>
         <button className={view === "settings" ? "active" : ""} onClick={() => selectView("settings")}>
           <Settings size={18} />
           设置
@@ -556,6 +561,7 @@ export function App(): JSX.Element {
           />
         ) : null}
         {view === "stats" ? <StatsView reviews={data.reviews} sessions={data.sessions} /> : null}
+        {view === "study" ? <StudyView /> : null}
         {view === "settings" ? (
           <SettingsView
             backupState={data.backupState}

@@ -328,6 +328,248 @@ button.primary.backup-decision-button .backup-action-summary {
   padding: 28px;
 }
 
+.study-shell {
+  width: min(1320px, calc(100vw - 86px));
+  margin: 0 auto;
+  padding: 28px;
+  display: grid;
+  gap: 16px;
+}
+
+.study-header {
+  min-height: 48px;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+
+.study-header p {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 5px;
+}
+
+.study-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+.study-control-block {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.study-controls .segmented button {
+  min-width: 78px;
+}
+
+.study-direction-options button {
+  min-width: 64px;
+}
+
+.study-carousel {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 12px;
+}
+
+.study-arrow {
+  width: 48px;
+  min-height: 48px;
+  padding: 0;
+}
+
+.study-figure {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 253, 250, 0.94);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.study-slide {
+  grid-area: 1 / 1;
+  min-width: 0;
+  background: rgba(255, 253, 250, 0.94);
+  will-change: transform;
+}
+
+.study-slide.active,
+.study-slide.enter-next,
+.study-slide.enter-previous {
+  pointer-events: auto;
+}
+
+.study-slide.exit-next,
+.study-slide.exit-previous {
+  pointer-events: none;
+}
+
+.study-slide.enter-next {
+  animation: study-enter-next 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  z-index: 2;
+}
+
+.study-slide.exit-next {
+  animation: study-exit-next 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  z-index: 1;
+}
+
+.study-slide.enter-previous {
+  animation: study-enter-previous 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  z-index: 2;
+}
+
+.study-slide.exit-previous {
+  animation: study-exit-previous 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  z-index: 1;
+}
+
+@keyframes study-enter-next {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes study-exit-next {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes study-enter-previous {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes study-exit-previous {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.study-figure figcaption {
+  min-height: 44px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.study-map {
+  cursor: grab;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.study-map-renderer {
+  min-width: 100%;
+  width: 100%;
+}
+
+.study-map svg {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  width: 100%;
+}
+
+.study-column-highlight {
+  pointer-events: none;
+}
+
+.study-note-hotspot {
+  cursor: pointer;
+  fill: transparent;
+  outline: none;
+  pointer-events: all;
+  stroke: transparent;
+  stroke-width: 2;
+}
+
+.study-note-hotspot.active {
+  fill: rgba(47, 143, 95, 0.1);
+  stroke: var(--success);
+}
+
+.study-label-hotspot {
+  cursor: pointer;
+  fill: transparent;
+  outline: none;
+  pointer-events: all;
+  stroke: transparent;
+}
+
+.study-dots {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.study-dot {
+  width: 10px;
+  min-width: 10px;
+  height: 10px;
+  min-height: 10px;
+  border-radius: 999px;
+  border-color: transparent;
+  background: #d2c6b6;
+  box-shadow: none;
+  padding: 0;
+}
+
+.study-dot:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--border-strong);
+  box-shadow: none;
+}
+
+.study-dot.active {
+  border-color: transparent;
+  background: var(--ink);
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .study-slide.enter-next,
+  .study-slide.exit-next,
+  .study-slide.enter-previous,
+  .study-slide.exit-previous {
+    animation: none;
+  }
+}
+
 .setup-grid {
   min-height: calc(100vh - 56px);
   display: grid;
@@ -1115,9 +1357,20 @@ main.has-backup-reminder .setup-grid {
 
   .practice-shell,
   .stats-shell,
+  .study-shell,
   .settings-shell {
     width: 100%;
     padding: 16px;
+  }
+
+  .study-carousel {
+    grid-template-columns: 40px minmax(0, 1fr) 40px;
+    gap: 8px;
+  }
+
+  .study-arrow {
+    width: 40px;
+    min-height: 40px;
   }
 
   .backup-reminder {
