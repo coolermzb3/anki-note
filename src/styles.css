@@ -403,17 +403,7 @@ button.primary.backup-decision-button .backup-action-summary {
   background: rgba(255, 253, 250, 0.94);
   box-shadow: var(--shadow);
   overflow: hidden;
-}
-
-.study-figure figcaption {
-  min-height: 44px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  font-weight: 800;
+  padding-top: 44px;
 }
 
 .study-map {

@@ -57,7 +57,7 @@ const STUDY_MAP_LAYOUT = {
   // x: 窄屏时音符区域到五线谱左右边缘至少保留的空白。
   minNoteAreaSidePadding: 40,
 
-  // y: 五线谱组到画布上下边缘的空白。
+  // y: SVG 的基础上下留白，影响学习图整体高度。
   staffVerticalPadding: 120,
   // y: 高低音谱号之间的间隔，按图分别设置。
   clefGap: {
@@ -778,7 +778,6 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
       </div>
       <div className="study-map-frame" aria-label="学习页音位图">
         <figure className="study-figure">
-          <figcaption>F1-G6 音符位置</figcaption>
           <StudyNoteMap
             columns={columns}
             highlightedNoteId={highlightedNoteId}
