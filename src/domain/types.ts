@@ -75,6 +75,8 @@ export interface PracticeSessionRecord {
   queueStrategy?: PracticeQueueStrategy;
   drillNoteNames?: NoteName[];
   focusedTraining?: boolean;
+  promptDisplayMode?: PromptDisplayMode;
+  includeLedgerVariants?: boolean;
   startedAt: string;
   endedAt?: string;
   endReason?: SessionEndReason;

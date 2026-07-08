@@ -32,6 +32,12 @@ _Avoid_: Unlocked group, available group
 A contiguous period of practice using the currently enabled groups. A session may be an open-ended flow that continues until the learner stops, a fixed-count session that ends after a chosen number of completed reviews, or a fixed-duration session that ends after a chosen active practice duration.
 _Avoid_: Game, round
 
+**Comparable practice session**:
+A fixed-count or fixed-duration practice session that can be compared with another session because it used the same
+practice range, inter-staff ledger spelling setting, prompt display mode, and practice queue strategy.
+Prompt note duration and automatic target-note playback do not make sessions incomparable.
+_Avoid_: Same round, identical UI state
+
 **Practice queue**:
 The card selection flow for a practice session. A practice queue decides which target note appears next, without changing what counts as a review or answer input.
 _Avoid_: Deck scheduler, spaced-repetition scheduler
