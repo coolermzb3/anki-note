@@ -1,5 +1,6 @@
 import { findNoteById } from "./notes";
-import { isCompletedReview } from "./reviews";
+import { isStatisticalReview } from "./reviews";
+import { hasEnoughStatReviews } from "./stats";
 import type { AppSettings, PracticeGroupId, PracticeSessionRecord, ReviewRecord } from "./types";
 
 export type SessionProgressMode = "actual-order" | "duration-cumsum";
@@ -48,6 +49,10 @@ function sameStringSet(left: string[] = [], right: string[] = []): boolean {
 
 function areFinitePracticeSessions(reference: PracticeSessionRecord, candidate: PracticeSessionRecord): boolean {
   return reference.mode !== "open-ended" && candidate.mode !== "open-ended";
+}
+
+export function isProgressChartEligible(session: PracticeSessionRecord, sessionReviews: ReviewRecord[]): boolean {
+  return session.mode !== "open-ended" && hasEnoughStatReviews(sessionReviews);
 }
 
 function hasLedgerVariantReview(reviews: ReviewRecord[]): boolean {
@@ -108,15 +113,15 @@ export function isComparablePracticeSession(
 }
 
 function buildActualOrderPoints(reviews: ReviewRecord[]): SessionProgressPoint[] {
-  const completedReviews = reviews.filter(isCompletedReview);
-  if (completedReviews.length === 0) {
+  const statisticalReviews = reviews.filter(isStatisticalReview);
+  if (statisticalReviews.length === 0) {
     return [];
   }
 
   let elapsedMs = 0;
   return [
     { elapsedMs: 0, completedReviews: 0 },
-    ...completedReviews
+    ...statisticalReviews
       .map((review, index) => ({ index, review }))
       .sort(
         (a, b) =>
@@ -137,7 +142,7 @@ function buildActualOrderPoints(reviews: ReviewRecord[]): SessionProgressPoint[]
 
 function buildDurationCumsumPoints(reviews: ReviewRecord[]): SessionProgressPoint[] {
   const durations = reviews
-    .filter(isCompletedReview)
+    .filter(isStatisticalReview)
     .map((review) => review.activeMs)
     .sort((a, b) => a - b);
   let elapsedMs = 0;
@@ -173,7 +178,7 @@ export function buildSessionProgressSeries({
   historyLimit,
   mode,
 }: BuildSessionProgressSeriesOptions): SessionProgressSeries[] {
-  if (currentSession.mode === "open-ended") {
+  if (!isProgressChartEligible(currentSession, currentReviews)) {
     return [];
   }
 
@@ -190,6 +195,7 @@ export function buildSessionProgressSeries({
       const sessionReviews = reviewsBySession.get(session.id) ?? [];
       return (
         new Date(session.startedAt).getTime() < currentStartedAt &&
+        isProgressChartEligible(session, sessionReviews) &&
         isComparablePracticeSession(currentSession, session, sessionReviews)
       );
     })
@@ -229,13 +235,13 @@ export function buildLatestSessionProgressSeries({
   const currentSession = [...sessions]
     .filter(
       (session) =>
-        session.mode !== "open-ended" && isSamePracticeRange(settings, session, reviewsBySession.get(session.id) ?? []),
+        isProgressChartEligible(session, reviewsBySession.get(session.id) ?? []) &&
+        isSamePracticeRange(settings, session, reviewsBySession.get(session.id) ?? []),
     )
     .sort(
       (a, b) =>
         new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime() || b.id.localeCompare(a.id),
-    )
-    .find((session) => buildSessionProgressPoints(reviewsBySession.get(session.id) ?? [], mode).length > 1);
+    )[0];
 
   if (!currentSession) {
     return [];

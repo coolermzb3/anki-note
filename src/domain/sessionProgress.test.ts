@@ -3,9 +3,12 @@ import {
   buildLatestSessionProgressSeries,
   buildSessionProgressSeries,
   isComparablePracticeSession,
+  isProgressChartEligible,
 } from "./sessionProgress";
 import { makeReview } from "./testFactories";
 import type { PracticeSessionRecord } from "./types";
+
+const REVIEW_NOTE_IDS = ["C4", "D4", "E4", "F4", "G4"] as const;
 
 function makeSession(
   overrides: Partial<PracticeSessionRecord> & { id: string; startedAt: string },
@@ -27,6 +30,24 @@ function makeSession(
     completedCount: overrides.completedCount ?? 0,
     interruptedCount: overrides.interruptedCount ?? 0,
   };
+}
+
+function makeSessionReviews(
+  sessionId: string,
+  activeMsList: number[],
+  answeredSeconds = activeMsList.map((_, index) => index + 1),
+) {
+  return activeMsList.map((activeMs, index) => {
+    const answeredAt = `2026-07-04T12:00:${String(answeredSeconds[index]).padStart(2, "0")}.000+08:00`;
+    return makeReview({
+      id: `${sessionId}-${index}`,
+      targetNoteId: REVIEW_NOTE_IDS[index % REVIEW_NOTE_IDS.length],
+      sessionId,
+      activeMs,
+      answeredAt,
+      endedAt: answeredAt,
+    });
+  });
 }
 
 describe("session progress", () => {
@@ -108,6 +129,31 @@ describe("session progress", () => {
     ).toBe(false);
   });
 
+  it("requires enough statistical reviews and a finite mode for progress charts", () => {
+    const current = makeSession({
+      id: "current",
+      startedAt: "2026-07-04T12:00:00.000+08:00",
+      mode: "fixed-duration",
+      fixedDurationSeconds: 60,
+    });
+    const shortReviews = makeSessionReviews("current", [1000, 1100, 1200, 1300]);
+    const enoughReviews = makeSessionReviews("current", [1000, 1100, 1200, 1300, 1400]);
+
+    expect(isProgressChartEligible(current, shortReviews)).toBe(false);
+    expect(isProgressChartEligible(current, enoughReviews)).toBe(true);
+    expect(isProgressChartEligible({ ...current, mode: "open-ended" }, enoughReviews)).toBe(false);
+    expect(
+      buildSessionProgressSeries({
+        currentSession: current,
+        currentReviews: shortReviews,
+        sessions: [],
+        reviews: [],
+        historyLimit: 10,
+        mode: "actual-order",
+      }),
+    ).toEqual([]);
+  });
+
   it("builds actual-order progress by cumulating completed review active time in answer order", () => {
     const current = makeSession({
       id: "current",
@@ -142,46 +188,12 @@ describe("session progress", () => {
 
     const series = buildSessionProgressSeries({
       currentSession: current,
-      currentReviews: [
-        makeReview({
-          targetNoteId: "C4",
-          sessionId: "current",
-          activeMs: 1300,
-          answeredAt: "2026-07-04T12:00:02.300+08:00",
-        }),
-        makeReview({
-          targetNoteId: "D4",
-          sessionId: "current",
-          activeMs: 1000,
-          answeredAt: "2026-07-04T12:00:01.000+08:00",
-        }),
-      ],
+      currentReviews: makeSessionReviews("current", [1300, 1000, 700, 900, 1100], [2, 1, 3, 4, 5]),
       sessions: [older, old, different],
       reviews: [
-        makeReview({
-          targetNoteId: "C4",
-          sessionId: "older",
-          activeMs: 900,
-          answeredAt: "2026-07-04T10:00:00.900+08:00",
-        }),
-        makeReview({
-          targetNoteId: "C4",
-          sessionId: "old",
-          activeMs: 1200,
-          answeredAt: "2026-07-04T11:00:01.200+08:00",
-        }),
-        makeReview({
-          targetNoteId: "D4",
-          sessionId: "old",
-          activeMs: 1300,
-          answeredAt: "2026-07-04T11:00:02.500+08:00",
-        }),
-        makeReview({
-          targetNoteId: "C4",
-          sessionId: "different",
-          activeMs: 800,
-          answeredAt: "2026-07-04T11:30:00.800+08:00",
-        }),
+        ...makeSessionReviews("older", [900, 800, 700, 600, 500]),
+        ...makeSessionReviews("old", [1200, 1300, 700, 900, 1000]),
+        ...makeSessionReviews("different", [800, 900, 1000, 1100, 1200]),
       ],
       historyLimit: 1,
       mode: "actual-order",
@@ -192,11 +204,17 @@ describe("session progress", () => {
       { elapsedMs: 0, completedReviews: 0 },
       { elapsedMs: 1200, completedReviews: 1 },
       { elapsedMs: 2500, completedReviews: 2 },
+      { elapsedMs: 3200, completedReviews: 3 },
+      { elapsedMs: 4100, completedReviews: 4 },
+      { elapsedMs: 5100, completedReviews: 5 },
     ]);
     expect(series[1].points).toEqual([
       { elapsedMs: 0, completedReviews: 0 },
       { elapsedMs: 1000, completedReviews: 1 },
       { elapsedMs: 2300, completedReviews: 2 },
+      { elapsedMs: 3000, completedReviews: 3 },
+      { elapsedMs: 3900, completedReviews: 4 },
+      { elapsedMs: 5000, completedReviews: 5 },
     ]);
   });
 
@@ -213,10 +231,7 @@ describe("session progress", () => {
 
     const series = buildSessionProgressSeries({
       currentSession: current,
-      currentReviews: [
-        makeReview({ targetNoteId: "C4", sessionId: "current", activeMs: 2300 }),
-        makeReview({ targetNoteId: "D4", sessionId: "current", activeMs: 700 }),
-      ],
+      currentReviews: makeSessionReviews("current", [2300, 700, 1600, 900, 1100]),
       sessions: [],
       reviews: [],
       historyLimit: 10,
@@ -227,7 +242,10 @@ describe("session progress", () => {
     expect(series[0].points).toEqual([
       { elapsedMs: 0, completedReviews: 0 },
       { elapsedMs: 700, completedReviews: 1 },
-      { elapsedMs: 3000, completedReviews: 2 },
+      { elapsedMs: 1600, completedReviews: 2 },
+      { elapsedMs: 2700, completedReviews: 3 },
+      { elapsedMs: 4300, completedReviews: 4 },
+      { elapsedMs: 6600, completedReviews: 5 },
     ]);
   });
 
@@ -253,6 +271,11 @@ describe("session progress", () => {
       startedAt: "2026-07-04T11:30:00.000+08:00",
       mode: "open-ended",
     });
+    const latestShort = makeSession({
+      ...older,
+      id: "latest-short",
+      startedAt: "2026-07-04T11:45:00.000+08:00",
+    });
     const latest = makeSession({
       ...older,
       id: "latest",
@@ -261,16 +284,13 @@ describe("session progress", () => {
 
     const series = buildLatestSessionProgressSeries({
       settings: { enabledGroupIds: ["G3-F4"], includeLedgerVariants: true },
-      sessions: [older, latestDifferentRange, latestOpenEnded, latest],
+      sessions: [older, latestDifferentRange, latestOpenEnded, latestShort, latest],
       reviews: [
-        makeReview({ targetNoteId: "C4", sessionId: "older", activeMs: 1100 }),
-        makeReview({ targetNoteId: "D4", sessionId: "older", activeMs: 1200 }),
-        makeReview({ targetNoteId: "G4", sessionId: "latest-different-range", activeMs: 700 }),
-        makeReview({ targetNoteId: "A4", sessionId: "latest-different-range", activeMs: 800 }),
-        makeReview({ targetNoteId: "C4", sessionId: "latest-open-ended", activeMs: 500 }),
-        makeReview({ targetNoteId: "D4", sessionId: "latest-open-ended", activeMs: 600 }),
-        makeReview({ targetNoteId: "C4", sessionId: "latest", activeMs: 900 }),
-        makeReview({ targetNoteId: "D4", sessionId: "latest", activeMs: 1000 }),
+        ...makeSessionReviews("older", [1100, 1200, 1300, 1400, 1500]),
+        ...makeSessionReviews("latest-different-range", [700, 800, 900, 1000, 1100]),
+        ...makeSessionReviews("latest-open-ended", [500, 600, 700, 800, 900]),
+        ...makeSessionReviews("latest-short", [700, 800, 900, 1000]),
+        ...makeSessionReviews("latest", [900, 1000, 1100, 1200, 1300]),
       ],
       historyLimit: 10,
       mode: "actual-order",

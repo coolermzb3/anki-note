@@ -4,6 +4,8 @@ import {
   buildNoteStats,
   buildPracticeSessionStats,
   filterLongTermReviews,
+  hasEnoughStatReviews,
+  isLongTermStatsEligible,
   percentile,
   positiveTertileLevel,
 } from "./stats";
@@ -73,6 +75,8 @@ describe("stats", () => {
 
     const filtered = filterLongTermReviews([...shortSession, ...longSession]);
 
+    expect(hasEnoughStatReviews(shortSession)).toBe(false);
+    expect(isLongTermStatsEligible(longSession)).toBe(true);
     expect(new Set(filtered.map((review) => review.sessionId))).toEqual(new Set(["long-session"]));
     expect(buildDailyStats(filtered)[0].completedReviews).toBe(5);
   });

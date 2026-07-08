@@ -33,18 +33,39 @@ export interface PracticeSessionStat {
   p90Ms?: number;
 }
 
-export const MIN_LONG_TERM_SESSION_REVIEWS = 5;
+export const MIN_SESSION_STAT_REVIEWS = 5;
 export type PositiveHeatLevel = 1 | 2 | 3;
 export type HeatLevel = 0 | PositiveHeatLevel;
 
-export function filterLongTermReviews(reviews: ReviewRecord[]): ReviewRecord[] {
-  const qualifiedCountBySession = new Map<string, number>();
+function groupReviewsBySession(reviews: ReviewRecord[]): Map<string, ReviewRecord[]> {
+  const reviewsBySession = new Map<string, ReviewRecord[]>();
   for (const review of reviews) {
-    if (isStatisticalReview(review)) {
-      qualifiedCountBySession.set(review.sessionId, (qualifiedCountBySession.get(review.sessionId) ?? 0) + 1);
+    const sessionReviews = reviewsBySession.get(review.sessionId);
+    if (sessionReviews) {
+      sessionReviews.push(review);
+    } else {
+      reviewsBySession.set(review.sessionId, [review]);
     }
   }
-  return reviews.filter((review) => (qualifiedCountBySession.get(review.sessionId) ?? 0) >= MIN_LONG_TERM_SESSION_REVIEWS);
+  return reviewsBySession;
+}
+
+export function hasEnoughStatReviews(reviews: ReviewRecord[]): boolean {
+  return reviews.filter(isStatisticalReview).length >= MIN_SESSION_STAT_REVIEWS;
+}
+
+export function isLongTermStatsEligible(reviews: ReviewRecord[]): boolean {
+  return hasEnoughStatReviews(reviews);
+}
+
+export function filterLongTermReviews(reviews: ReviewRecord[]): ReviewRecord[] {
+  const reviewsBySession = groupReviewsBySession(reviews);
+  const eligibleSessionIds = new Set(
+    [...reviewsBySession.entries()]
+      .filter(([, sessionReviews]) => isLongTermStatsEligible(sessionReviews))
+      .map(([sessionId]) => sessionId),
+  );
+  return reviews.filter((review) => eligibleSessionIds.has(review.sessionId));
 }
 
 export function percentile(values: number[], percent: number): number | undefined {
