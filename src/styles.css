@@ -834,8 +834,24 @@ main.has-backup-reminder .setup-grid::after {
   font-size: 24px;
 }
 
-.note-list {
+.summary-section {
   margin-top: 16px;
+}
+
+.summary-section-heading {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.summary-section-heading h2 {
+  font-size: 18px;
+}
+
+.note-list {
   display: grid;
   gap: 8px;
 }
@@ -852,6 +868,143 @@ main.has-backup-reminder .setup-grid::after {
   background: var(--surface);
 }
 
+.note-row-header {
+  min-height: 30px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.session-progress-heading {
+  align-items: flex-start;
+}
+
+.session-progress-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.session-progress-controls .segmented,
+.session-progress-history-limit {
+  height: 44px;
+  min-height: 44px;
+}
+
+.session-progress-controls .segmented {
+  flex-wrap: nowrap;
+  padding: 3px;
+}
+
+.session-progress-controls .segmented button {
+  height: 36px;
+  min-height: 36px;
+}
+
+.session-progress-history-limit {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: inherit;
+  font-weight: 400;
+}
+
+.session-progress-history-limit input {
+  width: 74px;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.session-progress-chart-wrap {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.session-progress-chart {
+  width: 100%;
+  height: var(--session-progress-chart-height, 260px);
+  display: block;
+}
+
+.session-progress-grid-line {
+  stroke: #e5dccf;
+  stroke-dasharray: 4 5;
+  stroke-width: 1;
+}
+
+.session-progress-axis {
+  stroke: #bcae9a;
+  stroke-width: 1.2;
+}
+
+.session-progress-tick,
+.session-progress-axis-label {
+  fill: var(--muted);
+  font-size: 12px;
+}
+
+.session-progress-line-history,
+.session-progress-line-current {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.session-progress-line-history {
+  stroke: rgba(37, 111, 103, 0.2);
+  stroke-width: 1.6;
+}
+
+.session-progress-line-current {
+  stroke: var(--accent);
+  stroke-width: 2.6;
+}
+
+.session-progress-current-point {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2.2;
+}
+
+.session-progress-legend {
+  color: var(--muted);
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.session-progress-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-progress-legend i {
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.session-progress-legend-history {
+  background: rgba(37, 111, 103, 0.2);
+}
+
+.session-progress-legend-current {
+  background: var(--accent);
+}
+
 .stats-header {
   margin-bottom: 18px;
 }
@@ -861,8 +1014,23 @@ main.has-backup-reminder .setup-grid::after {
   margin: 0;
 }
 
+.stats-header-range-filter {
+  margin-left: auto;
+}
+
 .stats-range-filter .segmented button {
   min-width: 76px;
+}
+
+.stats-range-filter .segmented {
+  height: 44px;
+  min-height: 44px;
+  padding: 3px;
+}
+
+.stats-range-filter .segmented button {
+  height: 36px;
+  min-height: 36px;
 }
 
 .chart-panel-actions {
@@ -872,6 +1040,21 @@ main.has-backup-reminder .setup-grid::after {
   justify-content: flex-end;
   gap: 8px 18px;
   min-width: 0;
+}
+
+.stats-carousel-card > .panel-heading {
+  min-height: 52px;
+}
+
+.chart-panel-actions > .segmented {
+  height: 44px;
+  min-height: 44px;
+  padding: 3px;
+}
+
+.chart-panel-actions > .segmented button {
+  height: 36px;
+  min-height: 36px;
 }
 
 .switch-line {
@@ -985,6 +1168,63 @@ main.has-backup-reminder .setup-grid::after {
   overflow: hidden;
 }
 
+.chart-carousel-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.chart-carousel-arrow {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.chart-carousel-arrow:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--surface-soft);
+  box-shadow: none;
+}
+
+.chart-carousel-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.chart-carousel-dots button {
+  width: 8px;
+  height: 8px;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 999px;
+  border-color: transparent;
+  background: #cdbca8;
+  box-shadow: none;
+  padding: 0;
+}
+
+.chart-carousel-dots button:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--border-strong);
+  box-shadow: none;
+}
+
+.chart-carousel-dots button.active {
+  width: 20px;
+  background: var(--accent);
+}
+
 .recognition-time-chart {
   max-width: 100%;
   min-width: 0;
@@ -993,32 +1233,66 @@ main.has-backup-reminder .setup-grid::after {
   min-height: 320px;
 }
 
-.stats-main-grid {
+.stats-card-carousel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.95fr);
-  gap: 18px;
-  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
 }
 
-.stats-left-column,
-.stats-right-column {
-  display: grid;
+.stats-card-carousel-viewport {
+  cursor: grab;
   min-width: 0;
+  overflow: hidden;
+  user-select: none;
+}
+
+.stats-card-carousel-viewport:active {
+  cursor: grabbing;
+}
+
+.stats-card-carousel-viewport .chart-box,
+.stats-card-carousel-viewport .chart-panel-actions,
+.stats-card-carousel-viewport .note-heat-stack {
+  cursor: default;
+  user-select: auto;
+}
+
+.stats-card-carousel-track {
+  display: flex;
+  gap: 18px;
+  width: 100%;
+  transform: translateX(var(--stats-carousel-translate, calc(-50% - 9px)));
+  transition: transform 0.22s ease;
+}
+
+.stats-card-carousel-track-instant {
+  transition: none;
+}
+
+.stats-card-carousel-single .stats-card-carousel-track {
+  transform: translateX(var(--stats-carousel-single-translate, calc(-100% - 18px)));
+  width: 100%;
+}
+
+.stats-card-carousel-slide {
+  display: grid;
+  flex: 0 0 calc((100% - 18px) / 2);
+  min-width: 0;
+}
+
+.stats-card-carousel-single .stats-card-carousel-slide {
+  flex-basis: 100%;
+}
+
+.stats-carousel-card {
+  height: 100%;
+  min-height: 0;
+  box-shadow: none;
 }
 
 .chart-panel {
   min-width: 0;
   overflow: hidden;
-}
-
-.stats-left-column > .panel,
-.stats-right-column > .panel {
-  height: 100%;
-  min-height: 0;
-}
-
-.stats-right-column .panel {
-  box-shadow: 0 12px 32px rgba(66, 50, 34, 0.07);
 }
 
 .note-heat-panel {
@@ -1027,7 +1301,7 @@ main.has-backup-reminder .setup-grid::after {
 }
 
 .note-heat-panel .panel-heading {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .note-heat-stack {
@@ -1228,17 +1502,6 @@ main.has-backup-reminder .setup-grid::after {
   border: 0;
 }
 
-@media (max-width: 1320px) {
-  .stats-main-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .stats-left-column > .panel,
-  .stats-right-column > .panel {
-    height: auto;
-  }
-}
-
 @media (max-width: 820px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1339,6 +1602,16 @@ main.has-backup-reminder .setup-grid::after {
     justify-content: flex-start;
   }
 
+  .stats-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .stats-header-range-filter {
+    margin-left: 0;
+    width: 100%;
+  }
+
   .stats-range-filter .segmented {
     width: 100%;
   }
@@ -1354,6 +1627,23 @@ main.has-backup-reminder .setup-grid::after {
 
   .note-row {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .session-progress-heading,
+  .session-progress-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .session-progress-controls,
+  .session-progress-controls .segmented,
+  .session-progress-history-limit {
+    width: 100%;
+  }
+
+  .session-progress-controls .segmented button {
+    flex: 1;
+    min-width: 0;
   }
 
   .chart-panel .panel-heading {

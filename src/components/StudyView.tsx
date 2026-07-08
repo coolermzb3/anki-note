@@ -4,6 +4,7 @@ import { playTargetNote, startTargetNote, type SustainedPianoNote } from "../aud
 import { formatTargetNoteLabel, getNotesForGroups, noteToVexKey } from "../domain/notes";
 import type { AppSettings, NoteName, Staff, TargetNote } from "../domain/types";
 import { GlobalRangeControls } from "./GlobalRangeControls";
+import { useLocalStorageState } from "./useLocalStorageState";
 
 const NOTE_COLUMNS_BY_KEY: Array<{ answerNumber: string; noteName: NoteName }> = [
   { answerNumber: "1", noteName: "C" },
@@ -23,6 +24,10 @@ const STUDY_COLUMN_ORDER_OPTIONS = [
 
 type StudyColumnOrderId = (typeof STUDY_COLUMN_ORDER_OPTIONS)[number]["id"];
 type StudyColumnDefinition = (typeof NOTE_COLUMNS_BY_KEY)[number];
+interface StudyUiPreferences {
+  columnOrderId: StudyColumnOrderId;
+  isColumnOrderReversed: boolean;
+}
 
 const NOTE_DURATION = "w";
 const NEUTRAL_COLOR = "#211c18";
@@ -32,6 +37,11 @@ const ACTIVE_FILL = "rgba(47, 143, 95, 0.16)";
 const TRANSPARENT_NOTE_COLOR = "rgba(0, 0, 0, 0)";
 const KEY_FLASH_MS = 360;
 const NOTE_FLASH_MS = 260;
+const STUDY_UI_PREFERENCES_KEY = "anki-note.studyUiPreferences";
+const DEFAULT_STUDY_UI_PREFERENCES: StudyUiPreferences = {
+  columnOrderId: "circle",
+  isColumnOrderReversed: false,
+};
 const NOTE_NAME_ORDER: Record<NoteName, number> = {
   C: 0,
   D: 1,
@@ -128,6 +138,31 @@ interface StudyMapMetrics {
   trebleY: number;
   width: number;
   x: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStudyColumnOrderId(value: unknown): value is StudyColumnOrderId {
+  return (
+    typeof value === "string" &&
+    STUDY_COLUMN_ORDER_OPTIONS.some((option) => option.id === value)
+  );
+}
+
+function parseStudyUiPreferences(value: unknown, fallback: StudyUiPreferences): StudyUiPreferences {
+  if (!isRecord(value)) {
+    return fallback;
+  }
+
+  return {
+    columnOrderId: isStudyColumnOrderId(value.columnOrderId) ? value.columnOrderId : fallback.columnOrderId,
+    isColumnOrderReversed:
+      typeof value.isColumnOrderReversed === "boolean"
+        ? value.isColumnOrderReversed
+        : fallback.isColumnOrderReversed,
+  };
 }
 
 interface StudyColumnLayout {
@@ -556,10 +591,21 @@ function collectHighlightedNoteNames(heldColumns: Map<string, HeldColumnPlayback
 }
 
 export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.Element {
-  const [columnOrderId, setColumnOrderId] = useState<StudyColumnOrderId>("circle");
-  const [isColumnOrderReversed, setIsColumnOrderReversed] = useState(false);
+  const [studyUiPreferences, setStudyUiPreferences] = useLocalStorageState(
+    STUDY_UI_PREFERENCES_KEY,
+    DEFAULT_STUDY_UI_PREFERENCES,
+    { parse: parseStudyUiPreferences },
+  );
   const [highlightedNoteNames, setHighlightedNoteNames] = useState<ReadonlySet<NoteName>>(() => new Set());
   const [highlightedNoteId, setHighlightedNoteId] = useState<string | undefined>();
+  const columnOrderId = studyUiPreferences.columnOrderId;
+  const isColumnOrderReversed = studyUiPreferences.isColumnOrderReversed;
+  const setColumnOrderId = (nextColumnOrderId: StudyColumnOrderId): void => {
+    setStudyUiPreferences((current) => ({ ...current, columnOrderId: nextColumnOrderId }));
+  };
+  const setIsColumnOrderReversed = (nextIsColumnOrderReversed: boolean): void => {
+    setStudyUiPreferences((current) => ({ ...current, isColumnOrderReversed: nextIsColumnOrderReversed }));
+  };
   const columnFlashTimerRef = useRef<number | undefined>();
   const flashedColumnRef = useRef<NoteName | undefined>();
   const noteFlashTimerRef = useRef<number | undefined>();

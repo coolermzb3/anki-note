@@ -68,7 +68,7 @@ const RANGE_MAP_LAYOUT = {
   labelTopPadding: 5,
   labelStaffGap: 27,
   labelLineGap: 15,
-  lowerStaffReserve: 170,
+  lowerStaffReserve: 130,
   topLabelFontSize: 13,
   bottomLabelFontSize: 11,
 };

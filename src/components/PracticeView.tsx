@@ -1,7 +1,7 @@
 import { BarChart3, Pause, Play, RotateCcw, SlidersHorizontal, Square, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playPianoNote, playTargetNote, unlockAudio } from "../audio/piano";
-import { db, deletePracticeSessionWithReviews, resolveQueueStrategy, saveReview } from "../data/db";
+import { db, deletePracticeSessionWithReviews, resolveDrillNoteNames, resolveQueueStrategy, saveReview } from "../data/db";
 import { writeBackupIfSafe, writeBackupNow } from "../data/backup";
 import { createUuid } from "../domain/id";
 import {
@@ -14,7 +14,13 @@ import {
 import { shouldIgnoreReviewForSession, shouldKeepPracticeSession } from "../domain/practiceSession";
 import { isCompletedReview } from "../domain/reviews";
 import { getDrillNotes, selectNextNote, selectNotePage } from "../domain/scheduler";
-import { buildNoteStats, filterLongTermReviews, formatMs, percentile } from "../domain/stats";
+import { buildSessionProgressSeries, type SessionProgressMode } from "../domain/sessionProgress";
+import {
+  buildNoteStats,
+  filterLongTermReviews,
+  formatMs,
+  percentile,
+} from "../domain/stats";
 import type {
   AppSettings,
   FocusLoss,
@@ -31,11 +37,23 @@ import type {
   WrongAnswer,
 } from "../domain/types";
 import { GlobalRangeControls } from "./GlobalRangeControls";
+import {
+  SessionProgressChart,
+  SessionProgressControls,
+  SessionProgressLegend,
+} from "./SessionProgressChart";
+import {
+  DEFAULT_SESSION_PROGRESS_UI_PREFERENCES,
+  parseSessionProgressUiPreferences,
+  SESSION_PROGRESS_UI_PREFERENCES_KEY,
+} from "./sessionProgressPreferences";
 import { StaffPagePrompt } from "./StaffPagePrompt";
 import { StaffPrompt } from "./StaffPrompt";
+import { useLocalStorageState } from "./useLocalStorageState";
 
 interface PracticeViewProps {
   settings: AppSettings;
+  sessions: PracticeSessionRecord[];
   reviews: ReviewRecord[];
   navigationExitRequest?: PracticeNavigationExitRequest | null;
   onNavigationExit?: (targetView: PracticeNavigationExitTarget) => void;
@@ -91,6 +109,17 @@ interface CompleteSessionOptions {
   updateUi?: boolean;
 }
 
+interface PracticeSetupUiPreferences {
+  autoPlayTarget: boolean;
+  drillNoteNames: NoteName[];
+  fixedCount: number;
+  fixedDurationSeconds: number;
+  mode: PracticeMode;
+  promptDisplayMode: PromptDisplayMode;
+  promptNoteDuration: PromptNoteDuration;
+  queueStrategy: PracticeQueueStrategy;
+}
+
 function newSessionId(): string {
   return createUuid();
 }
@@ -113,6 +142,11 @@ function inputMinutesToDurationSeconds(value: string): number {
 const ALL_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS.map((group) => group.id);
 const STAFF_PAGE_SIZE = 48;
 const MELODY_BUFFER_SIZE = 16;
+const PRACTICE_SETUP_UI_PREFERENCES_KEY = "anki-note.practiceSetupUiPreferences";
+const PRACTICE_MODES: readonly PracticeMode[] = ["open-ended", "fixed-count", "fixed-duration"];
+const PROMPT_DISPLAY_MODES: readonly PromptDisplayMode[] = ["single-note", "staff-page"];
+const PROMPT_NOTE_DURATIONS: readonly PromptNoteDuration[] = ["whole", "quarter"];
+const PRACTICE_QUEUE_STRATEGIES: readonly PracticeQueueStrategy[] = ["adaptive", "focused", "melody", "note-drill"];
 const PRACTICE_QUEUE_OPTIONS: Array<{ strategy: PracticeQueueStrategy; label: string; description: string }> = [
   {
     strategy: "adaptive",
@@ -136,8 +170,80 @@ const PRACTICE_QUEUE_OPTIONS: Array<{ strategy: PracticeQueueStrategy; label: st
   },
 ];
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPracticeMode(value: unknown): value is PracticeMode {
+  return typeof value === "string" && PRACTICE_MODES.includes(value as PracticeMode);
+}
+
+function isPromptDisplayMode(value: unknown): value is PromptDisplayMode {
+  return typeof value === "string" && PROMPT_DISPLAY_MODES.includes(value as PromptDisplayMode);
+}
+
+function isPromptNoteDuration(value: unknown): value is PromptNoteDuration {
+  return typeof value === "string" && PROMPT_NOTE_DURATIONS.includes(value as PromptNoteDuration);
+}
+
+function isPracticeQueueStrategy(value: unknown): value is PracticeQueueStrategy {
+  return typeof value === "string" && PRACTICE_QUEUE_STRATEGIES.includes(value as PracticeQueueStrategy);
+}
+
+function normalizeFixedCount(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(500, Math.max(1, Math.floor(parsed))) : fallback;
+}
+
+function normalizeFixedDurationSeconds(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(60, Math.round(parsed)) : fallback;
+}
+
+function normalizeDrillNoteNames(value: unknown, fallback: NoteName[]): NoteName[] {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+  const selected = new Set(value.filter((noteName): noteName is string => typeof noteName === "string"));
+  return ANSWER_BUTTONS.map((button) => button.noteName).filter((noteName) => selected.has(noteName));
+}
+
+function makeDefaultPracticeSetupUiPreferences(settings: AppSettings): PracticeSetupUiPreferences {
+  return {
+    autoPlayTarget: settings.autoPlayTarget,
+    drillNoteNames: resolveDrillNoteNames(settings),
+    fixedCount: settings.fixedCount,
+    fixedDurationSeconds: settings.fixedDurationSeconds,
+    mode: settings.defaultMode,
+    promptDisplayMode: settings.promptDisplayMode ?? "staff-page",
+    promptNoteDuration: settings.promptNoteDuration ?? "quarter",
+    queueStrategy: resolveQueueStrategy(settings),
+  };
+}
+
+function parsePracticeSetupUiPreferences(
+  value: unknown,
+  fallback: PracticeSetupUiPreferences,
+): PracticeSetupUiPreferences {
+  if (!isRecord(value)) {
+    return fallback;
+  }
+
+  return {
+    autoPlayTarget: typeof value.autoPlayTarget === "boolean" ? value.autoPlayTarget : fallback.autoPlayTarget,
+    drillNoteNames: normalizeDrillNoteNames(value.drillNoteNames, fallback.drillNoteNames),
+    fixedCount: normalizeFixedCount(value.fixedCount, fallback.fixedCount),
+    fixedDurationSeconds: normalizeFixedDurationSeconds(value.fixedDurationSeconds, fallback.fixedDurationSeconds),
+    mode: isPracticeMode(value.mode) ? value.mode : fallback.mode,
+    promptDisplayMode: isPromptDisplayMode(value.promptDisplayMode) ? value.promptDisplayMode : fallback.promptDisplayMode,
+    promptNoteDuration: isPromptNoteDuration(value.promptNoteDuration) ? value.promptNoteDuration : fallback.promptNoteDuration,
+    queueStrategy: isPracticeQueueStrategy(value.queueStrategy) ? value.queueStrategy : fallback.queueStrategy,
+  };
+}
+
 export function PracticeView({
   settings,
+  sessions,
   reviews,
   navigationExitRequest,
   onNavigationExit,
@@ -148,19 +254,21 @@ export function PracticeView({
   onPracticeFinished,
   onRunningChange,
 }: PracticeViewProps): JSX.Element {
+  const defaultPracticeSetupUiPreferences = useMemo(
+    () => makeDefaultPracticeSetupUiPreferences(settings),
+    [settings],
+  );
+  const [practiceSetupPreferences, setPracticeSetupPreferences] = useLocalStorageState(
+    PRACTICE_SETUP_UI_PREFERENCES_KEY,
+    defaultPracticeSetupUiPreferences,
+    { parse: parsePracticeSetupUiPreferences },
+  );
+  const [sessionProgressPreferences, setSessionProgressPreferences] = useLocalStorageState(
+    SESSION_PROGRESS_UI_PREFERENCES_KEY,
+    DEFAULT_SESSION_PROGRESS_UI_PREFERENCES,
+    { parse: parseSessionProgressUiPreferences },
+  );
   const [phase, setPhase] = useState<Phase>("setup");
-  const [mode, setMode] = useState<PracticeMode>(settings.defaultMode);
-  const [promptDisplayMode, setPromptDisplayMode] = useState<PromptDisplayMode>(
-    settings.promptDisplayMode ?? "staff-page",
-  );
-  const [promptNoteDuration, setPromptNoteDuration] = useState<PromptNoteDuration>(
-    settings.promptNoteDuration ?? "quarter",
-  );
-  const [fixedCount, setFixedCount] = useState(settings.fixedCount);
-  const [fixedDurationSeconds, setFixedDurationSeconds] = useState(settings.fixedDurationSeconds);
-  const [autoPlayTarget, setAutoPlayTarget] = useState(settings.autoPlayTarget);
-  const [queueStrategy, setQueueStrategy] = useState<PracticeQueueStrategy>(resolveQueueStrategy(settings));
-  const [drillNoteNames, setDrillNoteNames] = useState<NoteName[]>(settings.drillNoteNames ?? ["C"]);
   const [session, setSession] = useState<PracticeSessionRecord | null>(null);
   const [currentNote, setCurrentNote] = useState<TargetNote | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
@@ -172,6 +280,46 @@ export function PracticeView({
   const [staffPageIndex, setStaffPageIndex] = useState(0);
   const [staffPageCompletedCount, setStaffPageCompletedCount] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const mode = practiceSetupPreferences.mode;
+  const promptDisplayMode = practiceSetupPreferences.promptDisplayMode;
+  const promptNoteDuration = practiceSetupPreferences.promptNoteDuration;
+  const fixedCount = practiceSetupPreferences.fixedCount;
+  const fixedDurationSeconds = practiceSetupPreferences.fixedDurationSeconds;
+  const autoPlayTarget = practiceSetupPreferences.autoPlayTarget;
+  const queueStrategy = practiceSetupPreferences.queueStrategy;
+  const drillNoteNames = practiceSetupPreferences.drillNoteNames;
+  const summaryProgressMode = sessionProgressPreferences.mode;
+  const summaryHistoryLimit = sessionProgressPreferences.historyLimit;
+  const setMode = (nextMode: PracticeMode): void => {
+    setPracticeSetupPreferences((current) => ({ ...current, mode: nextMode }));
+  };
+  const setPromptDisplayMode = (nextPromptDisplayMode: PromptDisplayMode): void => {
+    setPracticeSetupPreferences((current) => ({ ...current, promptDisplayMode: nextPromptDisplayMode }));
+  };
+  const setPromptNoteDuration = (nextPromptNoteDuration: PromptNoteDuration): void => {
+    setPracticeSetupPreferences((current) => ({ ...current, promptNoteDuration: nextPromptNoteDuration }));
+  };
+  const setFixedCount = (nextFixedCount: number): void => {
+    setPracticeSetupPreferences((current) => ({ ...current, fixedCount: normalizeFixedCount(nextFixedCount, current.fixedCount) }));
+  };
+  const setFixedDurationSeconds = (nextFixedDurationSeconds: number): void => {
+    setPracticeSetupPreferences((current) => ({
+      ...current,
+      fixedDurationSeconds: normalizeFixedDurationSeconds(nextFixedDurationSeconds, current.fixedDurationSeconds),
+    }));
+  };
+  const setAutoPlayTarget = (nextAutoPlayTarget: boolean): void => {
+    setPracticeSetupPreferences((current) => ({ ...current, autoPlayTarget: nextAutoPlayTarget }));
+  };
+  const setQueueStrategy = (nextQueueStrategy: PracticeQueueStrategy): void => {
+    setPracticeSetupPreferences((current) => ({ ...current, queueStrategy: nextQueueStrategy }));
+  };
+  const setSummaryProgressMode = (nextMode: SessionProgressMode): void => {
+    setSessionProgressPreferences((current) => ({ ...current, mode: nextMode }));
+  };
+  const setSummaryHistoryLimit = (nextHistoryLimit: number): void => {
+    setSessionProgressPreferences((current) => ({ ...current, historyLimit: nextHistoryLimit }));
+  };
 
   const promptRef = useRef<PromptRuntime | null>(null);
   const sessionRef = useRef<PracticeSessionRecord | null>(null);
@@ -194,21 +342,8 @@ export function PracticeView({
   }, [onRunningChange, phase]);
 
   const applySettingsSnapshot = useCallback((nextSettings: AppSettings): void => {
-    setMode(nextSettings.defaultMode);
-    setPromptDisplayMode(nextSettings.promptDisplayMode ?? "staff-page");
-    setPromptNoteDuration(nextSettings.promptNoteDuration ?? "quarter");
-    setFixedCount(nextSettings.fixedCount);
-    setFixedDurationSeconds(nextSettings.fixedDurationSeconds);
-    setAutoPlayTarget(nextSettings.autoPlayTarget);
-    setQueueStrategy(resolveQueueStrategy(nextSettings));
-    setDrillNoteNames(nextSettings.drillNoteNames ?? ["C"]);
-  }, []);
-
-  useEffect(() => {
-    if (phase === "setup") {
-      applySettingsSnapshot(settings);
-    }
-  }, [applySettingsSnapshot, phase, settings]);
+    setPracticeSetupPreferences(makeDefaultPracticeSetupUiPreferences(nextSettings));
+  }, [setPracticeSetupPreferences]);
 
   const enabledNotes = useMemo(
     () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
@@ -251,12 +386,17 @@ export function PracticeView({
   );
 
   const toggleDrillNoteName = useCallback((noteName: NoteName, checked: boolean): void => {
-    setDrillNoteNames((current) => {
-      const next = checked ? [...current, noteName] : current.filter((name) => name !== noteName);
+    setPracticeSetupPreferences((current) => {
+      const next = checked
+        ? [...current.drillNoteNames, noteName]
+        : current.drillNoteNames.filter((name) => name !== noteName);
       const selected = new Set(next);
-      return ANSWER_BUTTONS.map((button) => button.noteName).filter((name) => selected.has(name));
+      return {
+        ...current,
+        drillNoteNames: ANSWER_BUTTONS.map((button) => button.noteName).filter((name) => selected.has(name)),
+      };
     });
-  }, []);
+  }, [setPracticeSetupPreferences]);
 
   const getPromptActiveMs = useCallback((): number => {
     const prompt = promptRef.current;
@@ -705,6 +845,8 @@ export function PracticeView({
       queueStrategy: nextQueueStrategy,
       drillNoteNames: nextSettings.drillNoteNames,
       focusedTraining: nextQueueStrategy === "focused",
+      promptDisplayMode: nextSettings.promptDisplayMode,
+      includeLedgerVariants: nextSettings.includeLedgerVariants,
       startedAt,
       completedCount: 0,
       interruptedCount: 0,
@@ -953,6 +1095,20 @@ export function PracticeView({
         .sort((a, b) => b.weaknessScore - a.weaknessScore)
         .slice(0, 4)
     : [];
+  const summaryProgressSeries = useMemo(
+    () =>
+      summary
+        ? buildSessionProgressSeries({
+            currentSession: summary.session,
+            currentReviews: summary.reviews,
+            sessions,
+            reviews,
+            historyLimit: summaryHistoryLimit,
+            mode: summaryProgressMode,
+          })
+        : [],
+    [reviews, sessions, summary, summaryHistoryLimit, summaryProgressMode],
+  );
 
   if (phase === "setup") {
     return (
@@ -1161,16 +1317,42 @@ export function PracticeView({
               <strong>{formatMs(percentile(sessionQualifiedTimes, 0.9))}</strong>
             </div>
           </div>
-          <div className="note-list">
-            {weakestNotes.map((note) => (
-              <div className="note-row" key={note.targetNoteId}>
-                <span>{formatTargetNoteLabel(getNoteById(note.targetNoteId))}</span>
-                <span>{formatMs(note.medianMs)}</span>
-                <span>{Math.round(note.errorRate * 100)}%</span>
-                <span>{note.commonConfusion ? `常错 ${note.commonConfusion}` : "无混淆"}</span>
+          <section className="summary-section">
+            <div className="summary-section-heading">
+              <h2>薄弱音</h2>
+            </div>
+            <div className="note-list">
+              <div className="note-row note-row-header">
+                <span>目标音</span>
+                <span>中位时长</span>
+                <span>错误率</span>
+                <span>常错音</span>
               </div>
-            ))}
-          </div>
+              {weakestNotes.map((note) => (
+                <div className="note-row" key={note.targetNoteId}>
+                  <span>{formatTargetNoteLabel(getNoteById(note.targetNoteId))}</span>
+                  <span>{formatMs(note.medianMs)}</span>
+                  <span>{Math.round(note.errorRate * 100)}%</span>
+                  <span>{note.commonConfusion ?? "无"}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+          {summaryProgressSeries.length > 0 ? (
+            <section className="summary-section">
+              <div className="summary-section-heading session-progress-heading">
+                <h2>答对进度</h2>
+                <SessionProgressControls
+                  historyLimit={summaryHistoryLimit}
+                  mode={summaryProgressMode}
+                  onHistoryLimitChange={setSummaryHistoryLimit}
+                  onModeChange={setSummaryProgressMode}
+                />
+              </div>
+              <SessionProgressChart series={summaryProgressSeries} />
+              <SessionProgressLegend series={summaryProgressSeries} />
+            </section>
+          ) : null}
           <div className="action-row">
             <button className="primary" onClick={() => void startSession()}>
               <RotateCcw size={18} />

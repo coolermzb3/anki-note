@@ -25,6 +25,7 @@ import {
 import { SettingsView } from "./components/SettingsView";
 import { StatsView } from "./components/StatsView";
 import { StudyView } from "./components/StudyView";
+import { useBlurButtonAfterPointerClick } from "./components/useBlurButtonAfterPointerClick";
 
 type View = PracticeNavigationExitTarget;
 
@@ -97,6 +98,8 @@ async function loadFreshAppData(): Promise<AppData> {
 }
 
 export function App(): JSX.Element {
+  useBlurButtonAfterPointerClick();
+
   const [view, setView] = useState<View>("practice");
   const [data, setData] = useState<AppData | null>(null);
   const [practiceRunning, setPracticeRunning] = useState(false);
@@ -560,6 +563,7 @@ export function App(): JSX.Element {
         {view === "practice" ? (
           <PracticeView
             settings={data.settings}
+            sessions={data.sessions}
             reviews={data.reviews}
             navigationExitRequest={practiceExitRequest}
             onDataChanged={refresh}
