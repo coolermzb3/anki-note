@@ -249,6 +249,109 @@ describe("session progress", () => {
     ]);
   });
 
+  it("uses the current fixed-duration setting as the progress comparison window", () => {
+    const current = makeSession({
+      id: "current",
+      startedAt: "2026-07-04T12:00:00.000+08:00",
+      mode: "fixed-duration",
+      fixedDurationSeconds: 6,
+      queueStrategy: "adaptive",
+      promptDisplayMode: "staff-page",
+      includeLedgerVariants: true,
+    });
+    const old = makeSession({
+      ...current,
+      id: "old",
+      startedAt: "2026-07-04T11:00:00.000+08:00",
+      fixedDurationSeconds: 10,
+    });
+
+    const series = buildSessionProgressSeries({
+      currentSession: current,
+      currentReviews: makeSessionReviews("current", [1000, 1000, 1000, 1000, 1000]),
+      sessions: [old],
+      reviews: makeSessionReviews("old", [1000, 1000, 1000, 1000, 1000, 1000, 1000]),
+      historyLimit: 10,
+      mode: "actual-order",
+    });
+
+    expect(series.find((line) => line.isCurrent)?.durationMs).toBe(6000);
+    expect(series.find((line) => !line.isCurrent)?.points).toEqual([
+      { elapsedMs: 0, completedReviews: 0 },
+      { elapsedMs: 1000, completedReviews: 1 },
+      { elapsedMs: 2000, completedReviews: 2 },
+      { elapsedMs: 3000, completedReviews: 3 },
+      { elapsedMs: 4000, completedReviews: 4 },
+      { elapsedMs: 5000, completedReviews: 5 },
+      { elapsedMs: 6000, completedReviews: 6 },
+    ]);
+  });
+
+  it("uses the current fixed-count actual duration as the progress comparison window", () => {
+    const current = makeSession({
+      id: "current",
+      startedAt: "2026-07-04T12:00:00.000+08:00",
+      mode: "fixed-count",
+      fixedCount: 5,
+      queueStrategy: "adaptive",
+      promptDisplayMode: "staff-page",
+      includeLedgerVariants: true,
+    });
+    const old = makeSession({
+      ...current,
+      id: "old",
+      startedAt: "2026-07-04T11:00:00.000+08:00",
+    });
+
+    const series = buildSessionProgressSeries({
+      currentSession: current,
+      currentReviews: makeSessionReviews("current", [1000, 1000, 1000, 1000, 1000]),
+      sessions: [old],
+      reviews: makeSessionReviews("old", [2000, 2000, 2000, 2000, 2000]),
+      historyLimit: 10,
+      mode: "actual-order",
+    });
+
+    expect(series.find((line) => line.isCurrent)?.durationMs).toBe(5000);
+    expect(series.find((line) => !line.isCurrent)?.points).toEqual([
+      { elapsedMs: 0, completedReviews: 0 },
+      { elapsedMs: 2000, completedReviews: 1 },
+      { elapsedMs: 4000, completedReviews: 2 },
+    ]);
+  });
+
+  it("truncates historical raw reviews before building sorted duration-cumsum progress", () => {
+    const current = makeSession({
+      id: "current",
+      startedAt: "2026-07-04T12:00:00.000+08:00",
+      mode: "fixed-count",
+      fixedCount: 5,
+      queueStrategy: "adaptive",
+      promptDisplayMode: "staff-page",
+      includeLedgerVariants: true,
+    });
+    const old = makeSession({
+      ...current,
+      id: "old",
+      startedAt: "2026-07-04T11:00:00.000+08:00",
+    });
+
+    const series = buildSessionProgressSeries({
+      currentSession: current,
+      currentReviews: makeSessionReviews("current", [1000, 1000, 1000, 1000, 1000]),
+      sessions: [old],
+      reviews: makeSessionReviews("old", [3000, 1000, 2000, 500, 500]),
+      historyLimit: 10,
+      mode: "duration-cumsum",
+    });
+
+    expect(series.find((line) => !line.isCurrent)?.points).toEqual([
+      { elapsedMs: 0, completedReviews: 0 },
+      { elapsedMs: 1000, completedReviews: 1 },
+      { elapsedMs: 4000, completedReviews: 2 },
+    ]);
+  });
+
   it("selects the latest plottable session in the current global practice range", () => {
     const older = makeSession({
       id: "older",

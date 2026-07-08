@@ -11,6 +11,7 @@ export interface SessionProgressPoint {
 }
 
 export interface SessionProgressSeries {
+  durationMs?: number;
   sessionId: string;
   startedAt: string;
   isCurrent: boolean;
@@ -112,8 +113,22 @@ export function isComparablePracticeSession(
   return true;
 }
 
+function getStatisticalReviewsInAnswerOrder(reviews: ReviewRecord[]): ReviewRecord[] {
+  return reviews
+    .map((review, index) => ({ index, review }))
+    .filter(({ review }) => isStatisticalReview(review))
+    .sort(
+      (a, b) =>
+        new Date(a.review.answeredAt ?? a.review.endedAt).getTime() -
+          new Date(b.review.answeredAt ?? b.review.endedAt).getTime() ||
+        new Date(a.review.startedAt).getTime() - new Date(b.review.startedAt).getTime() ||
+        a.index - b.index,
+    )
+    .map(({ review }) => review);
+}
+
 function buildActualOrderPoints(reviews: ReviewRecord[]): SessionProgressPoint[] {
-  const statisticalReviews = reviews.filter(isStatisticalReview);
+  const statisticalReviews = getStatisticalReviewsInAnswerOrder(reviews);
   if (statisticalReviews.length === 0) {
     return [];
   }
@@ -121,22 +136,13 @@ function buildActualOrderPoints(reviews: ReviewRecord[]): SessionProgressPoint[]
   let elapsedMs = 0;
   return [
     { elapsedMs: 0, completedReviews: 0 },
-    ...statisticalReviews
-      .map((review, index) => ({ index, review }))
-      .sort(
-        (a, b) =>
-          new Date(a.review.answeredAt ?? a.review.endedAt).getTime() -
-            new Date(b.review.answeredAt ?? b.review.endedAt).getTime() ||
-          new Date(a.review.startedAt).getTime() - new Date(b.review.startedAt).getTime() ||
-          a.index - b.index,
-      )
-      .map(({ review }, index) => {
-        elapsedMs += Math.max(0, review.activeMs);
-        return {
-          elapsedMs,
-          completedReviews: index + 1,
-        };
-      }),
+    ...statisticalReviews.map((review, index) => {
+      elapsedMs += Math.max(0, review.activeMs);
+      return {
+        elapsedMs,
+        completedReviews: index + 1,
+      };
+    }),
   ];
 }
 
@@ -160,6 +166,27 @@ function buildDurationCumsumPoints(reviews: ReviewRecord[]): SessionProgressPoin
 
 function buildSessionProgressPoints(reviews: ReviewRecord[], mode: SessionProgressMode): SessionProgressPoint[] {
   return mode === "actual-order" ? buildActualOrderPoints(reviews) : buildDurationCumsumPoints(reviews);
+}
+
+function getComparisonDurationMs(session: PracticeSessionRecord, points: SessionProgressPoint[]): number {
+  if (session.mode === "fixed-duration" && session.fixedDurationSeconds !== undefined) {
+    return Math.max(0, session.fixedDurationSeconds * 1000);
+  }
+  return points[points.length - 1]?.elapsedMs ?? 0;
+}
+
+function truncateReviewsByActualElapsedMs(reviews: ReviewRecord[], maxElapsedMs: number): ReviewRecord[] {
+  let elapsedMs = 0;
+  const truncatedReviews: ReviewRecord[] = [];
+  for (const review of getStatisticalReviewsInAnswerOrder(reviews)) {
+    const nextElapsedMs = elapsedMs + Math.max(0, review.activeMs);
+    if (nextElapsedMs > maxElapsedMs) {
+      break;
+    }
+    truncatedReviews.push(review);
+    elapsedMs = nextElapsedMs;
+  }
+  return truncatedReviews;
 }
 
 function groupReviewsBySession(reviews: ReviewRecord[]): Map<string, ReviewRecord[]> {
@@ -187,6 +214,7 @@ export function buildSessionProgressSeries({
     return [];
   }
 
+  const comparisonDurationMs = getComparisonDurationMs(currentSession, currentPoints);
   const currentStartedAt = new Date(currentSession.startedAt).getTime();
   const reviewsBySession = groupReviewsBySession(reviews);
 
@@ -205,17 +233,21 @@ export function buildSessionProgressSeries({
     )
     .slice(0, Math.max(1, Math.floor(historyLimit)))
     .reverse()
-    .map((session) => ({
-      sessionId: session.id,
-      startedAt: session.startedAt,
-      isCurrent: false,
-      points: buildSessionProgressPoints(reviewsBySession.get(session.id) ?? [], mode),
-    }))
+    .map((session) => {
+      const sessionReviews = reviewsBySession.get(session.id) ?? [];
+      return {
+        sessionId: session.id,
+        startedAt: session.startedAt,
+        isCurrent: false,
+        points: buildSessionProgressPoints(truncateReviewsByActualElapsedMs(sessionReviews, comparisonDurationMs), mode),
+      };
+    })
     .filter((series) => series.points.length > 1);
 
   return [
     ...historySeries,
     {
+      durationMs: comparisonDurationMs,
       sessionId: currentSession.id,
       startedAt: currentSession.startedAt,
       isCurrent: true,

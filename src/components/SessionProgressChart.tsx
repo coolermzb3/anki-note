@@ -79,7 +79,8 @@ export function SessionProgressChart({
   const [chartWidth, setChartWidth] = useState(SESSION_PROGRESS_WIDTH);
   const allPoints = series.flatMap((line) => line.points);
   const dataMaxElapsedMs = Math.max(...allPoints.map((point) => point.elapsedMs), 0);
-  const xMax = Math.max(dataMaxElapsedMs, 1000);
+  const currentDurationMs = series.find((line) => line.isCurrent)?.durationMs;
+  const xMax = Math.max(currentDurationMs ?? dataMaxElapsedMs, 1000);
   const maxCompleted = Math.max(...allPoints.map((point) => point.completedReviews), 1);
   const yStep = Math.max(1, Math.ceil(maxCompleted / 4));
   const yMax = Math.max(yStep, Math.ceil(maxCompleted / yStep) * yStep);
