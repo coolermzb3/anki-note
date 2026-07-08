@@ -30,6 +30,7 @@ import { useBlurButtonAfterPointerClick } from "./components/useBlurButtonAfterP
 type View = PracticeNavigationExitTarget;
 
 const BACKUP_REMINDER_SUPPRESSED_DATE_KEY = "anki-note.backupReminderSuppressedDate";
+const RELOAD_VIEW_SESSION_KEY = "anki-note.reloadView";
 
 interface AppData {
   settings: AppSettings;
@@ -63,6 +64,29 @@ function isBackupReminderSuppressedToday(): boolean {
     return localStorage.getItem(BACKUP_REMINDER_SUPPRESSED_DATE_KEY) === todayKey();
   } catch {
     return false;
+  }
+}
+
+function readInitialView(): View {
+  const [navigation] = window.performance.getEntriesByType("navigation") as PerformanceNavigationTiming[];
+  // 只在刷新时恢复上次页面；直接打开应用仍默认进入练习页。
+  if (navigation?.type !== "reload") {
+    return "practice";
+  }
+
+  try {
+    const storedView = window.sessionStorage.getItem(RELOAD_VIEW_SESSION_KEY);
+    return storedView === "stats" || storedView === "study" || storedView === "settings" ? storedView : "practice";
+  } catch {
+    return "practice";
+  }
+}
+
+function rememberReloadView(view: View): void {
+  try {
+    window.sessionStorage.setItem(RELOAD_VIEW_SESSION_KEY, view);
+  } catch {
+    return;
   }
 }
 
@@ -100,7 +124,7 @@ async function loadFreshAppData(): Promise<AppData> {
 export function App(): JSX.Element {
   useBlurButtonAfterPointerClick();
 
-  const [view, setView] = useState<View>("practice");
+  const [view, setView] = useState<View>(readInitialView);
   const [data, setData] = useState<AppData | null>(null);
   const [practiceRunning, setPracticeRunning] = useState(false);
   const [backupReminderBusy, setBackupReminderBusy] = useState(false);
@@ -126,6 +150,10 @@ export function App(): JSX.Element {
     setData((current) => (current ? { ...current, backupState } : current));
   }, []);
   const hasBackupDirectory = Boolean(data?.backupState.directoryHandle);
+
+  useEffect(() => {
+    rememberReloadView(view);
+  }, [view]);
 
   useEffect(() => {
     let cancelled = false;
