@@ -78,7 +78,7 @@ const RECOGNITION_CHART_HANDLE_ICON =
   "path://M11,5 H17 A4,4 0 0 1 21,9 V23 A4,4 0 0 1 17,27 H11 A4,4 0 0 1 7,23 V9 A4,4 0 0 1 11,5 Z M14,-3 V5 M14,27 V35";
 const WEEKDAY_LABELS = ["周一", "", "周三", "", "周五", "", "周日"];
 const DEFAULT_STATS_UI_PREFERENCES: StatsUiPreferences = {
-  carouselCardId: STATS_CAROUSEL_CARD_IDS[0],
+  carouselCardId: STATS_CAROUSEL_CARD_IDS[1],
   range: "30",
   recognitionTimeGrouping: "practice-session",
 };
@@ -296,6 +296,7 @@ function isStatsCarouselDragBlockedTarget(target: EventTarget | null): boolean {
 }
 
 function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChartsOption {
+  const showPointSymbols = data.length === 1;
   const dataZoomSliderStyle = {
     backgroundColor: RECOGNITION_CHART_COLORS.sliderBackground,
     borderColor: RECOGNITION_CHART_COLORS.sliderBorder,
@@ -368,8 +369,9 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
         connectNulls: false,
         data: data.map((stat) => stat.p10 ?? null),
         name: "P10",
-        showSymbol: false,
+        showSymbol: showPointSymbols,
         smooth: true,
+        symbolSize: 7,
         type: "line",
       },
       {
@@ -377,16 +379,18 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
         data: data.map((stat) => stat.median ?? null),
         lineStyle: { width: 2.5 },
         name: "中位",
-        showSymbol: false,
+        showSymbol: showPointSymbols,
         smooth: true,
+        symbolSize: 7,
         type: "line",
       },
       {
         connectNulls: false,
         data: data.map((stat) => stat.p90 ?? null),
         name: "P90",
-        showSymbol: false,
+        showSymbol: showPointSymbols,
         smooth: true,
+        symbolSize: 7,
         type: "line",
       },
     ],
