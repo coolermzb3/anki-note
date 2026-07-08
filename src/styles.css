@@ -968,18 +968,6 @@ main.has-backup-reminder .setup-grid::after {
   border: 1px solid rgba(66, 50, 34, 0.08);
 }
 
-.heat-0 {
-  background: #efe7dc;
-}
-
-.heat-1 {
-  background: #94c9b7;
-}
-
-.heat-2 {
-  background: var(--accent);
-}
-
 .chart-panel,
 .note-heat-panel {
   margin-top: 0;
@@ -1092,26 +1080,6 @@ main.has-backup-reminder .setup-grid::after {
   border: 1px solid rgba(33, 28, 24, 0.16);
   border-radius: 999px;
   flex: 0 0 auto;
-}
-
-.legend-neutral {
-  background: #211c18;
-}
-
-.legend-red-light {
-  background: #d9867b;
-}
-
-.legend-red-dark {
-  background: #ad3226;
-}
-
-.legend-blue-light {
-  background: #7ca8ca;
-}
-
-.legend-blue-dark {
-  background: #245f92;
 }
 
 .stats-range-staff {

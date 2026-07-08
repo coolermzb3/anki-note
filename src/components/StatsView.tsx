@@ -11,6 +11,7 @@ import {
 import type { AppSettings, PracticeSessionRecord, ReviewRecord } from "../domain/types";
 import { GlobalRangeControls } from "./GlobalRangeControls";
 import { StatsRangeStaff, type StaffHeatNote } from "./StatsRangeStaff";
+import { STATS_COLORS } from "./statsColors";
 
 interface StatsViewProps {
   settings: AppSettings;
@@ -33,18 +34,7 @@ interface RecognitionTimeChartStat {
 
 const EMPTY_SESSIONS: PracticeSessionRecord[] = [];
 const HEATMAP_WEEK_COUNT = 53;
-const RECOGNITION_CHART_COLORS = {
-  p10: "#2f7d74",
-  median: "#2b2520",
-  p90: "#c84c3d",
-  grid: "#e5dccf",
-  muted: "#7a6f61",
-  panel: "#fffaf2",
-  rangeFill: "rgba(47, 125, 116, 0.14)",
-  rangeMoveHandle: "rgba(47, 125, 116, 0.45)",
-  rangePreview: "#efe7dc",
-  rangePreviewLine: "#cdbca8",
-};
+const RECOGNITION_CHART_COLORS = STATS_COLORS.recognitionChart;
 const RECOGNITION_CHART_HANDLE_ICON =
   "path://M11,5 H17 A4,4 0 0 1 21,9 V23 A4,4 0 0 1 17,27 H11 A4,4 0 0 1 7,23 V9 A4,4 0 0 1 11,5 Z M14,-3 V5 M14,27 V35";
 const WEEKDAY_LABELS = ["周一", "", "周三", "", "周五", "", "周日"];
@@ -156,14 +146,18 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
             ))}
           </div>
           <div className="heatmap">
-            {days.map((day) => (
-              <div
-                aria-label={`${day.key}: ${day.stat?.completedReviews ?? 0} 次`}
-                className={`heat-cell heat-${day.stat?.heatLevel ?? 0}`}
-                key={day.key}
-                title={`${day.key}: ${day.stat?.completedReviews ?? 0}`}
-              />
-            ))}
+            {days.map((day) => {
+              const heatLevel = day.stat?.heatLevel ?? 0;
+              return (
+                <div
+                  aria-label={`${day.key}: ${day.stat?.completedReviews ?? 0} 次`}
+                  className="heat-cell"
+                  key={day.key}
+                  style={{ backgroundColor: STATS_COLORS.heatmap[heatLevel] }}
+                  title={`${day.key}: ${day.stat?.completedReviews ?? 0}`}
+                />
+              );
+            })}
           </div>
         </div>
       </div>
@@ -171,10 +165,14 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
   );
 }
 
+function LegendSwatch({ color }: { color: string }): JSX.Element {
+  return <i className="legend-swatch" style={{ backgroundColor: color }} />;
+}
+
 function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChartsOption {
   const dataZoomSliderStyle = {
-    backgroundColor: "rgba(255, 250, 242, 0.92)",
-    borderColor: "#dfd3c4",
+    backgroundColor: RECOGNITION_CHART_COLORS.sliderBackground,
+    borderColor: RECOGNITION_CHART_COLORS.sliderBorder,
     brushSelect: false,
     dataBackground: {
       areaStyle: { color: RECOGNITION_CHART_COLORS.rangePreview },
@@ -193,7 +191,7 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
       color: RECOGNITION_CHART_COLORS.rangeMoveHandle,
     },
     selectedDataBackground: {
-      areaStyle: { color: "rgba(47, 125, 116, 0.08)" },
+      areaStyle: { color: RECOGNITION_CHART_COLORS.selectedRangePreview },
       lineStyle: { color: RECOGNITION_CHART_COLORS.p10 },
     },
     showDetail: false,
@@ -275,7 +273,9 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
         const firstItem = items[0] as { dataIndex?: number } | undefined;
         const stat = firstItem?.dataIndex === undefined ? undefined : data[firstItem.dataIndex];
         const title = stat?.tooltipLabel ?? "";
-        const completed = stat ? `<div style="color:#7a6f61">完成 ${stat.completedReviews} 次</div>` : "";
+        const completed = stat
+          ? `<div style="color:${RECOGNITION_CHART_COLORS.muted}">完成 ${stat.completedReviews} 次</div>`
+          : "";
         const rows = items
           .map((item) => {
             const point = item as { marker?: string; seriesName?: string; value?: number | string | null };
@@ -503,15 +503,19 @@ export function StatsView({
                   <h3>识别速度</h3>
                   <div className="range-legend">
                     <span>
-                      <i className="legend-swatch legend-neutral" />
+                      <LegendSwatch color={STATS_COLORS.range.neutral} />
                       无记录
                     </span>
                     <span>
-                      <i className="legend-swatch legend-blue-light" />
+                      <LegendSwatch color={STATS_COLORS.range.tone.blue[1]} />
                       较快
                     </span>
                     <span>
-                      <i className="legend-swatch legend-blue-dark" />
+                      <LegendSwatch color={STATS_COLORS.range.tone.blue[2]} />
+                      中等
+                    </span>
+                    <span>
+                      <LegendSwatch color={STATS_COLORS.range.tone.blue[3]} />
                       较慢
                     </span>
                   </div>
@@ -523,15 +527,19 @@ export function StatsView({
                   <h3>错误次数</h3>
                   <div className="range-legend">
                     <span>
-                      <i className="legend-swatch legend-neutral" />
+                      <LegendSwatch color={STATS_COLORS.range.neutral} />
                       0
                     </span>
                     <span>
-                      <i className="legend-swatch legend-red-light" />
+                      <LegendSwatch color={STATS_COLORS.range.tone.red[1]} />
                       较低
                     </span>
                     <span>
-                      <i className="legend-swatch legend-red-dark" />
+                      <LegendSwatch color={STATS_COLORS.range.tone.red[2]} />
+                      中等
+                    </span>
+                    <span>
+                      <LegendSwatch color={STATS_COLORS.range.tone.red[3]} />
                       较高
                     </span>
                   </div>

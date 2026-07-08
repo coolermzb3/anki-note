@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildDailyStats, buildNoteStats, buildPracticeSessionStats, filterLongTermReviews, percentile } from "./stats";
+import {
+  buildDailyStats,
+  buildNoteStats,
+  buildPracticeSessionStats,
+  filterLongTermReviews,
+  percentile,
+  positiveTertileLevel,
+} from "./stats";
 import { makeReview } from "./testFactories";
 import type { PracticeSessionRecord } from "./types";
 
@@ -23,6 +30,13 @@ describe("stats", () => {
   it("calculates percentile values with interpolation", () => {
     expect(percentile([100, 200, 300], 0.5)).toBe(200);
     expect(percentile([100, 200], 0.5)).toBe(150);
+  });
+
+  it("assigns positive values to tertile heat levels", () => {
+    expect(positiveTertileLevel(10, [10, 20, 30])).toBe(1);
+    expect(positiveTertileLevel(20, [10, 20, 30])).toBe(2);
+    expect(positiveTertileLevel(30, [10, 20, 30])).toBe(3);
+    expect(positiveTertileLevel(10, [10, 10, 10])).toBe(1);
   });
 
   it("excludes interrupted reviews by default", () => {
@@ -57,6 +71,39 @@ describe("stats", () => {
 
     expect(new Set(filtered.map((review) => review.sessionId))).toEqual(new Set(["long-session"]));
     expect(buildDailyStats(filtered)[0].completedReviews).toBe(5);
+  });
+
+  it("assigns daily heat levels from positive daily-count tertiles", () => {
+    const reviews = [
+      makeReview({
+        id: "day-1-0",
+        targetNoteId: "C4",
+        answeredAt: "2026-07-01T12:00:00.000+08:00",
+        endedAt: "2026-07-01T12:00:00.000+08:00",
+      }),
+      ...Array.from({ length: 2 }, (_, index) =>
+        makeReview({
+          id: `day-2-${index}`,
+          targetNoteId: "C4",
+          answeredAt: "2026-07-02T12:00:00.000+08:00",
+          endedAt: "2026-07-02T12:00:00.000+08:00",
+        }),
+      ),
+      ...Array.from({ length: 3 }, (_, index) =>
+        makeReview({
+          id: `day-3-${index}`,
+          targetNoteId: "C4",
+          answeredAt: "2026-07-03T12:00:00.000+08:00",
+          endedAt: "2026-07-03T12:00:00.000+08:00",
+        }),
+      ),
+    ];
+
+    expect(buildDailyStats(reviews).map((stat) => [stat.date, stat.completedReviews, stat.heatLevel])).toEqual([
+      ["2026-07-01", 1, 1],
+      ["2026-07-02", 2, 2],
+      ["2026-07-03", 3, 3],
+    ]);
   });
 
   it("does not let interrupted reviews qualify a session for long-term stats", () => {

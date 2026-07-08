@@ -8,7 +8,7 @@ export interface DailyStat {
   p10Ms?: number;
   medianMs?: number;
   p90Ms?: number;
-  heatLevel: 0 | 1 | 2;
+  heatLevel: HeatLevel;
 }
 
 export interface NoteStat {
@@ -34,6 +34,8 @@ export interface PracticeSessionStat {
 }
 
 export const MIN_LONG_TERM_SESSION_REVIEWS = 5;
+export type PositiveHeatLevel = 1 | 2 | 3;
+export type HeatLevel = 0 | PositiveHeatLevel;
 
 export function filterLongTermReviews(reviews: ReviewRecord[]): ReviewRecord[] {
   const qualifiedCountBySession = new Map<string, number>();
@@ -57,6 +59,15 @@ export function percentile(values: number[], percent: number): number | undefine
     return sorted[lower];
   }
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+}
+
+export function positiveTertileLevel(value: number, positiveValues: number[]): PositiveHeatLevel {
+  const lowThreshold = percentile(positiveValues, 1 / 3);
+  const highThreshold = percentile(positiveValues, 2 / 3);
+  if (lowThreshold === undefined || highThreshold === undefined || value <= lowThreshold) {
+    return 1;
+  }
+  return value <= highThreshold ? 2 : 3;
 }
 
 export function localDateKey(iso: string): string {
@@ -91,8 +102,6 @@ export function buildDailyStats(reviews: ReviewRecord[]): DailyStat[] {
   }
 
   const nonZeroCounts = [...byDate.values()].map((dayReviews) => dayReviews.length);
-  const p75 = percentile(nonZeroCounts, 0.75);
-  const highThreshold = Math.max(20, Math.ceil(p75 ?? 20));
 
   return [...byDate.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -105,7 +114,7 @@ export function buildDailyStats(reviews: ReviewRecord[]): DailyStat[] {
         p10Ms: percentile(times, 0.1),
         medianMs: percentile(times, 0.5),
         p90Ms: percentile(times, 0.9),
-        heatLevel: completedReviews === 0 ? 0 : completedReviews >= highThreshold ? 2 : 1,
+        heatLevel: completedReviews === 0 ? 0 : positiveTertileLevel(completedReviews, nonZeroCounts),
       };
     });
 }

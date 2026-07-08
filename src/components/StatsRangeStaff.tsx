@@ -1,20 +1,19 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Formatter, Renderer, Stave, StaveConnector, StaveNote, Voice } from "vexflow";
 import { noteToVexKey } from "../domain/notes";
-import { percentile } from "../domain/stats";
+import { positiveTertileLevel } from "../domain/stats";
 import type { NoteName, Staff, TargetNote } from "../domain/types";
+import { STATS_COLORS, type StatsRangeTone } from "./statsColors";
 
 export interface StaffHeatNote {
   note: TargetNote;
   value?: number;
 }
 
-type HeatTone = "red" | "blue";
-
 interface StatsRangeStaffProps {
   label: string;
   notes: StaffHeatNote[];
-  tone: HeatTone;
+  tone: StatsRangeTone;
 }
 
 interface ColoredStaffHeatNote extends StaffHeatNote {
@@ -41,19 +40,6 @@ interface RangeMapMetrics {
 }
 
 const NOTE_DURATION = "w";
-const NEUTRAL_COLOR = "#211c18";
-const MUTED_COLOR = "#766b5f";
-const TRANSPARENT_NOTE_COLOR = "rgba(0, 0, 0, 0)";
-const TONE_COLORS: Record<HeatTone, { light: string; dark: string }> = {
-  red: {
-    light: "#d9867b",
-    dark: "#ad3226",
-  },
-  blue: {
-    light: "#7ca8ca",
-    dark: "#245f92",
-  },
-};
 const RANGE_COLUMNS: Array<{ answerNumber: string; noteName: NoteName }> = [
   { answerNumber: "1", noteName: "C" },
   { answerNumber: "2", noteName: "D" },
@@ -95,16 +81,15 @@ function comparePitch(left: StaffHeatNote, right: StaffHeatNote): number {
   return pitchOrder(left.note) - pitchOrder(right.note);
 }
 
-function heatColor(value: number | undefined, positiveValues: number[], tone: HeatTone): string {
+function heatColor(value: number | undefined, positiveValues: number[], tone: StatsRangeTone): string {
   if (value === undefined || value <= 0 || positiveValues.length === 0) {
-    return NEUTRAL_COLOR;
+    return STATS_COLORS.range.neutral;
   }
 
-  const darkThreshold = percentile(positiveValues, 0.67);
-  return darkThreshold !== undefined && value > darkThreshold ? TONE_COLORS[tone].dark : TONE_COLORS[tone].light;
+  return STATS_COLORS.range.tone[tone][positiveTertileLevel(value, positiveValues)];
 }
 
-function getRangeColumns(notes: StaffHeatNote[], tone: HeatTone): RangeColumn[] {
+function getRangeColumns(notes: StaffHeatNote[], tone: StatsRangeTone): RangeColumn[] {
   const positiveValues = notes
     .map((note) => note.value)
     .filter((value): value is number => value !== undefined && value > 0)
@@ -131,7 +116,7 @@ function makeChord(notes: ColoredStaffHeatNote[], staff: Staff): StaveNote {
     duration: NOTE_DURATION,
     keys: hasNotes ? notes.map((note) => noteToVexKey(note.note)) : [staff === "treble" ? "b/4" : "d/3"],
   });
-  const baseColor = hasNotes ? NEUTRAL_COLOR : TRANSPARENT_NOTE_COLOR;
+  const baseColor = hasNotes ? STATS_COLORS.range.neutral : STATS_COLORS.range.transparentNote;
   chord.setStyle({ fillStyle: baseColor, strokeStyle: baseColor });
   chord.setLedgerLineStyle({ fillStyle: baseColor, strokeStyle: baseColor });
   notes.forEach((note, index) => {
@@ -247,11 +232,11 @@ export function StatsRangeStaff({ label, notes, tone }: StatsRangeStaffProps): J
       trebleVoice.draw(context, treble);
       bassVoice.draw(context, bass);
 
-      context.setFont("Inter", RANGE_MAP_LAYOUT.topLabelFontSize, 800).setFillStyle(NEUTRAL_COLOR);
+      context.setFont("Inter", RANGE_MAP_LAYOUT.topLabelFontSize, 800).setFillStyle(STATS_COLORS.range.neutral);
       columns.forEach((column, index) => {
         drawCenteredText(context, column.noteName, columnCenterX(trebleTickables[index]), metrics.topLabelY);
       });
-      context.setFont("Inter", RANGE_MAP_LAYOUT.bottomLabelFontSize, 700).setFillStyle(MUTED_COLOR);
+      context.setFont("Inter", RANGE_MAP_LAYOUT.bottomLabelFontSize, 700).setFillStyle(STATS_COLORS.range.muted);
       columns.forEach((column, index) => {
         drawCenteredText(context, column.answerNumber, columnCenterX(trebleTickables[index]), metrics.bottomLabelY);
       });
