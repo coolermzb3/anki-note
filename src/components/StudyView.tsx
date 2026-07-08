@@ -27,6 +27,7 @@ type StudyColumnDefinition = (typeof NOTE_COLUMNS_BY_KEY)[number];
 interface StudyUiPreferences {
   columnOrderId: StudyColumnOrderId;
   isColumnOrderReversed: boolean;
+  showLabels: boolean;
 }
 
 const NOTE_DURATION = "w";
@@ -41,6 +42,7 @@ const STUDY_UI_PREFERENCES_KEY = "anki-note.studyUiPreferences";
 const DEFAULT_STUDY_UI_PREFERENCES: StudyUiPreferences = {
   columnOrderId: "circle",
   isColumnOrderReversed: false,
+  showLabels: true,
 };
 const NOTE_NAME_ORDER: Record<NoteName, number> = {
   C: 0,
@@ -119,6 +121,7 @@ interface StudyNoteMapProps {
   label: string;
   onPlayColumn: (noteName: NoteName) => void;
   onPlayNote: (note: TargetNote) => void;
+  showLabels: boolean;
 }
 
 interface StudyViewProps {
@@ -162,6 +165,7 @@ function parseStudyUiPreferences(value: unknown, fallback: StudyUiPreferences): 
       typeof value.isColumnOrderReversed === "boolean"
         ? value.isColumnOrderReversed
         : fallback.isColumnOrderReversed,
+    showLabels: typeof value.showLabels === "boolean" ? value.showLabels : fallback.showLabels,
   };
 }
 
@@ -455,6 +459,7 @@ function StudyNoteMap({
   label,
   onPlayColumn,
   onPlayNote,
+  showLabels,
 }: StudyNoteMapProps): JSX.Element {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const rendererTargetRef = useRef<HTMLDivElement | null>(null);
@@ -519,16 +524,18 @@ function StudyNoteMap({
         });
       }
 
-      context.setFont("Inter", STUDY_MAP_LAYOUT.topLabelFontSize, 800).setFillStyle(NEUTRAL_COLOR);
-      columns.forEach((column, index) => {
-        const centerX = columnLayouts[index].centerX;
-        drawCenteredText(context, column.noteName, centerX, metrics.topLabelY);
-      });
-      context.setFont("Inter", STUDY_MAP_LAYOUT.bottomLabelFontSize, 700).setFillStyle(MUTED_COLOR);
-      columns.forEach((column, index) => {
-        const centerX = columnLayouts[index].centerX;
-        drawCenteredText(context, column.answerNumber, centerX, metrics.bottomLabelY);
-      });
+      if (showLabels) {
+        context.setFont("Inter", STUDY_MAP_LAYOUT.topLabelFontSize, 800).setFillStyle(NEUTRAL_COLOR);
+        columns.forEach((column, index) => {
+          const centerX = columnLayouts[index].centerX;
+          drawCenteredText(context, column.noteName, centerX, metrics.topLabelY);
+        });
+        context.setFont("Inter", STUDY_MAP_LAYOUT.bottomLabelFontSize, 700).setFillStyle(MUTED_COLOR);
+        columns.forEach((column, index) => {
+          const centerX = columnLayouts[index].centerX;
+          drawCenteredText(context, column.answerNumber, centerX, metrics.bottomLabelY);
+        });
+      }
 
       if (!svg) {
         return;
@@ -562,7 +569,7 @@ function StudyNoteMap({
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [columns, highlightedNoteId, highlightedNoteNames, includeLedgerVariants, onPlayColumn, onPlayNote]);
+  }, [columns, highlightedNoteId, highlightedNoteNames, includeLedgerVariants, onPlayColumn, onPlayNote, showLabels]);
 
   return (
     <div ref={frameRef} className="study-map" aria-label={label}>
@@ -600,11 +607,15 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
   const [highlightedNoteId, setHighlightedNoteId] = useState<string | undefined>();
   const columnOrderId = studyUiPreferences.columnOrderId;
   const isColumnOrderReversed = studyUiPreferences.isColumnOrderReversed;
+  const showLabels = studyUiPreferences.showLabels;
   const setColumnOrderId = (nextColumnOrderId: StudyColumnOrderId): void => {
     setStudyUiPreferences((current) => ({ ...current, columnOrderId: nextColumnOrderId }));
   };
   const setIsColumnOrderReversed = (nextIsColumnOrderReversed: boolean): void => {
     setStudyUiPreferences((current) => ({ ...current, isColumnOrderReversed: nextIsColumnOrderReversed }));
+  };
+  const setShowLabels = (nextShowLabels: boolean): void => {
+    setStudyUiPreferences((current) => ({ ...current, showLabels: nextShowLabels }));
   };
   const columnFlashTimerRef = useRef<number | undefined>();
   const flashedColumnRef = useRef<NoteName | undefined>();
@@ -821,6 +832,17 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
             </button>
           </div>
         </div>
+        <div className="study-control-block">
+          <span className="control-label">标签</span>
+          <div className="segmented study-label-options">
+            <button type="button" className={showLabels ? "active" : ""} onClick={() => setShowLabels(true)}>
+              显示
+            </button>
+            <button type="button" className={!showLabels ? "active" : ""} onClick={() => setShowLabels(false)}>
+              隐藏
+            </button>
+          </div>
+        </div>
       </div>
       <div className="study-map-frame" aria-label="学习页音位图">
         <figure className="study-figure">
@@ -832,6 +854,7 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
             label="F1-G6 音符位置"
             onPlayColumn={playColumn}
             onPlayNote={playNote}
+            showLabels={showLabels}
           />
         </figure>
       </div>
