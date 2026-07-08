@@ -45,7 +45,7 @@ export function makeDefaultSettings(): AppSettings {
     fixedCount: 20,
     fixedDurationSeconds: 60,
     autoPlayTarget: false,
-    includeLedgerVariants: true,
+    includeLedgerVariants: false,
     pianoVolume: DEFAULT_PIANO_VOLUME,
     queueStrategy: "adaptive",
     drillNoteNames: ["C"],

@@ -10,6 +10,7 @@ describe("makeDefaultSettings", () => {
       promptNoteDuration: "quarter",
       autoPlayTarget: false,
       enabledGroupIds: ["G3-F4"],
+      includeLedgerVariants: false,
       correctDelayMs: 0,
       pianoVolume: 0.8,
     });
