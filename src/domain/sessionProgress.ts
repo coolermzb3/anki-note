@@ -35,6 +35,25 @@ export interface BuildLatestSessionProgressSeriesOptions {
   mode: SessionProgressMode;
 }
 
+export type BuildLatestSessionProgressBenchmarkOptions = Pick<
+  BuildLatestSessionProgressSeriesOptions,
+  "reviews" | "sessions" | "settings"
+>;
+
+export interface BuildSessionProgressBenchmarkOptions {
+  currentSession: PracticeSessionRecord;
+  currentReviews: ReviewRecord[];
+  sessions: PracticeSessionRecord[];
+  reviews: ReviewRecord[];
+}
+
+export interface SessionProgressBenchmark {
+  bestValue?: number;
+  currentValue?: number;
+  isNewBest: boolean;
+  metric: "completed-count" | "elapsed-ms";
+}
+
 type PracticeRangeScope = {
   enabledGroupIds: PracticeGroupId[];
   includeLedgerVariants?: boolean;
@@ -197,6 +216,90 @@ function groupReviewsBySession(reviews: ReviewRecord[]): Map<string, ReviewRecor
   return reviewsBySession;
 }
 
+function findLatestProgressSession(
+  settings: Pick<AppSettings, "enabledGroupIds" | "includeLedgerVariants">,
+  sessions: PracticeSessionRecord[],
+  reviewsBySession: Map<string, ReviewRecord[]>,
+): PracticeSessionRecord | undefined {
+  return [...sessions]
+    .filter(
+      (session) =>
+        isProgressChartEligible(session, reviewsBySession.get(session.id) ?? []) &&
+        isSamePracticeRange(settings, session, reviewsBySession.get(session.id) ?? []),
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime() || b.id.localeCompare(a.id),
+    )[0];
+}
+
+export function buildSessionProgressBenchmark({
+  currentSession,
+  currentReviews,
+  sessions,
+  reviews,
+}: BuildSessionProgressBenchmarkOptions): SessionProgressBenchmark | undefined {
+  if (currentSession.mode === "open-ended") {
+    return undefined;
+  }
+  const currentStartedAt = new Date(currentSession.startedAt).getTime();
+  const reviewsBySession = groupReviewsBySession(reviews);
+  const comparableReviewSets = [
+    currentReviews,
+    ...sessions
+      .filter((session) => {
+        const sessionReviews = reviewsBySession.get(session.id) ?? [];
+        return (
+          new Date(session.startedAt).getTime() < currentStartedAt &&
+          isComparablePracticeSession(currentSession, session, sessionReviews)
+        );
+      })
+      .map((session) => reviewsBySession.get(session.id) ?? []),
+  ];
+
+  if (currentSession.mode === "fixed-duration") {
+    const durationMs = (currentSession.fixedDurationSeconds ?? 0) * 1000;
+    if (durationMs <= 0) {
+      return undefined;
+    }
+    const values = comparableReviewSets.map(
+      (sessionReviews) => truncateReviewsByActualElapsedMs(sessionReviews, durationMs).length,
+    );
+    const historicalValues = values.slice(1);
+    return {
+      metric: "completed-count",
+      currentValue: values[0],
+      bestValue: Math.max(...values),
+      isNewBest: historicalValues.length > 0 && values[0] > Math.max(...historicalValues),
+    };
+  }
+
+  const targetCount = currentSession.fixedCount ?? 0;
+  if (targetCount <= 0) {
+    return undefined;
+  }
+  const values = comparableReviewSets.map((sessionReviews) => {
+    const orderedReviews = getStatisticalReviewsInAnswerOrder(sessionReviews);
+    if (orderedReviews.length < targetCount) {
+      return undefined;
+    }
+    return orderedReviews
+      .slice(0, targetCount)
+      .reduce((total, review) => total + Math.max(0, review.activeMs), 0);
+  });
+  const completedValues = values.filter((value): value is number => value !== undefined);
+  const historicalCompletedValues = values.slice(1).filter((value): value is number => value !== undefined);
+  return {
+    metric: "elapsed-ms",
+    currentValue: values[0],
+    bestValue: completedValues.length > 0 ? Math.min(...completedValues) : undefined,
+    isNewBest:
+      values[0] !== undefined &&
+      historicalCompletedValues.length > 0 &&
+      values[0] < Math.min(...historicalCompletedValues),
+  };
+}
+
 export function buildSessionProgressSeries({
   currentSession,
   currentReviews,
@@ -264,16 +367,7 @@ export function buildLatestSessionProgressSeries({
   mode,
 }: BuildLatestSessionProgressSeriesOptions): SessionProgressSeries[] {
   const reviewsBySession = groupReviewsBySession(reviews);
-  const currentSession = [...sessions]
-    .filter(
-      (session) =>
-        isProgressChartEligible(session, reviewsBySession.get(session.id) ?? []) &&
-        isSamePracticeRange(settings, session, reviewsBySession.get(session.id) ?? []),
-    )
-    .sort(
-      (a, b) =>
-        new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime() || b.id.localeCompare(a.id),
-    )[0];
+  const currentSession = findLatestProgressSession(settings, sessions, reviewsBySession);
 
   if (!currentSession) {
     return [];
@@ -286,5 +380,23 @@ export function buildLatestSessionProgressSeries({
     reviews,
     historyLimit,
     mode,
+  });
+}
+
+export function buildLatestSessionProgressBenchmark({
+  settings,
+  sessions,
+  reviews,
+}: BuildLatestSessionProgressBenchmarkOptions): SessionProgressBenchmark | undefined {
+  const reviewsBySession = groupReviewsBySession(reviews);
+  const currentSession = findLatestProgressSession(settings, sessions, reviewsBySession);
+  if (!currentSession) {
+    return undefined;
+  }
+  return buildSessionProgressBenchmark({
+    currentSession,
+    currentReviews: reviewsBySession.get(currentSession.id) ?? [],
+    sessions,
+    reviews,
   });
 }

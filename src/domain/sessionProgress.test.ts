@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildLatestSessionProgressBenchmark,
   buildLatestSessionProgressSeries,
+  buildSessionProgressBenchmark,
   buildSessionProgressSeries,
   isComparablePracticeSession,
   isProgressChartEligible,
@@ -287,6 +289,51 @@ describe("session progress", () => {
     ]);
   });
 
+  it("builds fixed-duration count and fixed-count time benchmarks", () => {
+    const currentDuration = makeSession({
+      id: "current-duration",
+      startedAt: "2026-07-04T12:00:00.000+08:00",
+      mode: "fixed-duration",
+      fixedDurationSeconds: 6,
+      queueStrategy: "adaptive",
+    });
+    const oldDuration = makeSession({
+      ...currentDuration,
+      id: "old-duration",
+      startedAt: "2026-07-04T11:00:00.000+08:00",
+    });
+    expect(
+      buildSessionProgressBenchmark({
+        currentSession: currentDuration,
+        currentReviews: makeSessionReviews("current-duration", [1000, 1000, 1000, 1000, 1000]),
+        sessions: [oldDuration],
+        reviews: makeSessionReviews("old-duration", [1000, 1000, 1000, 1000, 1000, 1000, 1000]),
+      }),
+    ).toEqual({ metric: "completed-count", currentValue: 5, bestValue: 6, isNewBest: false });
+
+    const currentCount = makeSession({
+      ...currentDuration,
+      id: "current-count",
+      startedAt: "2026-07-04T14:00:00.000+08:00",
+      mode: "fixed-count",
+      fixedCount: 5,
+      fixedDurationSeconds: undefined,
+    });
+    const oldCount = makeSession({
+      ...currentCount,
+      id: "old-count",
+      startedAt: "2026-07-04T13:00:00.000+08:00",
+    });
+    expect(
+      buildSessionProgressBenchmark({
+        currentSession: currentCount,
+        currentReviews: makeSessionReviews("current-count", [1000, 1000, 1000, 1000, 1000]),
+        sessions: [oldCount],
+        reviews: makeSessionReviews("old-count", [1100, 1100, 1100, 1100, 1100]),
+      }),
+    ).toEqual({ metric: "elapsed-ms", currentValue: 5000, bestValue: 5000, isNewBest: true });
+  });
+
   it("uses the current fixed-count actual duration as the progress comparison window", () => {
     const current = makeSession({
       id: "current",
@@ -400,5 +447,18 @@ describe("session progress", () => {
     });
 
     expect(series.map((line) => line.sessionId)).toEqual(["older", "latest"]);
+    expect(
+      buildLatestSessionProgressBenchmark({
+        settings: { enabledGroupIds: ["G3-F4"], includeLedgerVariants: true },
+        sessions: [older, latestDifferentRange, latestOpenEnded, latestShort, latest],
+        reviews: [
+          ...makeSessionReviews("older", [1100, 1200, 1300, 1400, 1500]),
+          ...makeSessionReviews("latest-different-range", [700, 800, 900, 1000, 1100]),
+          ...makeSessionReviews("latest-open-ended", [500, 600, 700, 800, 900]),
+          ...makeSessionReviews("latest-short", [700, 800, 900, 1000]),
+          ...makeSessionReviews("latest", [900, 1000, 1100, 1200, 1300]),
+        ],
+      }),
+    ).toEqual({ metric: "completed-count", currentValue: 5, bestValue: 5, isNewBest: false });
   });
 });

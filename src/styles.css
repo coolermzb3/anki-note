@@ -1127,9 +1127,34 @@ main.has-backup-reminder .setup-grid::after {
 }
 
 .session-progress-controls .segmented,
-.session-progress-history-limit {
+.session-progress-history-limit,
+.session-progress-benchmark {
   height: 44px;
   min-height: 44px;
+}
+
+.session-progress-benchmark {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 12px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.session-progress-benchmark span {
+  align-items: baseline;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+}
+
+.session-progress-benchmark strong {
+  color: var(--ink);
+  font-size: 14px;
 }
 
 .session-progress-controls .segmented {
@@ -1887,8 +1912,13 @@ main.has-backup-reminder .setup-grid::after {
 
   .session-progress-controls,
   .session-progress-controls .segmented,
-  .session-progress-history-limit {
+  .session-progress-history-limit,
+  .session-progress-benchmark {
     width: 100%;
+  }
+
+  .session-progress-benchmark {
+    justify-content: center;
   }
 
   .session-progress-controls .segmented button {

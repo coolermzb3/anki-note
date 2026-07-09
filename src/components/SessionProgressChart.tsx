@@ -1,14 +1,24 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
-import type { SessionProgressMode, SessionProgressSeries } from "../domain/sessionProgress";
+import type {
+  SessionProgressBenchmark,
+  SessionProgressMode,
+  SessionProgressSeries,
+} from "../domain/sessionProgress";
+import {
+  DEFAULT_HISTORY_LIMIT,
+  HistoryLimitControl,
+  normalizeHistoryLimit,
+} from "./HistoryLimitControl";
 
-export const DEFAULT_SESSION_PROGRESS_HISTORY_LIMIT = 10;
+export const DEFAULT_SESSION_PROGRESS_HISTORY_LIMIT = DEFAULT_HISTORY_LIMIT;
 
 const SESSION_PROGRESS_WIDTH = 720;
 const DEFAULT_SESSION_PROGRESS_HEIGHT = 260;
 const SESSION_PROGRESS_PADDING = { bottom: 38, left: 50, right: 18, top: 18 };
 
 interface SessionProgressControlsProps {
+  benchmark?: SessionProgressBenchmark;
   historyLimit: number;
   mode: SessionProgressMode;
   onHistoryLimitChange: (historyLimit: number) => void;
@@ -25,8 +35,7 @@ type SessionProgressChartStyle = CSSProperties & {
 };
 
 export function normalizeSessionProgressHistoryLimit(value: string): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(1, Math.floor(parsed)) : DEFAULT_SESSION_PROGRESS_HISTORY_LIMIT;
+  return normalizeHistoryLimit(value);
 }
 
 function formatElapsedMs(ms: number): string {
@@ -39,7 +48,15 @@ function formatElapsedMs(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function formatBenchmarkValue(benchmark: SessionProgressBenchmark, value: number | undefined): string {
+  if (value === undefined) {
+    return "-";
+  }
+  return benchmark.metric === "completed-count" ? `${value}题` : `${(value / 1000).toFixed(1)}s`;
+}
+
 export function SessionProgressControls({
+  benchmark,
   historyLimit,
   mode,
   onHistoryLimitChange,
@@ -47,6 +64,19 @@ export function SessionProgressControls({
 }: SessionProgressControlsProps): JSX.Element {
   return (
     <div className="session-progress-controls">
+      {benchmark ? (
+        <div className="session-progress-benchmark">
+          <span>
+            本次 <strong>{formatBenchmarkValue(benchmark, benchmark.currentValue)}</strong>
+          </span>
+          <span>
+            最佳{" "}
+            <strong className={benchmark.isNewBest ? "new-best" : undefined}>
+              {formatBenchmarkValue(benchmark, benchmark.bestValue)}
+            </strong>
+          </span>
+        </div>
+      ) : null}
       <div className="segmented" aria-label="答对进度口径">
         <button className={mode === "actual-order" ? "active" : ""} onClick={() => onModeChange("actual-order")}>
           真实顺序
@@ -55,18 +85,11 @@ export function SessionProgressControls({
           排序累加
         </button>
       </div>
-      <label className="session-progress-history-limit">
-        <span>历史</span>
-        <input
-          aria-label="历史练习次数"
-          min={1}
-          step={1}
-          type="number"
-          value={historyLimit}
-          onChange={(event) => onHistoryLimitChange(normalizeSessionProgressHistoryLimit(event.target.value))}
-        />
-        <span>次</span>
-      </label>
+      <HistoryLimitControl
+        ariaLabel="历史练习次数"
+        historyLimit={historyLimit}
+        onHistoryLimitChange={onHistoryLimitChange}
+      />
     </div>
   );
 }

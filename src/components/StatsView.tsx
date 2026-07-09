@@ -17,7 +17,10 @@ import {
   buildPracticeSessionStats,
   filterLongTermReviews,
 } from "../domain/stats";
-import { buildLatestSessionProgressSeries } from "../domain/sessionProgress";
+import {
+  buildLatestSessionProgressBenchmark,
+  buildLatestSessionProgressSeries,
+} from "../domain/sessionProgress";
 import type { AppSettings, PracticeSessionRecord, ReviewRecord } from "../domain/types";
 import { GlobalRangeControls } from "./GlobalRangeControls";
 import {
@@ -619,6 +622,10 @@ export function StatsView({
       }),
     [reviews, sessions, sessionProgressHistoryLimit, sessionProgressMode, settings],
   );
+  const sessionProgressBenchmark = useMemo(
+    () => buildLatestSessionProgressBenchmark({ settings, sessions, reviews }),
+    [reviews, sessions, settings],
+  );
   const noteStats = useMemo(() => {
     if (activeNotes.length === 0) {
       return [];
@@ -802,6 +809,7 @@ export function StatsView({
             <h2>答对进度</h2>
             <div className="chart-panel-actions">
               <SessionProgressControls
+                benchmark={sessionProgressBenchmark}
                 historyLimit={sessionProgressHistoryLimit}
                 mode={sessionProgressMode}
                 onHistoryLimitChange={setSessionProgressHistoryLimit}

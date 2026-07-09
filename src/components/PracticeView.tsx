@@ -14,7 +14,11 @@ import {
 import { shouldIgnoreReviewForSession, shouldKeepPracticeSession } from "../domain/practiceSession";
 import { isCompletedReview } from "../domain/reviews";
 import { getDrillNotes, selectNextNote, selectNotePage } from "../domain/scheduler";
-import { buildSessionProgressSeries, type SessionProgressMode } from "../domain/sessionProgress";
+import {
+  buildSessionProgressBenchmark,
+  buildSessionProgressSeries,
+  type SessionProgressMode,
+} from "../domain/sessionProgress";
 import {
   buildNoteStats,
   filterLongTermReviews,
@@ -47,6 +51,7 @@ import {
   parseSessionProgressUiPreferences,
   SESSION_PROGRESS_UI_PREFERENCES_KEY,
 } from "./sessionProgressPreferences";
+import { PauseOverlay } from "./PauseOverlay";
 import { StaffPagePrompt } from "./StaffPagePrompt";
 import { StaffPrompt } from "./StaffPrompt";
 import { useLocalStorageState } from "./useLocalStorageState";
@@ -1109,6 +1114,18 @@ export function PracticeView({
         : [],
     [reviews, sessions, summary, summaryHistoryLimit, summaryProgressMode],
   );
+  const summaryProgressBenchmark = useMemo(
+    () =>
+      summary
+        ? buildSessionProgressBenchmark({
+            currentSession: summary.session,
+            currentReviews: summary.reviews,
+            sessions,
+            reviews,
+          })
+        : undefined,
+    [reviews, sessions, summary],
+  );
 
   if (phase === "setup") {
     return (
@@ -1343,6 +1360,7 @@ export function PracticeView({
               <div className="summary-section-heading session-progress-heading">
                 <h2>答对进度</h2>
                 <SessionProgressControls
+                  benchmark={summaryProgressBenchmark}
                   historyLimit={summaryHistoryLimit}
                   mode={summaryProgressMode}
                   onHistoryLimitChange={setSummaryHistoryLimit}
@@ -1438,12 +1456,7 @@ export function PracticeView({
       <span className="sr-only" aria-live="polite">
         {tick} {wrongAnswerCount}
       </span>
-      {isPaused ? (
-        <button className="pause-overlay" onClick={resumePractice} type="button">
-          <span>已暂停</span>
-          <small>点击或按 P 继续</small>
-        </button>
-      ) : null}
+      {isPaused ? <PauseOverlay onResume={resumePractice} /> : null}
     </section>
   );
 }
