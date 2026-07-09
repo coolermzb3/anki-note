@@ -17,12 +17,14 @@ const NOTE_COLUMNS_BY_KEY: Array<{ answerNumber: string; noteName: NoteName }> =
 ];
 
 const STUDY_COLUMN_ORDER_OPTIONS = [
-  { id: "circle", label: "4152637", answerNumbers: ["4", "1", "5", "2", "6", "3", "7"] },
-  { id: "scale", label: "1234567", answerNumbers: ["1", "2", "3", "4", "5", "6", "7"] },
-  { id: "thirds", label: "1357246", answerNumbers: ["1", "3", "5", "7", "2", "4", "6"] },
+  { id: "circle", label: "4152637" },
+  { id: "scale", label: "1234567" },
+  { id: "thirds", label: "1357246" },
+  { id: "random", label: "随机" },
 ] as const;
 
 type StudyColumnOrderId = (typeof STUDY_COLUMN_ORDER_OPTIONS)[number]["id"];
+type FixedStudyColumnOrderId = Exclude<StudyColumnOrderId, "random">;
 type StudyColumnDefinition = (typeof NOTE_COLUMNS_BY_KEY)[number];
 interface StudyUiPreferences {
   columnOrderId: StudyColumnOrderId;
@@ -39,6 +41,11 @@ const TRANSPARENT_NOTE_COLOR = "rgba(0, 0, 0, 0)";
 const KEY_FLASH_MS = 360;
 const NOTE_FLASH_MS = 260;
 const STUDY_UI_PREFERENCES_KEY = "anki-note.studyUiPreferences";
+const FIXED_STUDY_COLUMN_ANSWER_NUMBERS: Record<FixedStudyColumnOrderId, readonly string[]> = {
+  circle: ["4", "1", "5", "2", "6", "3", "7"],
+  scale: ["1", "2", "3", "4", "5", "6", "7"],
+  thirds: ["1", "3", "5", "7", "2", "4", "6"],
+};
 const DEFAULT_STUDY_UI_PREFERENCES: StudyUiPreferences = {
   columnOrderId: "circle",
   isColumnOrderReversed: false,
@@ -182,10 +189,23 @@ function comparePitch(left: TargetNote, right: TargetNote): number {
   return pitchOrder(left) - pitchOrder(right);
 }
 
-function getStudyColumnDefinitions(orderId: StudyColumnOrderId, isReversed: boolean): StudyColumnDefinition[] {
-  const order = STUDY_COLUMN_ORDER_OPTIONS.find((option) => option.id === orderId) ?? STUDY_COLUMN_ORDER_OPTIONS[0];
-  const answerNumbers = isReversed ? [...order.answerNumbers].reverse() : order.answerNumbers;
-  return answerNumbers.map((answerNumber) => {
+function shuffleStudyAnswerNumbers(): string[] {
+  const answerNumbers = NOTE_COLUMNS_BY_KEY.map((column) => column.answerNumber);
+  for (let index = answerNumbers.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [answerNumbers[index], answerNumbers[swapIndex]] = [answerNumbers[swapIndex], answerNumbers[index]];
+  }
+  return answerNumbers;
+}
+
+function getStudyColumnDefinitions(
+  orderId: StudyColumnOrderId,
+  isReversed: boolean,
+  randomAnswerNumbers: readonly string[],
+): StudyColumnDefinition[] {
+  const answerNumbers = orderId === "random" ? randomAnswerNumbers : FIXED_STUDY_COLUMN_ANSWER_NUMBERS[orderId];
+  const orderedAnswerNumbers = isReversed ? [...answerNumbers].reverse() : answerNumbers;
+  return orderedAnswerNumbers.map((answerNumber) => {
     const column = NOTE_COLUMNS_BY_KEY.find((candidate) => candidate.answerNumber === answerNumber);
     if (!column) {
       throw new Error(`Unknown study column number: ${answerNumber}`);
@@ -605,10 +625,14 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
   );
   const [highlightedNoteNames, setHighlightedNoteNames] = useState<ReadonlySet<NoteName>>(() => new Set());
   const [highlightedNoteId, setHighlightedNoteId] = useState<string | undefined>();
+  const [randomAnswerNumbers, setRandomAnswerNumbers] = useState(() => shuffleStudyAnswerNumbers());
   const columnOrderId = studyUiPreferences.columnOrderId;
   const isColumnOrderReversed = studyUiPreferences.isColumnOrderReversed;
   const showLabels = studyUiPreferences.showLabels;
   const setColumnOrderId = (nextColumnOrderId: StudyColumnOrderId): void => {
+    if (nextColumnOrderId === "random") {
+      setRandomAnswerNumbers(shuffleStudyAnswerNumbers());
+    }
     setStudyUiPreferences((current) => ({ ...current, columnOrderId: nextColumnOrderId }));
   };
   const setIsColumnOrderReversed = (nextIsColumnOrderReversed: boolean): void => {
@@ -622,8 +646,8 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
   const noteFlashTimerRef = useRef<number | undefined>();
   const heldColumnsRef = useRef(new Map<string, HeldColumnPlayback>());
   const columnDefinitions = useMemo(
-    () => getStudyColumnDefinitions(columnOrderId, isColumnOrderReversed),
-    [columnOrderId, isColumnOrderReversed],
+    () => getStudyColumnDefinitions(columnOrderId, isColumnOrderReversed, randomAnswerNumbers),
+    [columnOrderId, isColumnOrderReversed, randomAnswerNumbers],
   );
   const studyNotes = useMemo(
     () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
