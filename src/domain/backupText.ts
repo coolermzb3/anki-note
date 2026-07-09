@@ -23,12 +23,12 @@ export const backupText = {
   messages: {
     backupDirectoryAutoImported: "备份目录已有更新，已自动导入。",
     backupDirectoryWillBeReplaced: "这会用当前浏览器数据覆盖备份目录。继续？",
-    backupEnabled: "自动备份已启用，练习结束后会写入备份目录。",
+    backupEnabled: "自动备份已启用，练习或默写完成后会写入备份目录。",
     backupPermissionOrDirectoryHint: "请检查备份目录权限，或在设置页重新选择目录。",
-    browserDataWillBeReplaced: "导入备份会替换当前浏览器内练习数据。继续？",
-    browserOnlyNeedsDirectory: "练习记录只保存在当前浏览器，设置目录后可以导入和迁移数据。",
+    browserDataWillBeReplaced: "导入备份会替换当前浏览器内学习数据。继续？",
+    browserOnlyNeedsDirectory: "学习记录只保存在当前浏览器，设置目录后可以导入和迁移数据。",
     directorySelected: "已选择备份目录",
-    emptyBackupDirectory: "备份目录还没有可导入的数据，先练习一次后会自动备份。",
+    emptyBackupDirectory: "备份目录还没有可导入的数据，完成一次练习或默写后会自动备份。",
     dataConflictBeforeBackup:
       "备份目录与当前浏览器数据不一致。请选择保留哪份数据，或改选空目录以保留两边（备份目录数据保留，浏览器数据进入新的空目录）。",
     importSuccessDetail: "当前浏览器已使用备份目录中的数据。",
@@ -52,9 +52,9 @@ function formatBackupTime(value?: string): string {
 }
 
 export interface BackupConflictDataSummary {
-  firstReviewAt: string;
-  lastReviewAt: string;
-  reviewCount: number;
+  firstDataAt: string;
+  lastDataAt: string;
+  recordCount: number;
 }
 
 export interface BackupConflictDataSummaries {
@@ -71,17 +71,25 @@ type BackupConflictSummarySource = Pick<
   | "conflictBrowserFirstReviewAt"
   | "conflictBrowserLastReviewAt"
   | "conflictBrowserReviewCount"
+  | "conflictBackupFirstDataAt"
+  | "conflictBackupLastDataAt"
+  | "conflictBackupRecordCount"
+  | "conflictBackupStaffRecallRunCount"
+  | "conflictBrowserFirstDataAt"
+  | "conflictBrowserLastDataAt"
+  | "conflictBrowserRecordCount"
+  | "conflictBrowserStaffRecallRunCount"
 >;
 
 function formatBackupDataSummary(
-  firstReviewAt?: string,
-  lastReviewAt?: string,
-  reviewCount?: number,
+  firstDataAt?: string,
+  lastDataAt?: string,
+  recordCount?: number,
 ): BackupConflictDataSummary {
   return {
-    firstReviewAt: formatBackupTime(firstReviewAt),
-    lastReviewAt: formatBackupTime(lastReviewAt),
-    reviewCount: reviewCount ?? 0,
+    firstDataAt: formatBackupTime(firstDataAt),
+    lastDataAt: formatBackupTime(lastDataAt),
+    recordCount: recordCount ?? 0,
   };
 }
 
@@ -104,27 +112,41 @@ function compareBackupTime(a?: string, b?: string): number {
 }
 
 function backupDataCovers({
-  firstReviewAt,
-  lastReviewAt,
+  firstDataAt,
+  lastDataAt,
   reviewCount,
-  otherFirstReviewAt,
-  otherLastReviewAt,
+  staffRecallRunCount,
+  otherFirstDataAt,
+  otherLastDataAt,
   otherReviewCount,
+  otherStaffRecallRunCount,
 }: {
-  firstReviewAt?: string;
-  lastReviewAt?: string;
-  otherFirstReviewAt?: string;
-  otherLastReviewAt?: string;
+  firstDataAt?: string;
+  lastDataAt?: string;
+  otherFirstDataAt?: string;
+  otherLastDataAt?: string;
   otherReviewCount?: number;
+  otherStaffRecallRunCount?: number;
   reviewCount?: number;
+  staffRecallRunCount?: number;
 }): boolean {
-  if (!firstReviewAt || !lastReviewAt || !otherFirstReviewAt || !otherLastReviewAt) {
+  if (
+    !firstDataAt ||
+    !lastDataAt ||
+    !otherFirstDataAt ||
+    !otherLastDataAt ||
+    reviewCount === undefined ||
+    otherReviewCount === undefined ||
+    staffRecallRunCount === undefined ||
+    otherStaffRecallRunCount === undefined
+  ) {
     return false;
   }
   return (
-    compareBackupTime(firstReviewAt, otherFirstReviewAt) <= 0 &&
-    compareBackupTime(lastReviewAt, otherLastReviewAt) >= 0 &&
-    (reviewCount ?? 0) >= (otherReviewCount ?? 0)
+    compareBackupTime(firstDataAt, otherFirstDataAt) <= 0 &&
+    compareBackupTime(lastDataAt, otherLastDataAt) >= 0 &&
+    reviewCount >= otherReviewCount &&
+    staffRecallRunCount >= otherStaffRecallRunCount
   );
 }
 
@@ -132,30 +154,38 @@ export function getBackupConflictDataSummaries(
   backupState: BackupConflictSummarySource,
 ): BackupConflictDataSummaries {
   const backup = formatBackupDataSummary(
-    backupState.conflictBackupFirstReviewAt,
-    backupState.conflictBackupLastReviewAt,
-    backupState.conflictBackupReviewCount,
+    backupState.conflictBackupFirstDataAt ?? backupState.conflictBackupFirstReviewAt,
+    backupState.conflictBackupLastDataAt ?? backupState.conflictBackupLastReviewAt,
+    backupState.conflictBackupRecordCount ?? backupState.conflictBackupReviewCount,
   );
   const browser = formatBackupDataSummary(
-    backupState.conflictBrowserFirstReviewAt,
-    backupState.conflictBrowserLastReviewAt,
-    backupState.conflictBrowserReviewCount,
+    backupState.conflictBrowserFirstDataAt ?? backupState.conflictBrowserFirstReviewAt,
+    backupState.conflictBrowserLastDataAt ?? backupState.conflictBrowserLastReviewAt,
+    backupState.conflictBrowserRecordCount ?? backupState.conflictBrowserReviewCount,
   );
+  const backupFirstDataAt = backupState.conflictBackupFirstDataAt ?? backupState.conflictBackupFirstReviewAt;
+  const backupLastDataAt = backupState.conflictBackupLastDataAt ?? backupState.conflictBackupLastReviewAt;
+  const browserFirstDataAt = backupState.conflictBrowserFirstDataAt ?? backupState.conflictBrowserFirstReviewAt;
+  const browserLastDataAt = backupState.conflictBrowserLastDataAt ?? backupState.conflictBrowserLastReviewAt;
   const backupCoversBrowser = backupDataCovers({
-    firstReviewAt: backupState.conflictBackupFirstReviewAt,
-    lastReviewAt: backupState.conflictBackupLastReviewAt,
-    otherFirstReviewAt: backupState.conflictBrowserFirstReviewAt,
-    otherLastReviewAt: backupState.conflictBrowserLastReviewAt,
+    firstDataAt: backupFirstDataAt,
+    lastDataAt: backupLastDataAt,
+    otherFirstDataAt: browserFirstDataAt,
+    otherLastDataAt: browserLastDataAt,
     otherReviewCount: backupState.conflictBrowserReviewCount,
+    otherStaffRecallRunCount: backupState.conflictBrowserStaffRecallRunCount,
     reviewCount: backupState.conflictBackupReviewCount,
+    staffRecallRunCount: backupState.conflictBackupStaffRecallRunCount,
   });
   const browserCoversBackup = backupDataCovers({
-    firstReviewAt: backupState.conflictBrowserFirstReviewAt,
-    lastReviewAt: backupState.conflictBrowserLastReviewAt,
-    otherFirstReviewAt: backupState.conflictBackupFirstReviewAt,
-    otherLastReviewAt: backupState.conflictBackupLastReviewAt,
+    firstDataAt: browserFirstDataAt,
+    lastDataAt: browserLastDataAt,
+    otherFirstDataAt: backupFirstDataAt,
+    otherLastDataAt: backupLastDataAt,
     otherReviewCount: backupState.conflictBackupReviewCount,
+    otherStaffRecallRunCount: backupState.conflictBackupStaffRecallRunCount,
     reviewCount: backupState.conflictBrowserReviewCount,
+    staffRecallRunCount: backupState.conflictBrowserStaffRecallRunCount,
   });
   return {
     backup,
@@ -165,15 +195,7 @@ export function getBackupConflictDataSummaries(
 }
 
 export function formatBackupConflictDetail(
-  _backupState: Pick<
-    BackupState,
-    | "conflictBackupFirstReviewAt"
-    | "conflictBackupLastReviewAt"
-    | "conflictBackupReviewCount"
-    | "conflictBrowserFirstReviewAt"
-    | "conflictBrowserLastReviewAt"
-    | "conflictBrowserReviewCount"
-  >,
+  _backupState: BackupState,
 ): string {
   return backupText.messages.dataConflictBeforeBackup;
 }

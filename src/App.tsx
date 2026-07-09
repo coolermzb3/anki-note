@@ -2,19 +2,19 @@ import { BarChart3, BellOff, BookOpen, Download, Dumbbell, FolderOpen, Settings,
 import { useCallback, useEffect, useRef, useState } from "react";
 import { preloadPianoSamples, setPianoVolume } from "./audio/piano";
 import {
-  type BackupBeforePracticeResult,
+  type BackupPreflightResult,
   chooseBackupDirectory,
   refreshBackupConflictDetails,
   restoreBackupFromDirectory,
   supportsFileBackups,
-  syncBackupBeforePractice,
+  syncBackupBeforeActivity,
   writeBrowserDataToBackupDirectory,
 } from "./data/backup";
 import { db, getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
 import { IndexedDbMaintenancePanel } from "./debug/IndexedDbMaintenancePanel";
 import { installIndexedDbMaintenanceDebug } from "./debug/indexedDbMaintenance";
 import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "./domain/backupText";
-import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord } from "./domain/types";
+import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord, StaffRecallRunRecord } from "./domain/types";
 import { BackupConflictActionContent } from "./components/BackupConflictActionContent";
 import {
   PracticeView,
@@ -24,7 +24,7 @@ import {
 } from "./components/PracticeView";
 import { SettingsView } from "./components/SettingsView";
 import { StatsView } from "./components/StatsView";
-import { StudyView } from "./components/StudyView";
+import { StudyView, type StaffRecallStartPreflightResult } from "./components/StudyView";
 import { useBlurButtonAfterPointerClick } from "./components/useBlurButtonAfterPointerClick";
 
 type View = PracticeNavigationExitTarget;
@@ -36,13 +36,14 @@ interface AppData {
   settings: AppSettings;
   sessions: PracticeSessionRecord[];
   reviews: ReviewRecord[];
+  staffRecallRuns: StaffRecallRunRecord[];
   backupState: BackupState;
 }
 
-interface PracticeBackupCheckResult {
+interface BackupCheckResult {
   latestData?: AppData;
   proceed: boolean;
-  result: BackupBeforePracticeResult;
+  result: BackupPreflightResult;
 }
 
 type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
@@ -96,7 +97,12 @@ function backupSyncRequired(backupState: BackupState): boolean {
 }
 
 function backupConflictDetailsMissing(backupState: BackupState): boolean {
-  return backupState.conflictBrowserReviewCount === undefined && backupState.conflictBackupReviewCount === undefined;
+  return (
+    backupState.conflictBrowserReviewCount === undefined ||
+    backupState.conflictBackupReviewCount === undefined ||
+    backupState.conflictBrowserStaffRecallRunCount === undefined ||
+    backupState.conflictBackupStaffRecallRunCount === undefined
+  );
 }
 
 function isUserAbort(error: unknown): boolean {
@@ -117,8 +123,8 @@ function getBackupReminderState(data: AppData): BackupReminderState {
 }
 
 async function loadFreshAppData(): Promise<AppData> {
-  const [{ settings, sessions, reviews }, backupState] = await Promise.all([loadAllData(), getBackupState()]);
-  return { settings, sessions, reviews, backupState };
+  const [{ settings, sessions, reviews, staffRecallRuns }, backupState] = await Promise.all([loadAllData(), getBackupState()]);
+  return { settings, sessions, reviews, staffRecallRuns, backupState };
 }
 
 export function App(): JSX.Element {
@@ -134,7 +140,7 @@ export function App(): JSX.Element {
   const [practiceExitRequest, setPracticeExitRequest] = useState<PracticeNavigationExitRequest | null>(null);
   const practiceExitRequestIdRef = useRef(0);
   const backupToastMessageTimerRef = useRef<number | null>(null);
-  const practiceBackupCheckInFlightRef = useRef<Promise<PracticeBackupCheckResult> | null>(null);
+  const backupCheckInFlightRef = useRef<Promise<BackupCheckResult> | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
     setData(await loadFreshAppData());
@@ -260,7 +266,7 @@ export function App(): JSX.Element {
     setBackupReminderVisible(false);
   }, []);
 
-  const showBackupReminderAfterPractice = useCallback((): void => {
+  const showBackupReminderAfterActivity = useCallback((): void => {
     if (data && getBackupReminderState(data).showReminder) {
       setBackupReminderVisible(true);
     }
@@ -293,21 +299,25 @@ export function App(): JSX.Element {
     data?.backupState.syncRequiredBeforeBackup,
     data?.backupState.conflictBrowserReviewCount,
     data?.backupState.conflictBackupReviewCount,
+    data?.backupState.conflictBrowserRecordCount,
+    data?.backupState.conflictBackupRecordCount,
+    data?.backupState.conflictBrowserStaffRecallRunCount,
+    data?.backupState.conflictBackupStaffRecallRunCount,
     refreshBackupState,
   ]);
 
-  const runPracticeBackupCheck = useCallback(
-    async ({ requestPermission }: { requestPermission: boolean }): Promise<PracticeBackupCheckResult> => {
-      while (practiceBackupCheckInFlightRef.current) {
-        const inFlightResult = await practiceBackupCheckInFlightRef.current;
+  const runBackupCheck = useCallback(
+    async ({ requestPermission }: { requestPermission: boolean }): Promise<BackupCheckResult> => {
+      while (backupCheckInFlightRef.current) {
+        const inFlightResult = await backupCheckInFlightRef.current;
         if (!requestPermission || inFlightResult.result !== "skipped") {
           return inFlightResult;
         }
       }
 
-      const checkPromise = (async (): Promise<PracticeBackupCheckResult> => {
+      const checkPromise = (async (): Promise<BackupCheckResult> => {
         try {
-          const result = await syncBackupBeforePractice({ requestPermission });
+          const result = await syncBackupBeforeActivity({ requestPermission });
           if (result === "needs-directory") {
             setBackupReminderVisible(true);
             return { proceed: true, result };
@@ -345,12 +355,12 @@ export function App(): JSX.Element {
         }
       })();
 
-      practiceBackupCheckInFlightRef.current = checkPromise;
+      backupCheckInFlightRef.current = checkPromise;
       try {
         return await checkPromise;
       } finally {
-        if (practiceBackupCheckInFlightRef.current === checkPromise) {
-          practiceBackupCheckInFlightRef.current = null;
+        if (backupCheckInFlightRef.current === checkPromise) {
+          backupCheckInFlightRef.current = null;
         }
       }
     },
@@ -358,7 +368,7 @@ export function App(): JSX.Element {
   );
 
   const preflightBeforePracticeStart = useCallback(async (): Promise<PracticeStartPreflightResult> => {
-    const checkResult = await runPracticeBackupCheck({ requestPermission: true });
+    const checkResult = await runBackupCheck({ requestPermission: true });
     if (!checkResult.proceed) {
       return { proceed: false };
     }
@@ -368,7 +378,12 @@ export function App(): JSX.Element {
     const latestData = checkResult.latestData ?? (await loadFreshAppData());
     setData(latestData);
     return { proceed: true, reviews: latestData.reviews, settings: latestData.settings };
-  }, [runPracticeBackupCheck]);
+  }, [runBackupCheck]);
+
+  const preflightBeforeStaffRecallStart = useCallback(async (): Promise<StaffRecallStartPreflightResult> => {
+    const checkResult = await runBackupCheck({ requestPermission: true });
+    return { proceed: checkResult.proceed };
+  }, [runBackupCheck]);
 
   useEffect(() => {
     if (
@@ -379,7 +394,7 @@ export function App(): JSX.Element {
     ) {
       return;
     }
-    void runPracticeBackupCheck({ requestPermission: false });
+    void runBackupCheck({ requestPermission: false });
   }, [
     data !== null,
     hasBackupDirectory,
@@ -387,7 +402,7 @@ export function App(): JSX.Element {
     data?.backupState.dataConflictBeforeBackup,
     data?.backupState.syncRequiredBeforeBackup,
     practiceRunning,
-    runPracticeBackupCheck,
+    runBackupCheck,
     view,
   ]);
 
@@ -481,7 +496,7 @@ export function App(): JSX.Element {
 
   const backupReminderState = getBackupReminderState(data);
   const showBackupReminder = (backupReminderVisible && backupReminderState.showReminder) || backupReminderMessage !== null;
-  const hasBrowserPracticeData = data.sessions.length > 0 || data.reviews.length > 0;
+  const hasBrowserData = data.sessions.length > 0 || data.reviews.length > 0 || data.staffRecallRuns.length > 0;
   const backupConflictSummaries =
     backupReminderState.kind === "data-conflict" ? getBackupConflictDataSummaries(data.backupState) : null;
 
@@ -598,7 +613,7 @@ export function App(): JSX.Element {
             onNavigationExit={handleNavigationExit}
             onOpenStats={() => setView("stats")}
             onBeforePracticeStart={preflightBeforePracticeStart}
-            onPracticeFinished={showBackupReminderAfterPractice}
+            onPracticeFinished={showBackupReminderAfterActivity}
             onRunningChange={setPracticeRunning}
             onSettingsSaved={saveSettings}
           />
@@ -611,11 +626,20 @@ export function App(): JSX.Element {
             onSettingsSaved={saveSettings}
           />
         ) : null}
-        {view === "study" ? <StudyView settings={data.settings} onSettingsSaved={saveSettings} /> : null}
+        {view === "study" ? (
+          <StudyView
+            onBeforeStaffRecallStart={preflightBeforeStaffRecallStart}
+            onDataChanged={refresh}
+            onSettingsSaved={saveSettings}
+            onStaffRecallFinished={showBackupReminderAfterActivity}
+            settings={data.settings}
+            staffRecallRuns={data.staffRecallRuns}
+          />
+        ) : null}
         {view === "settings" ? (
           <SettingsView
             backupState={data.backupState}
-            hasBrowserPracticeData={hasBrowserPracticeData}
+            hasBrowserData={hasBrowserData}
             settings={data.settings}
             onDataChanged={refresh}
             onSettingsSaved={saveSettings}

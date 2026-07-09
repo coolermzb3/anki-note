@@ -28,6 +28,30 @@ _Avoid_: Difficulty level, card group
 A practice group selected by the learner as part of the current app-wide note range. Enabled groups scope practice prompts, statistics filters, and study maps consistently. The first version does not have locked or unlocked groups; any practice group may be enabled freely.
 _Avoid_: Unlocked group, available group
 
+**Staff recall**:
+The non-practice study activity labeled `默写`, where the learner reconstructs staff placements from written note-name prompts. For each prompt, the required placements are exactly the target notes shown for the same answer note name by the study map under the same enabled groups and inter-staff ledger spelling setting.
+_Avoid_: Dictation practice, reverse practice mode
+
+**Staff-recall column**:
+One of the seven note-name answer areas in staff recall. Each column has its own answer state and completion time while sharing one grand staff with the other columns.
+_Avoid_: Recall card, separate staff
+
+**Staff-recall input range**:
+The target-note placements available for input across all seven staff-recall columns, exactly matching the placements shown by the study map under the current enabled groups and inter-staff ledger spelling setting. Gaps between non-contiguous enabled groups are not input positions.
+_Avoid_: Continuous staff range, every visible line and space
+
+**Staff-recall run**:
+A completed staff-recall activity in which the learner finishes all seven staff-recall columns under one practice range and inter-staff ledger spelling setting. Completed runs are persistent learner history, separate from practice sessions and reviews.
+_Avoid_: Practice session, incomplete recall attempt
+
+**Comparable staff-recall run**:
+A staff-recall run whose required target-note set exactly matches another run. Random staff-recall column order does not affect comparability.
+_Avoid_: Same enabled-group labels, same column order
+
+**Staff-recall time**:
+The active elapsed time from the first placement in a staff-recall column until its required placements are complete. Time while the window is unfocused or the page is hidden is excluded, and a run's total is the sum of its seven column times.
+_Avoid_: Wall-clock time, time since entering recall
+
 **Practice session**:
 A contiguous period of practice using the currently enabled groups. A session may be an open-ended flow that continues until the learner stops, a fixed-count session that ends after a chosen number of completed reviews, or a fixed-duration session that ends after a chosen active practice duration.
 _Avoid_: Game, round
@@ -107,7 +131,7 @@ Recent movement in recognition time for a target note or practice group. The fir
 _Avoid_: Progress chart, learning curve
 
 **Browser data store**:
-The practice records and settings stored inside one browser origin, such as the published site or the local development server. Browser data stores are separate even when they point at the same backup directory.
+The practice records, staff-recall runs, and settings stored inside one browser origin, such as the published site or the local development server. Browser data stores are separate even when they point at the same backup directory.
 _Avoid_: Local data, device data
 
 **Backup directory**:
@@ -115,7 +139,7 @@ A user-selected file-system folder that stores a portable backup snapshot for th
 _Avoid_: Sync folder, database folder
 
 **Backup snapshot**:
-A complete file-system backup of practice records and settings at one point in time. A backup snapshot is used as a guarded recovery and transfer point, not as a merge log.
+A complete file-system backup of practice records, staff-recall runs, and settings at one point in time. A backup snapshot is used as a guarded recovery and transfer point, not as a merge log.
 _Avoid_: Incremental sync, cloud copy
 
 **Backup import**:

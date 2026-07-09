@@ -20,13 +20,13 @@ export function BackupConflictActionContent({
       </span>
       <span className="backup-action-summary">
         <span>
-          {backupText.labels.conflictStart}：{summary.firstReviewAt}
+          {backupText.labels.conflictStart}：{summary.firstDataAt}
         </span>
         <span>
-          {backupText.labels.conflictEnd}：{summary.lastReviewAt}
+          {backupText.labels.conflictEnd}：{summary.lastDataAt}
         </span>
         <span>
-          {backupText.labels.conflictCount}：{summary.reviewCount}
+          {backupText.labels.conflictCount}：{summary.recordCount}
         </span>
       </span>
     </>

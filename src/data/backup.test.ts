@@ -2,10 +2,18 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildBackupSnapshot } from "../domain/backupSnapshot";
 import { makeReview } from "../domain/testFactories";
-import type { AppSettings, BackupDayFile, BackupManifest, BackupState, PracticeSessionRecord, ReviewRecord } from "../domain/types";
+import type {
+  AppSettings,
+  BackupDayFile,
+  BackupManifest,
+  BackupState,
+  PracticeSessionRecord,
+  ReviewRecord,
+  StaffRecallRunRecord,
+} from "../domain/types";
 import { backupText } from "../domain/backupText";
 import { db, makeDefaultSettings } from "./db";
-import { refreshBackupConflictDetails, syncBackupBeforePractice, writeBackupIfSafe, writeBackupNow, writeBackupSnapshot } from "./backup";
+import { refreshBackupConflictDetails, syncBackupBeforeActivity, writeBackupIfSafe, writeBackupNow, writeBackupSnapshot } from "./backup";
 
 class MemoryFileHandle {
   readonly kind = "file";
@@ -128,6 +136,20 @@ function makeSession(overrides: Partial<PracticeSessionRecord> = {}): PracticeSe
   };
 }
 
+function makeStaffRecallRun(overrides: Partial<StaffRecallRunRecord> = {}): StaffRecallRunRecord {
+  return {
+    id: "recall-backup",
+    schemaVersion: 1,
+    answerSetKey: "C4|D4|E4|F4|G3|A3|B3",
+    targetNoteIds: ["C4", "D4", "E4", "F4", "G3", "A3", "B3"],
+    columnOrder: ["F", "C", "G", "D", "A", "E", "B"],
+    columnActiveMs: { C: 1000, D: 1000, E: 1000, F: 1000, G: 1000, A: 1000, B: 1000 },
+    startedAt: "2026-07-05T11:00:00.000+08:00",
+    endedAt: "2026-07-05T11:01:00.000+08:00",
+    ...overrides,
+  };
+}
+
 async function seedBrowserData({
   dataSetId = "dataset-browser",
   reviewId = "review-browser",
@@ -242,10 +264,21 @@ describe("file backup side effects", () => {
     await seedBackupDirectory(directory);
     await rememberDirectory(directory);
 
-    await expect(syncBackupBeforePractice({ requestPermission: true })).resolves.toBe("synced-up");
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toBe("synced-up");
 
     await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-backup" }]);
     await expect(db.settings.get("default")).resolves.toMatchObject({ dataSetId: "dataset-backup" });
+  });
+
+  it("imports staff-recall history from a backup-only directory", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const settings = makeSettings({ dataSetId: "dataset-backup" });
+    const run = makeStaffRecallRun();
+    await writeBackupSnapshot(directory.handle(), buildBackupSnapshot(settings, [], [], run.endedAt, [run]));
+    await rememberDirectory(directory);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toBe("synced-up");
+    await expect(db.staffRecallRuns.toArray()).resolves.toEqual([run]);
   });
 
   it("imports newer backup data before practice when no conflict guard exists", async () => {
@@ -260,7 +293,7 @@ describe("file backup side effects", () => {
     });
     await rememberDirectory(directory);
 
-    await expect(syncBackupBeforePractice({ requestPermission: true })).resolves.toBe("synced-up");
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toBe("synced-up");
 
     await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-backup" }]);
     await expect(db.backupStates.get("default")).resolves.toMatchObject({
@@ -288,7 +321,7 @@ describe("file backup side effects", () => {
       lastError: "备份目录已有更新，请先导入备份。",
     });
 
-    await expect(syncBackupBeforePractice({ requestPermission: true })).resolves.toBe("data-conflict");
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toBe("data-conflict");
 
     await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-browser" }]);
     await expect(db.backupStates.get("default")).resolves.toMatchObject({
@@ -343,8 +376,12 @@ describe("file backup side effects", () => {
     await expect(refreshBackupConflictDetails()).resolves.toBe(true);
 
     await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      conflictBackupRecordCount: 1,
       conflictBackupReviewCount: 1,
+      conflictBackupStaffRecallRunCount: 0,
+      conflictBrowserRecordCount: 1,
       conflictBrowserReviewCount: 1,
+      conflictBrowserStaffRecallRunCount: 0,
       dataConflictBeforeBackup: true,
       lastError: backupText.messages.dataConflictBeforeBackup,
       syncRequiredBeforeBackup: true,

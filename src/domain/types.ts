@@ -84,6 +84,17 @@ export interface PracticeSessionRecord {
   interruptedCount: number;
 }
 
+export interface StaffRecallRunRecord {
+  id: string;
+  schemaVersion: 1;
+  answerSetKey: string;
+  targetNoteIds: TargetNoteId[];
+  columnOrder: NoteName[];
+  columnActiveMs: Record<NoteName, number>;
+  startedAt: string;
+  endedAt: string;
+}
+
 export interface AppSettings {
   id: "default";
   schemaVersion: 1;
@@ -121,6 +132,14 @@ export interface BackupState {
   conflictBackupFirstReviewAt?: string;
   conflictBackupLastReviewAt?: string;
   conflictBackupReviewCount?: number;
+  conflictBrowserFirstDataAt?: string;
+  conflictBrowserLastDataAt?: string;
+  conflictBrowserRecordCount?: number;
+  conflictBrowserStaffRecallRunCount?: number;
+  conflictBackupFirstDataAt?: string;
+  conflictBackupLastDataAt?: string;
+  conflictBackupRecordCount?: number;
+  conflictBackupStaffRecallRunCount?: number;
   lastSeenBackupVersion?: string;
   backupDataModifiedAt?: string;
   lastBackupAt?: string;
@@ -138,6 +157,7 @@ export interface BackupManifest {
   dataModifiedAt?: string;
   lastBackupAt: string;
   lastReviewId?: string;
+  lastStaffRecallRunId?: string;
   dates: string[];
 }
 
@@ -146,6 +166,7 @@ export interface BackupDayFile {
   date: string;
   sessions: PracticeSessionRecord[];
   reviews: ReviewRecord[];
+  staffRecallRuns?: StaffRecallRunRecord[];
 }
 
 export interface BackupSnapshot {

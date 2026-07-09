@@ -367,6 +367,20 @@ button.primary.backup-decision-button .backup-action-summary {
   min-width: min(100%, 290px);
 }
 
+.global-range-controls-locked {
+  opacity: 0.58;
+}
+
+.study-mode-options button {
+  min-width: 96px;
+}
+
+.study-range-lock-hint,
+.staff-recall-hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .study-controls {
   display: flex;
   align-items: center;
@@ -450,6 +464,229 @@ button.primary.backup-decision-button .backup-action-summary {
   outline: none;
   pointer-events: all;
   stroke: transparent;
+}
+
+.staff-recall-readonly-controls .segmented button:disabled {
+  opacity: 0.55;
+}
+
+.staff-recall-readonly-controls .segmented button.active:disabled {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: white;
+  opacity: 0.72;
+}
+
+.staff-recall-controls-row {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.staff-recall-controls-row .study-controls {
+  flex: 1;
+}
+
+.staff-recall-hint {
+  align-self: end;
+  margin: 0 0 10px 4px;
+}
+
+.staff-recall-figure {
+  padding-top: 0;
+}
+
+.staff-recall-scroll {
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+.staff-recall-map {
+  cursor: crosshair;
+  min-width: 0;
+  touch-action: pan-y;
+  user-select: none;
+  width: 100%;
+}
+
+.staff-recall-map-renderer,
+.staff-recall-map-renderer svg {
+  display: block;
+  min-width: 100%;
+  width: 100%;
+}
+
+.staff-recall-map-renderer {
+  overflow-anchor: none;
+}
+
+.staff-recall-map-renderer svg {
+  height: auto;
+  max-width: 100%;
+}
+
+.staff-recall-ledger-guide {
+  stroke: rgba(118, 107, 95, 0.24);
+  stroke-linecap: butt;
+  stroke-width: 1;
+}
+
+.staff-recall-column-status {
+  fill: var(--muted);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 8.667px;
+  font-weight: 600;
+  pointer-events: none;
+  stroke: none;
+}
+
+.staff-recall-column-status .status-label {
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.staff-recall-column-status .status-value {
+  fill: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.staff-recall-column-status .faster,
+.staff-recall-summary .faster {
+  color: var(--success);
+  fill: var(--success);
+}
+
+.staff-recall-column-status .slower,
+.staff-recall-summary .slower {
+  color: var(--danger);
+  fill: var(--danger);
+}
+
+.staff-recall-column-mask {
+  fill: rgba(255, 253, 250, 0.76);
+  pointer-events: none;
+  stroke: none;
+}
+
+.staff-recall-column-active {
+  fill: rgba(37, 111, 103, 0.055);
+  pointer-events: none;
+  stroke: rgba(37, 111, 103, 0.24);
+  stroke-width: 1;
+}
+
+.staff-recall-save-error {
+  color: var(--danger);
+  margin-top: 12px;
+  text-align: center;
+}
+
+.staff-recall-empty {
+  color: var(--muted);
+  display: grid;
+  min-height: 360px;
+  place-items: center;
+}
+
+.staff-recall-summary {
+  margin: 18px auto 0;
+  max-width: 920px;
+}
+
+.staff-recall-summary-heading,
+.staff-recall-trend-heading {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.staff-recall-summary-metrics {
+  display: grid;
+  flex: 1;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.staff-recall-summary .metric strong {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.staff-recall-summary .metric small {
+  font-size: 14px;
+}
+
+.staff-recall-summary .staff-recall-summary-per-note {
+  color: var(--muted);
+  display: inline-flex;
+  font-weight: 600;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.staff-recall-summary .staff-recall-summary-per-note b {
+  color: var(--ink);
+}
+
+.staff-recall-summary .metric strong.new-best,
+.staff-recall-summary .metric strong.new-best .staff-recall-summary-per-note b,
+.session-progress-benchmark strong.new-best {
+  color: var(--success);
+}
+
+.staff-recall-trend-heading {
+  margin-top: 18px;
+}
+
+.staff-recall-trend-wrap {
+  margin-top: 8px;
+  width: 100%;
+}
+
+.staff-recall-trend-chart {
+  display: block;
+  height: 144px;
+  width: 100%;
+}
+
+.staff-recall-trend-grid {
+  stroke: #e5dccf;
+  stroke-width: 1;
+}
+
+.staff-recall-trend-tick {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.staff-recall-trend-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+}
+
+.staff-recall-trend-point {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.staff-recall-trend-point.current {
+  fill: var(--accent);
+}
+
+.staff-recall-first-run {
+  color: var(--muted);
+  padding: 32px 0 12px;
+  text-align: center;
 }
 
 .setup-grid {
@@ -1587,6 +1824,19 @@ main.has-backup-reminder .setup-grid::after {
 
   .staff-page-stage {
     min-height: 430px;
+  }
+
+  .staff-recall-summary-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .staff-recall-summary-heading > button {
+    width: 100%;
+  }
+
+  .staff-recall-summary-metrics {
+    grid-template-columns: 1fr;
   }
 
   .note-heat-stack {

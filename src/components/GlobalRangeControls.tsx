@@ -4,6 +4,7 @@ import { PRACTICE_GROUPS } from "../domain/notes";
 import type { AppSettings, PracticeGroupId } from "../domain/types";
 
 interface GlobalRangeControlsProps {
+  disabled?: boolean;
   settings: AppSettings;
   onSettingsSaved: (settings: AppSettings) => void | Promise<void>;
 }
@@ -13,7 +14,7 @@ function orderGroupIds(groupIds: PracticeGroupId[]): PracticeGroupId[] {
   return PRACTICE_GROUPS.map((group) => group.id).filter((groupId) => selected.has(groupId));
 }
 
-export function GlobalRangeControls({ settings, onSettingsSaved }: GlobalRangeControlsProps): JSX.Element {
+export function GlobalRangeControls({ disabled = false, settings, onSettingsSaved }: GlobalRangeControlsProps): JSX.Element {
   const pointerToggleRef = useRef(false);
 
   function markPointerToggle(): void {
@@ -51,7 +52,7 @@ export function GlobalRangeControls({ settings, onSettingsSaved }: GlobalRangeCo
   }
 
   return (
-    <div className="global-range-controls" aria-label="全局范围">
+    <div className={disabled ? "global-range-controls global-range-controls-locked" : "global-range-controls"} aria-label="全局范围">
       <div className="global-range-groups">
         {PRACTICE_GROUPS.map((group) => {
           const checked = settings.enabledGroupIds.includes(group.id);
@@ -64,6 +65,7 @@ export function GlobalRangeControls({ settings, onSettingsSaved }: GlobalRangeCo
               <input
                 type="checkbox"
                 checked={checked}
+                disabled={disabled}
                 onChange={(event) => {
                   toggleGroup(group.id, event.target.checked);
                   blurAfterPointerToggle(event.currentTarget);
@@ -85,6 +87,7 @@ export function GlobalRangeControls({ settings, onSettingsSaved }: GlobalRangeCo
       >
         <input
           checked={settings.includeLedgerVariants}
+          disabled={disabled}
           type="checkbox"
           onChange={(event) => {
             toggleInterStaffLedger(event.target.checked);

@@ -2,30 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Formatter, Renderer, Stave, StaveConnector, StaveNote, Voice } from "vexflow";
 import { playTargetNote, startTargetNote, type SustainedPianoNote } from "../audio/piano";
 import { formatTargetNoteLabel, getNotesForGroups, noteToVexKey } from "../domain/notes";
-import type { AppSettings, NoteName, Staff, TargetNote } from "../domain/types";
+import {
+  buildNoteNameColumns,
+  compareTargetNotePitch,
+  dedupeTargetNotePitches,
+  NOTE_NAME_COLUMNS,
+  type NoteNameColumn,
+  type NoteNameColumnDefinition,
+} from "../domain/staffRecall";
+import type { AppSettings, NoteName, Staff, StaffRecallRunRecord, TargetNote } from "../domain/types";
 import { GlobalRangeControls } from "./GlobalRangeControls";
+import {
+  StudyDisplayControls,
+  STUDY_COLUMN_ORDER_OPTIONS,
+  type StudyColumnOrderId,
+} from "./StudyDisplayControls";
+import { StaffRecallView } from "./StaffRecallView";
 import { useLocalStorageState } from "./useLocalStorageState";
 
-const NOTE_COLUMNS_BY_KEY: Array<{ answerNumber: string; noteName: NoteName }> = [
-  { answerNumber: "1", noteName: "C" },
-  { answerNumber: "2", noteName: "D" },
-  { answerNumber: "3", noteName: "E" },
-  { answerNumber: "4", noteName: "F" },
-  { answerNumber: "5", noteName: "G" },
-  { answerNumber: "6", noteName: "A" },
-  { answerNumber: "7", noteName: "B" },
-];
-
-const STUDY_COLUMN_ORDER_OPTIONS = [
-  { id: "circle", label: "4152637" },
-  { id: "scale", label: "1234567" },
-  { id: "thirds", label: "1357246" },
-  { id: "random", label: "随机" },
-] as const;
-
-type StudyColumnOrderId = (typeof STUDY_COLUMN_ORDER_OPTIONS)[number]["id"];
 type FixedStudyColumnOrderId = Exclude<StudyColumnOrderId, "random">;
-type StudyColumnDefinition = (typeof NOTE_COLUMNS_BY_KEY)[number];
 interface StudyUiPreferences {
   columnOrderId: StudyColumnOrderId;
   isColumnOrderReversed: boolean;
@@ -51,16 +46,6 @@ const DEFAULT_STUDY_UI_PREFERENCES: StudyUiPreferences = {
   isColumnOrderReversed: false,
   showLabels: true,
 };
-const NOTE_NAME_ORDER: Record<NoteName, number> = {
-  C: 0,
-  D: 1,
-  E: 2,
-  F: 3,
-  G: 4,
-  A: 5,
-  B: 6,
-};
-
 // 学习页五线谱排版在这里手调。
 const STUDY_MAP_LAYOUT = {
   // x: 压缩判断用常量；谱号占用的保守宽度，通常先不调。
@@ -112,16 +97,8 @@ interface HeldColumnPlayback {
   releases: Array<SustainedPianoNote["release"]>;
 }
 
-interface StudyColumn {
-  answerNumber: string;
-  bassNotes: TargetNote[];
-  noteName: NoteName;
-  notes: TargetNote[];
-  trebleNotes: TargetNote[];
-}
-
 interface StudyNoteMapProps {
-  columns: StudyColumn[];
+  columns: NoteNameColumn[];
   highlightedNoteId?: string;
   highlightedNoteNames?: ReadonlySet<NoteName>;
   includeLedgerVariants: boolean;
@@ -131,9 +108,21 @@ interface StudyNoteMapProps {
   showLabels: boolean;
 }
 
-interface StudyViewProps {
+interface StudyMapContentProps {
   settings: AppSettings;
+}
+
+export interface StaffRecallStartPreflightResult {
+  proceed: boolean;
+}
+
+interface StudyViewProps {
+  onBeforeStaffRecallStart: () => Promise<StaffRecallStartPreflightResult>;
+  onDataChanged: () => void | Promise<void>;
+  onStaffRecallFinished?: () => void;
   onSettingsSaved: (settings: AppSettings) => void | Promise<void>;
+  settings: AppSettings;
+  staffRecallRuns: StaffRecallRunRecord[];
 }
 
 interface StudyMapMetrics {
@@ -181,16 +170,8 @@ interface StudyColumnLayout {
   highlightWidth: number;
 }
 
-function pitchOrder(note: Pick<TargetNote, "noteName" | "octave">): number {
-  return note.octave * 7 + NOTE_NAME_ORDER[note.noteName];
-}
-
-function comparePitch(left: TargetNote, right: TargetNote): number {
-  return pitchOrder(left) - pitchOrder(right);
-}
-
 function shuffleStudyAnswerNumbers(): string[] {
-  const answerNumbers = NOTE_COLUMNS_BY_KEY.map((column) => column.answerNumber);
+  const answerNumbers = NOTE_NAME_COLUMNS.map((column) => column.answerNumber);
   for (let index = answerNumbers.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(Math.random() * (index + 1));
     [answerNumbers[index], answerNumbers[swapIndex]] = [answerNumbers[swapIndex], answerNumbers[index]];
@@ -202,38 +183,15 @@ function getStudyColumnDefinitions(
   orderId: StudyColumnOrderId,
   isReversed: boolean,
   randomAnswerNumbers: readonly string[],
-): StudyColumnDefinition[] {
+): NoteNameColumnDefinition[] {
   const answerNumbers = orderId === "random" ? randomAnswerNumbers : FIXED_STUDY_COLUMN_ANSWER_NUMBERS[orderId];
   const orderedAnswerNumbers = isReversed ? [...answerNumbers].reverse() : answerNumbers;
   return orderedAnswerNumbers.map((answerNumber) => {
-    const column = NOTE_COLUMNS_BY_KEY.find((candidate) => candidate.answerNumber === answerNumber);
+    const column = NOTE_NAME_COLUMNS.find((candidate) => candidate.answerNumber === answerNumber);
     if (!column) {
       throw new Error(`Unknown study column number: ${answerNumber}`);
     }
     return column;
-  });
-}
-
-function getStudyColumns(notes: TargetNote[], columnDefinitions: StudyColumnDefinition[]): StudyColumn[] {
-  return columnDefinitions.map((column) => {
-    const columnNotes = notes.filter((note) => note.noteName === column.noteName).sort(comparePitch);
-    return {
-      ...column,
-      bassNotes: columnNotes.filter((note) => note.staff === "bass"),
-      notes: columnNotes,
-      trebleNotes: columnNotes.filter((note) => note.staff === "treble"),
-    };
-  });
-}
-
-function dedupePitches(notes: TargetNote[]): TargetNote[] {
-  const seen = new Set<string>();
-  return notes.filter((note) => {
-    if (seen.has(note.pitchId)) {
-      return false;
-    }
-    seen.add(note.pitchId);
-    return true;
   });
 }
 
@@ -617,7 +575,7 @@ function collectHighlightedNoteNames(heldColumns: Map<string, HeldColumnPlayback
   return noteNames;
 }
 
-export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.Element {
+function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
   const [studyUiPreferences, setStudyUiPreferences] = useLocalStorageState(
     STUDY_UI_PREFERENCES_KEY,
     DEFAULT_STUDY_UI_PREFERENCES,
@@ -653,7 +611,7 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
     () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
     [settings.enabledGroupIds, settings.includeLedgerVariants],
   );
-  const columns = useMemo(() => getStudyColumns(studyNotes, columnDefinitions), [columnDefinitions, studyNotes]);
+  const columns = useMemo(() => buildNoteNameColumns(studyNotes, columnDefinitions), [columnDefinitions, studyNotes]);
   const showInterStaffLedger = studyNotes.some((note) => note.isLedgerVariant);
 
   const flashColumn = useCallback((noteName: NoteName): void => {
@@ -691,7 +649,7 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
       }
       flashColumn(noteName);
       void (async () => {
-        for (const note of dedupePitches(column.notes).sort(comparePitch)) {
+        for (const note of dedupeTargetNotePitches(column.notes).sort(compareTargetNotePitch)) {
           void playTargetNote(note).catch(() => undefined);
           await delay(STUDY_MAP_LAYOUT.columnNoteDelayMs);
         }
@@ -730,7 +688,7 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
       setHighlightedNoteNames(collectHighlightedNoteNames(heldColumnsRef.current, flashedColumnRef.current));
 
       void (async () => {
-        for (const note of dedupePitches(column.notes).sort(comparePitch)) {
+        for (const note of dedupeTargetNotePitches(column.notes).sort(compareTargetNotePitch)) {
           if (held.cancelled) {
             break;
           }
@@ -788,7 +746,7 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
       if (isFormControlTarget(event.target)) {
         return;
       }
-      const column = NOTE_COLUMNS_BY_KEY.find((candidate) => candidate.answerNumber === event.key);
+      const column = NOTE_NAME_COLUMNS.find((candidate) => candidate.answerNumber === event.key);
       if (column) {
         event.preventDefault();
         if (!event.repeat) {
@@ -798,7 +756,7 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
     }
 
     function handleKeyUp(event: KeyboardEvent): void {
-      const column = NOTE_COLUMNS_BY_KEY.find((candidate) => candidate.answerNumber === event.key);
+      const column = NOTE_NAME_COLUMNS.find((candidate) => candidate.answerNumber === event.key);
       if (column) {
         event.preventDefault();
         releaseHeldColumn(event.key);
@@ -814,60 +772,16 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
   }, [releaseHeldColumn, startHeldColumn]);
 
   return (
-    <section className="study-shell">
-      <GlobalRangeControls settings={settings} onSettingsSaved={onSettingsSaved} />
-      <div className="study-header">
-        <div className="study-title">
-          <h1>学习</h1>
-        </div>
-      </div>
-      <div className="study-controls" aria-label="学习页显示设置">
-        <div className="study-control-block">
-          <span className="control-label">顺序</span>
-          <div className="segmented study-order-options">
-            {STUDY_COLUMN_ORDER_OPTIONS.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                className={columnOrderId === option.id ? "active" : ""}
-                onClick={() => setColumnOrderId(option.id)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="study-control-block">
-          <span className="control-label">方向</span>
-          <div className="segmented study-direction-options">
-            <button
-              type="button"
-              className={!isColumnOrderReversed ? "active" : ""}
-              onClick={() => setIsColumnOrderReversed(false)}
-            >
-              正序
-            </button>
-            <button
-              type="button"
-              className={isColumnOrderReversed ? "active" : ""}
-              onClick={() => setIsColumnOrderReversed(true)}
-            >
-              倒序
-            </button>
-          </div>
-        </div>
-        <div className="study-control-block">
-          <span className="control-label">标签</span>
-          <div className="segmented study-label-options">
-            <button type="button" className={showLabels ? "active" : ""} onClick={() => setShowLabels(true)}>
-              显示
-            </button>
-            <button type="button" className={!showLabels ? "active" : ""} onClick={() => setShowLabels(false)}>
-              隐藏
-            </button>
-          </div>
-        </div>
-      </div>
+    <>
+      <StudyDisplayControls
+        columnOrderId={columnOrderId}
+        isColumnOrderReversed={isColumnOrderReversed}
+        label="学习页显示设置"
+        onColumnOrderChange={setColumnOrderId}
+        onColumnOrderReversedChange={setIsColumnOrderReversed}
+        onShowLabelsChange={setShowLabels}
+        showLabels={showLabels}
+      />
       <div className="study-map-frame" aria-label="学习页音位图">
         <figure className="study-figure">
           <StudyNoteMap
@@ -882,6 +796,93 @@ export function StudyView({ settings, onSettingsSaved }: StudyViewProps): JSX.El
           />
         </figure>
       </div>
+    </>
+  );
+}
+
+export function StudyView({
+  onBeforeStaffRecallStart,
+  onDataChanged,
+  onSettingsSaved,
+  onStaffRecallFinished,
+  settings,
+  staffRecallRuns,
+}: StudyViewProps): JSX.Element {
+  const [mode, setMode] = useState<"study" | "staff-recall">("study");
+  const [enteringStaffRecall, setEnteringStaffRecall] = useState(false);
+  const [staffRecallRangeLocked, setStaffRecallRangeLocked] = useState(false);
+
+  const enterStaffRecall = useCallback(async (): Promise<void> => {
+    if (mode === "staff-recall" || enteringStaffRecall) {
+      return;
+    }
+    setEnteringStaffRecall(true);
+    try {
+      const result = await onBeforeStaffRecallStart();
+      if (result.proceed) {
+        setMode("staff-recall");
+      }
+    } finally {
+      setEnteringStaffRecall(false);
+    }
+  }, [enteringStaffRecall, mode, onBeforeStaffRecallStart]);
+
+  const enterStudy = useCallback((): void => {
+    setStaffRecallRangeLocked(false);
+    setMode("study");
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "staff-recall") {
+      return;
+    }
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        enterStudy();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [enterStudy, mode]);
+
+  return (
+    <section className="study-shell">
+      <GlobalRangeControls
+        disabled={mode === "staff-recall" && staffRecallRangeLocked}
+        settings={settings}
+        onSettingsSaved={onSettingsSaved}
+      />
+      <div className="study-header">
+        <h1 className="sr-only">学习</h1>
+        <div className="segmented study-mode-options" aria-label="学习模式">
+          <button className={mode === "study" ? "active" : ""} onClick={enterStudy} type="button">
+            学习
+          </button>
+          <button
+            className={mode === "staff-recall" ? "active" : ""}
+            disabled={enteringStaffRecall}
+            onClick={() => void enterStaffRecall()}
+            type="button"
+          >
+            {enteringStaffRecall ? "检查中" : "默写"}
+          </button>
+        </div>
+        {mode === "staff-recall" && staffRecallRangeLocked ? (
+          <span className="study-range-lock-hint">完成本轮或切回学习后可调整音域</span>
+        ) : null}
+      </div>
+      {mode === "study" ? (
+        <StudyMapContent settings={settings} />
+      ) : (
+        <StaffRecallView
+          onDataChanged={onDataChanged}
+          onFinished={onStaffRecallFinished}
+          onRangeLockedChange={setStaffRecallRangeLocked}
+          runs={staffRecallRuns}
+          settings={settings}
+        />
+      )}
     </section>
   );
 }

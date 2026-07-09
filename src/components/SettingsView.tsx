@@ -30,7 +30,7 @@ function isUserAbort(error: unknown): boolean {
 interface SettingsViewProps {
   settings: AppSettings;
   backupState: BackupState;
-  hasBrowserPracticeData: boolean;
+  hasBrowserData: boolean;
   onSettingsSaved: (settings: AppSettings) => void | Promise<void>;
   onDataChanged: () => Promise<void>;
 }
@@ -38,7 +38,7 @@ interface SettingsViewProps {
 export function SettingsView({
   settings,
   backupState,
-  hasBrowserPracticeData,
+  hasBrowserData,
   onSettingsSaved,
   onDataChanged,
 }: SettingsViewProps): JSX.Element {
@@ -224,7 +224,7 @@ export function SettingsView({
               if (!backupState.directoryHandle) {
                 return;
               }
-              if (!hasBrowserPracticeData || window.confirm(backupText.messages.browserDataWillBeReplaced)) {
+              if (!hasBrowserData || window.confirm(backupText.messages.browserDataWillBeReplaced)) {
                 void runBusy(() => restoreBackupFromDirectory(backupState.directoryHandle!), backupText.titles.importSuccess);
               }
             }}

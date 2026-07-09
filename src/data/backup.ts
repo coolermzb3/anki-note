@@ -11,6 +11,7 @@ import type {
   BackupState,
   PracticeSessionRecord,
   ReviewRecord,
+  StaffRecallRunRecord,
 } from "../domain/types";
 import {
   db,
@@ -28,6 +29,7 @@ interface BrowserData {
   settings: AppSettings;
   sessions: PracticeSessionRecord[];
   reviews: ReviewRecord[];
+  staffRecallRuns: StaffRecallRunRecord[];
 }
 
 interface BackupStatusInspection {
@@ -41,7 +43,7 @@ interface BackupStatusInspection {
 }
 
 export type BackupDirectorySelectionResult = "ready" | "synced-down" | "synced-up" | "diverged";
-export type BackupBeforePracticeResult =
+export type BackupPreflightResult =
   | "needs-directory"
   | "ready"
   | "synced-down"
@@ -50,9 +52,11 @@ export type BackupBeforePracticeResult =
   | "skipped";
 
 interface DataSummary {
-  firstReviewAt?: string;
-  lastReviewAt?: string;
+  firstDataAt?: string;
+  lastDataAt?: string;
+  recordCount: number;
   reviewCount: number;
+  staffRecallRunCount: number;
 }
 
 function cleanBackupState(state: BackupState): BackupState {
@@ -70,24 +74,34 @@ function explicitDataConflict(state: BackupState): boolean {
 }
 
 function conflictDetailsMissing(state: BackupState): boolean {
-  return state.conflictBrowserReviewCount === undefined && state.conflictBackupReviewCount === undefined;
+  return (
+    state.conflictBrowserReviewCount === undefined ||
+    state.conflictBackupReviewCount === undefined ||
+    state.conflictBrowserStaffRecallRunCount === undefined ||
+    state.conflictBackupStaffRecallRunCount === undefined
+  );
 }
 
-function hasBrowserData(sessions: PracticeSessionRecord[], reviews: ReviewRecord[]): boolean {
-  return sessions.length > 0 || reviews.length > 0;
+function hasBrowserData(data: Pick<BrowserData, "sessions" | "reviews" | "staffRecallRuns">): boolean {
+  return data.sessions.length > 0 || data.reviews.length > 0 || data.staffRecallRuns.length > 0;
 }
 
 function getManifestDataModifiedAt(manifest: BackupManifest | null): string | undefined {
   return manifest?.dataModifiedAt ?? manifest?.lastBackupAt;
 }
 
-function summarizeReviews(reviews: ReviewRecord[]): DataSummary {
-  const times = reviews.flatMap((review) => [review.startedAt, review.answeredAt, review.endedAt]).filter((time): time is string => Boolean(time));
+function summarizeData(reviews: ReviewRecord[], staffRecallRuns: StaffRecallRunRecord[]): DataSummary {
+  const times = [
+    ...reviews.flatMap((review) => [review.startedAt, review.answeredAt, review.endedAt]),
+    ...staffRecallRuns.flatMap((run) => [run.startedAt, run.endedAt]),
+  ].filter((time): time is string => Boolean(time));
   const sortedTimes = [...times].sort((a, b) => a.localeCompare(b));
   return {
-    firstReviewAt: sortedTimes[0],
-    lastReviewAt: sortedTimes[sortedTimes.length - 1],
+    firstDataAt: sortedTimes[0],
+    lastDataAt: sortedTimes[sortedTimes.length - 1],
+    recordCount: reviews.length + staffRecallRuns.length,
     reviewCount: reviews.length,
+    staffRecallRunCount: staffRecallRuns.length,
   };
 }
 
@@ -124,7 +138,10 @@ function backupDataConsistent(
   if (manifest.dataSetId !== data.settings.dataSetId || getBackupManifestVersion(manifest) !== state.lastSeenBackupVersion) {
     return false;
   }
-  return !manifest.lastReviewId || data.reviews.some((review) => review.id === manifest.lastReviewId);
+  const latestReviewPresent = !manifest.lastReviewId || data.reviews.some((review) => review.id === manifest.lastReviewId);
+  const latestStaffRecallRunPresent =
+    !manifest.lastStaffRecallRunId || data.staffRecallRuns.some((run) => run.id === manifest.lastStaffRecallRunId);
+  return latestReviewPresent && latestStaffRecallRunPresent;
 }
 
 async function ensureReadWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
@@ -191,16 +208,14 @@ async function inspectBackupStatus(
   state: BackupState,
 ): Promise<BackupStatusInspection> {
   const [data, manifest] = await Promise.all([loadAllData(), readBackupManifestIfExists(directory)]);
-  const backupSummary =
-    manifest && manifest.dates.length > 0
-      ? summarizeReviews((await readBackupSnapshot(directory)).reviews)
-      : undefined;
-  const browserModifiedAt = getBackupDataModifiedAt(data.settings, data.sessions, data.reviews);
+  const backupData = manifest && manifest.dates.length > 0 ? await readBackupSnapshot(directory) : undefined;
+  const backupSummary = backupData ? summarizeData(backupData.reviews, backupData.staffRecallRuns) : undefined;
+  const browserModifiedAt = getBackupDataModifiedAt(data.settings, data.sessions, data.reviews, data.staffRecallRuns);
   const backupModifiedAt = getManifestDataModifiedAt(manifest);
-  const browserSummary = summarizeReviews(data.reviews);
+  const browserSummary = summarizeData(data.reviews, data.staffRecallRuns);
   const status = deriveBackupDataStatus({
     hasDirectoryHandle: true,
-    hasBrowserData: hasBrowserData(data.sessions, data.reviews),
+    hasBrowserData: hasBrowserData(data),
     hasBackupManifest: Boolean(manifest),
     dataConsistent: backupDataConsistent(data, state, manifest),
   });
@@ -228,6 +243,14 @@ function buildReadyBackupState(
     conflictBackupFirstReviewAt: undefined,
     conflictBackupLastReviewAt: undefined,
     conflictBackupReviewCount: undefined,
+    conflictBrowserFirstDataAt: undefined,
+    conflictBrowserLastDataAt: undefined,
+    conflictBrowserRecordCount: undefined,
+    conflictBrowserStaffRecallRunCount: undefined,
+    conflictBackupFirstDataAt: undefined,
+    conflictBackupLastDataAt: undefined,
+    conflictBackupRecordCount: undefined,
+    conflictBackupStaffRecallRunCount: undefined,
     lastSeenBackupVersion: manifest ? getBackupManifestVersion(manifest) : undefined,
     backupDataModifiedAt: getManifestDataModifiedAt(manifest),
     lastBackupAt: manifest?.lastBackupAt,
@@ -259,12 +282,20 @@ async function saveDivergedBackupState(
     syncRequiredBeforeBackup: true,
     conflictBrowserModifiedAt: inspection.browserModifiedAt,
     conflictBackupModifiedAt: inspection.backupModifiedAt,
-    conflictBrowserFirstReviewAt: inspection.browserSummary.firstReviewAt,
-    conflictBrowserLastReviewAt: inspection.browserSummary.lastReviewAt,
+    conflictBrowserFirstReviewAt: undefined,
+    conflictBrowserLastReviewAt: undefined,
     conflictBrowserReviewCount: inspection.browserSummary.reviewCount,
-    conflictBackupFirstReviewAt: inspection.backupSummary?.firstReviewAt,
-    conflictBackupLastReviewAt: inspection.backupSummary?.lastReviewAt,
-    conflictBackupReviewCount: inspection.backupSummary?.reviewCount,
+    conflictBackupFirstReviewAt: undefined,
+    conflictBackupLastReviewAt: undefined,
+    conflictBackupReviewCount: inspection.backupSummary?.reviewCount ?? 0,
+    conflictBrowserFirstDataAt: inspection.browserSummary.firstDataAt,
+    conflictBrowserLastDataAt: inspection.browserSummary.lastDataAt,
+    conflictBrowserRecordCount: inspection.browserSummary.recordCount,
+    conflictBrowserStaffRecallRunCount: inspection.browserSummary.staffRecallRunCount,
+    conflictBackupFirstDataAt: inspection.backupSummary?.firstDataAt,
+    conflictBackupLastDataAt: inspection.backupSummary?.lastDataAt,
+    conflictBackupRecordCount: inspection.backupSummary?.recordCount ?? 0,
+    conflictBackupStaffRecallRunCount: inspection.backupSummary?.staffRecallRunCount ?? 0,
     lastSeenBackupVersion: undefined,
     lastBackupAt: inspection.manifest?.lastBackupAt,
     lastBackupReviewId: inspection.manifest?.lastReviewId,
@@ -277,7 +308,7 @@ async function writeBrowserSnapshotToDirectory(
   data: BrowserData,
   backupAt = new Date().toISOString(),
 ): Promise<BackupSnapshot> {
-  const snapshot = buildBackupSnapshot(data.settings, data.sessions, data.reviews, backupAt);
+  const snapshot = buildBackupSnapshot(data.settings, data.sessions, data.reviews, backupAt, data.staffRecallRuns);
   await writeBackupSnapshot(directory, snapshot);
   return snapshot;
 }
@@ -287,7 +318,7 @@ async function importDirectorySnapshot(
   state: BackupState,
 ): Promise<void> {
   const snapshot = await readBackupSnapshot(directory);
-  await replaceAllData(snapshot.settings, snapshot.sessions, snapshot.reviews);
+  await replaceAllData(snapshot.settings, snapshot.sessions, snapshot.reviews, snapshot.staffRecallRuns);
   await saveReadyBackupState(state, directory, snapshot.manifest);
 }
 
@@ -325,11 +356,11 @@ export async function chooseBackupDirectory(): Promise<BackupDirectorySelectionR
   return "ready";
 }
 
-export async function syncBackupBeforePractice({
+export async function syncBackupBeforeActivity({
   requestPermission = false,
 }: {
   requestPermission?: boolean;
-} = {}): Promise<BackupBeforePracticeResult> {
+} = {}): Promise<BackupPreflightResult> {
   const state = await getBackupState();
   if (!state.directoryHandle) {
     return "needs-directory";
@@ -406,7 +437,7 @@ export async function writeBackupNow(): Promise<void> {
       await saveDivergedBackupState(state, state.directoryHandle, inspection);
       throw new Error(backupText.messages.dataConflictBeforeBackup);
     }
-    if (inspection.status === "ready" && !inspection.manifest && !hasBrowserData(inspection.data.sessions, inspection.data.reviews)) {
+    if (inspection.status === "ready" && !inspection.manifest && !hasBrowserData(inspection.data)) {
       await saveReadyBackupState(state, state.directoryHandle, null);
       return;
     }
@@ -437,7 +468,7 @@ export async function writeBackupIfSafe(): Promise<void> {
       await saveDivergedBackupState(state, state.directoryHandle, inspection);
       return;
     }
-    if (inspection.status === "ready" && !inspection.manifest && !hasBrowserData(inspection.data.sessions, inspection.data.reviews)) {
+    if (inspection.status === "ready" && !inspection.manifest && !hasBrowserData(inspection.data)) {
       await saveReadyBackupState(state, state.directoryHandle, null);
       return;
     }
@@ -479,12 +510,14 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
   settings: AppSettings;
   sessions: PracticeSessionRecord[];
   reviews: ReviewRecord[];
+  staffRecallRuns: StaffRecallRunRecord[];
 }> {
   const manifest = await readJson<BackupManifest>(directory, "manifest.json");
   const daysDirectory = await directory.getDirectoryHandle("days");
   const dayFiles = await Promise.all(manifest.dates.map((date) => readJson<BackupDayFile>(daysDirectory, `${date}.json`)));
   const sessions = dayFiles.flatMap((day) => day.sessions);
   const reviews = dayFiles.flatMap((day) => day.reviews);
+  const staffRecallRuns = dayFiles.flatMap((day) => day.staffRecallRuns ?? []);
   const existingSettings = await db.settings.get("default");
   const baseSettings = manifest.settings ?? existingSettings ?? makeDefaultSettings();
   const settings: AppSettings = {
@@ -501,7 +534,7 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
     promptDisplayMode: baseSettings.promptDisplayMode ?? "staff-page",
     promptNoteDuration: baseSettings.promptNoteDuration ?? "quarter",
   };
-  return { manifest, settings, sessions, reviews };
+  return { manifest, settings, sessions, reviews, staffRecallRuns };
 }
 
 export async function restoreBackupFromDirectory(directory: FileSystemDirectoryHandle): Promise<void> {

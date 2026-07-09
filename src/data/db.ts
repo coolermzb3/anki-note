@@ -2,12 +2,21 @@ import Dexie, { type Table } from "dexie";
 import { createUuid } from "../domain/id";
 import { DEFAULT_ENABLED_GROUPS, normalizePracticeGroupIds } from "../domain/notes";
 import { DEFAULT_PIANO_VOLUME, normalizePianoVolume } from "../domain/settings";
-import type { AppSettings, BackupState, NoteName, PracticeQueueStrategy, PracticeSessionRecord, ReviewRecord } from "../domain/types";
+import type {
+  AppSettings,
+  BackupState,
+  NoteName,
+  PracticeQueueStrategy,
+  PracticeSessionRecord,
+  ReviewRecord,
+  StaffRecallRunRecord,
+} from "../domain/types";
 
 export class AppDatabase extends Dexie {
   settings!: Table<AppSettings, string>;
   practiceSessions!: Table<PracticeSessionRecord, string>;
   reviews!: Table<ReviewRecord, string>;
+  staffRecallRuns!: Table<StaffRecallRunRecord, string>;
   backupStates!: Table<BackupState, string>;
 
   constructor() {
@@ -16,6 +25,13 @@ export class AppDatabase extends Dexie {
       settings: "id",
       practiceSessions: "id, startedAt, mode, endReason",
       reviews: "id, sessionId, targetNoteId, groupId, startedAt, answeredCorrectly, interrupted",
+      backupStates: "id",
+    });
+    this.version(2).stores({
+      settings: "id",
+      practiceSessions: "id, startedAt, mode, endReason",
+      reviews: "id, sessionId, targetNoteId, groupId, startedAt, answeredCorrectly, interrupted",
+      staffRecallRuns: "id, answerSetKey, endedAt",
       backupStates: "id",
     });
   }
@@ -117,6 +133,10 @@ export async function saveReview(review: ReviewRecord): Promise<void> {
   });
 }
 
+export async function saveStaffRecallRun(run: StaffRecallRunRecord): Promise<void> {
+  await db.staffRecallRuns.put(run);
+}
+
 export async function deletePracticeSessionWithReviews(
   sessionId: PracticeSessionRecord["id"],
   reviews: ReviewRecord[],
@@ -152,14 +172,17 @@ export async function replaceAllData(
   settings: AppSettings,
   sessions: PracticeSessionRecord[],
   reviews: ReviewRecord[],
+  staffRecallRuns: StaffRecallRunRecord[] = [],
 ): Promise<void> {
-  await db.transaction("rw", db.settings, db.practiceSessions, db.reviews, async () => {
+  await db.transaction("rw", db.settings, db.practiceSessions, db.reviews, db.staffRecallRuns, async () => {
     await db.settings.clear();
     await db.practiceSessions.clear();
     await db.reviews.clear();
+    await db.staffRecallRuns.clear();
     await db.settings.put(settings);
     await db.practiceSessions.bulkPut(sessions);
     await db.reviews.bulkPut(reviews);
+    await db.staffRecallRuns.bulkPut(staffRecallRuns);
   });
 }
 
@@ -167,13 +190,15 @@ export async function loadAllData(): Promise<{
   settings: AppSettings;
   sessions: PracticeSessionRecord[];
   reviews: ReviewRecord[];
+  staffRecallRuns: StaffRecallRunRecord[];
 }> {
   const settings = await ensureSettings();
-  const [sessions, reviews] = await Promise.all([
+  const [sessions, reviews, staffRecallRuns] = await Promise.all([
     db.practiceSessions.orderBy("startedAt").toArray(),
     db.reviews.orderBy("startedAt").toArray(),
+    db.staffRecallRuns.orderBy("endedAt").toArray(),
   ]);
-  return { settings, sessions, reviews };
+  return { settings, sessions, reviews, staffRecallRuns };
 }
 
 export async function recoverAbandonedSessions(): Promise<void> {
