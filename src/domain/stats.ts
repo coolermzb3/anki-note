@@ -1,4 +1,4 @@
-import { ALL_NOTES } from "./notes";
+import { ALL_NOTES, NOTE_NAMES } from "./notes";
 import { isStatisticalReview } from "./reviews";
 import type { NoteName, PracticeGroupId, PracticeSessionRecord, ReviewRecord, TargetNoteId } from "./types";
 
@@ -20,7 +20,13 @@ export interface NoteStat {
   p90Ms?: number;
   errorRate: number;
   commonConfusion?: NoteName;
+  commonConfusions: NoteConfusionStat[];
   weaknessScore: number;
+}
+
+export interface NoteConfusionStat {
+  count: number;
+  noteName: NoteName;
 }
 
 export interface PracticeSessionStat {
@@ -82,13 +88,23 @@ export function percentile(values: number[], percent: number): number | undefine
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
 }
 
+export interface PositiveTertileThresholds {
+  high: number;
+  low: number;
+}
+
+export function positiveTertileThresholds(positiveValues: number[]): PositiveTertileThresholds | undefined {
+  const low = percentile(positiveValues, 1 / 3);
+  const high = percentile(positiveValues, 2 / 3);
+  return low === undefined || high === undefined ? undefined : { low, high };
+}
+
 export function positiveTertileLevel(value: number, positiveValues: number[]): PositiveHeatLevel {
-  const lowThreshold = percentile(positiveValues, 1 / 3);
-  const highThreshold = percentile(positiveValues, 2 / 3);
-  if (lowThreshold === undefined || highThreshold === undefined || value <= lowThreshold) {
+  const thresholds = positiveTertileThresholds(positiveValues);
+  if (!thresholds || value <= thresholds.low) {
     return 1;
   }
-  return value <= highThreshold ? 2 : 3;
+  return value <= thresholds.high ? 2 : 3;
 }
 
 export function localDateKey(iso: string): string {
@@ -99,20 +115,20 @@ export function localDateKey(iso: string): string {
   return `${year}-${month}-${day}`;
 }
 
-function commonConfusion(reviews: ReviewRecord[]): NoteName | undefined {
+function commonConfusions(reviews: ReviewRecord[]): NoteConfusionStat[] {
   const counts = new Map<NoteName, number>();
   for (const review of reviews) {
     for (const wrongAnswer of review.wrongAnswers) {
       counts.set(wrongAnswer.noteName, (counts.get(wrongAnswer.noteName) ?? 0) + 1);
     }
   }
-  let best: { noteName: NoteName; count: number } | undefined;
-  for (const [noteName, count] of counts) {
-    if (!best || count > best.count) {
-      best = { noteName, count };
-    }
-  }
-  return best?.noteName;
+  return [...counts.entries()]
+    .map(([noteName, count]) => ({ noteName, count }))
+    .sort(
+      (left, right) =>
+        right.count - left.count || NOTE_NAMES.indexOf(left.noteName) - NOTE_NAMES.indexOf(right.noteName),
+    )
+    .slice(0, 3);
 }
 
 export function buildDailyStats(reviews: ReviewRecord[]): DailyStat[] {
@@ -196,6 +212,7 @@ export function buildNoteStats(
     const p90Ms = percentile(times, 0.9);
     const errorRate = noteReviews.length === 0 ? 0 : reviewsWithErrors / noteReviews.length;
     const speedScore = medianMs === undefined ? 2 : medianMs / 1000;
+    const confusionStats = commonConfusions(noteReviews);
     return {
       targetNoteId: note.id,
       groupId: note.groupId,
@@ -204,7 +221,8 @@ export function buildNoteStats(
       medianMs,
       p90Ms,
       errorRate,
-      commonConfusion: commonConfusion(noteReviews),
+      commonConfusion: confusionStats[0]?.noteName,
+      commonConfusions: confusionStats,
       weaknessScore: speedScore + errorRate * 3 + (noteReviews.length === 0 ? 2 : 0),
     };
   });

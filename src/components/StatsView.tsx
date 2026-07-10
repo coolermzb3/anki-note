@@ -16,6 +16,7 @@ import {
   buildNoteStats,
   buildPracticeSessionStats,
   filterLongTermReviews,
+  positiveTertileThresholds,
 } from "../domain/stats";
 import {
   buildLatestSessionProgressBenchmark,
@@ -215,6 +216,16 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
 
 function LegendSwatch({ color }: { color: string }): JSX.Element {
   return <i className="legend-swatch" style={{ backgroundColor: color }} />;
+}
+
+function positiveStaffHeatValues(notes: StaffHeatNote[]): number[] {
+  return notes
+    .map((note) => note.value)
+    .filter((value): value is number => value !== undefined && value > 0);
+}
+
+function formatRangeSeconds(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -640,12 +651,25 @@ export function StatsView({
     return activeNotes.map((note) => ({ note, stat: statsByNoteId.get(note.id) }));
   }, [activeNotes, noteStats]);
   const errorStaffNotes = useMemo<StaffHeatNote[]>(
-    () => rangeStaffNotes.map(({ note, stat }) => ({ note, value: stat?.errorCount ?? 0 })),
+    () =>
+      rangeStaffNotes.map(({ note, stat }) => ({
+        confusions: stat?.commonConfusions ?? [],
+        note,
+        value: stat?.errorCount ?? 0,
+      })),
     [rangeStaffNotes],
   );
   const timeStaffNotes = useMemo<StaffHeatNote[]>(
     () => rangeStaffNotes.map(({ note, stat }) => ({ note, value: stat?.medianMs })),
     [rangeStaffNotes],
+  );
+  const timeTertileThresholds = useMemo(
+    () => positiveTertileThresholds(positiveStaffHeatValues(timeStaffNotes)),
+    [timeStaffNotes],
+  );
+  const errorTertileThresholds = useMemo(
+    () => positiveTertileThresholds(positiveStaffHeatValues(errorStaffNotes)),
+    [errorStaffNotes],
   );
 
   useEffect(() => {
@@ -847,7 +871,7 @@ export function StatsView({
                 </span>
                 <span>
                   <LegendSwatch color={STATS_COLORS.range.tone.blue[1]} />
-                  较快
+                  较快{timeTertileThresholds ? ` (≤${formatRangeSeconds(timeTertileThresholds.low)})` : ""}
                 </span>
                 <span>
                   <LegendSwatch color={STATS_COLORS.range.tone.blue[2]} />
@@ -855,7 +879,7 @@ export function StatsView({
                 </span>
                 <span>
                   <LegendSwatch color={STATS_COLORS.range.tone.blue[3]} />
-                  较慢
+                  较慢{timeTertileThresholds ? ` (>${formatRangeSeconds(timeTertileThresholds.high)})` : ""}
                 </span>
               </div>
             </div>
@@ -871,7 +895,7 @@ export function StatsView({
                 </span>
                 <span>
                   <LegendSwatch color={STATS_COLORS.range.tone.red[1]} />
-                  较低
+                  较低{errorTertileThresholds ? ` (≤${Math.floor(errorTertileThresholds.low)}次)` : ""}
                 </span>
                 <span>
                   <LegendSwatch color={STATS_COLORS.range.tone.red[2]} />
@@ -879,7 +903,7 @@ export function StatsView({
                 </span>
                 <span>
                   <LegendSwatch color={STATS_COLORS.range.tone.red[3]} />
-                  较高
+                  较高{errorTertileThresholds ? ` (≥${Math.floor(errorTertileThresholds.high) + 1}次)` : ""}
                 </span>
               </div>
             </div>

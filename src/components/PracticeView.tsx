@@ -1089,7 +1089,13 @@ export function PracticeView({
     settings.inactivityThresholdSeconds,
   ]);
 
-  const setupDisabled = queueNotes.length === 0;
+  const setupDisabledReason =
+    enabledNotes.length === 0
+      ? "请至少选择一组上方的音区"
+      : queueStrategy === "note-drill" && drillNoteNames.length === 0
+        ? "请至少选择一个强化音名"
+        : undefined;
+  const setupDisabled = setupDisabledReason !== undefined;
   const remainingMs = mode === "fixed-duration" ? fixedDurationSeconds * 1000 - getSessionActiveMs() : 0;
   const sessionQualifiedTimes = (summary?.reviews ?? [])
     .filter(isCompletedReview)
@@ -1293,10 +1299,17 @@ export function PracticeView({
             </div>
 
             <div className="action-row">
-              <button className="primary" disabled={setupDisabled} onClick={() => void startSession()}>
-                <Play size={18} />
-                开始
-              </button>
+              <span className="practice-start-action" tabIndex={setupDisabled ? 0 : undefined}>
+                <button className="primary" disabled={setupDisabled} onClick={() => void startSession()}>
+                  <Play size={18} />
+                  开始
+                </button>
+                {setupDisabledReason ? (
+                  <span className="practice-start-tooltip" role="tooltip">
+                    {setupDisabledReason}
+                  </span>
+                ) : null}
+              </span>
               <button onClick={onOpenStats}>
                 <BarChart3 size={18} />
                 统计

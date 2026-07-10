@@ -8,6 +8,7 @@ import {
   isLongTermStatsEligible,
   percentile,
   positiveTertileLevel,
+  positiveTertileThresholds,
 } from "./stats";
 import { makeReview } from "./testFactories";
 import type { PracticeSessionRecord } from "./types";
@@ -39,6 +40,7 @@ describe("stats", () => {
   });
 
   it("assigns positive values to tertile heat levels", () => {
+    expect(positiveTertileThresholds([40, 10, 50, 20])).toEqual({ low: 20, high: 40 });
     expect(positiveTertileLevel(10, [10, 20, 30])).toBe(1);
     expect(positiveTertileLevel(20, [10, 20, 30])).toBe(2);
     expect(positiveTertileLevel(30, [10, 20, 30])).toBe(3);
@@ -178,16 +180,40 @@ describe("stats", () => {
 
   it("builds per-note error and confusion stats", () => {
     const reviews = [
+      makeReview({
+        targetNoteId: "F3",
+        wrongAnswers: (["A", "D", "B", "C"] as const).map((noteName, index) => ({
+          noteName,
+          atActiveMs: 500 + index * 100,
+        })),
+      }),
+      makeReview({
+        targetNoteId: "F3",
+        wrongAnswers: (["A", "D", "B"] as const).map((noteName, index) => ({
+          noteName,
+          atActiveMs: 500 + index * 100,
+        })),
+      }),
+      makeReview({
+        targetNoteId: "F3",
+        wrongAnswers: (["A", "D"] as const).map((noteName, index) => ({
+          noteName,
+          atActiveMs: 500 + index * 100,
+        })),
+      }),
       makeReview({ targetNoteId: "F3", wrongAnswers: [{ noteName: "A", atActiveMs: 500 }] }),
-      makeReview({ targetNoteId: "F3", wrongAnswers: [{ noteName: "A", atActiveMs: 700 }] }),
-      makeReview({ targetNoteId: "F3" }),
     ];
 
     const f3 = buildNoteStats(reviews).find((stat) => stat.targetNoteId === "F3")!;
-    expect(f3.reviewCount).toBe(3);
-    expect(f3.errorCount).toBe(2);
+    expect(f3.reviewCount).toBe(4);
+    expect(f3.errorCount).toBe(10);
     expect(f3.commonConfusion).toBe("A");
-    expect(Math.round(f3.errorRate * 100)).toBe(67);
+    expect(f3.commonConfusions).toEqual([
+      { noteName: "A", count: 4 },
+      { noteName: "D", count: 3 },
+      { noteName: "B", count: 2 },
+    ]);
+    expect(Math.round(f3.errorRate * 100)).toBe(100);
   });
 
   it("builds note stats from the current target-note group instead of the review group snapshot", () => {

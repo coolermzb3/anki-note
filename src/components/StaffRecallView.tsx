@@ -457,7 +457,10 @@ export function StaffRecallView({
                 </strong>
               </div>
               <div className="metric">
-                <span>个人最佳</span>
+                <span>
+                  个人最佳
+                  {isNewBest ? <small className="new-record-label">新纪录！</small> : null}
+                </span>
                 <strong className={isNewBest ? "new-best" : undefined}>
                   {formatMs(bestTotalMs)}
                   {bestTotalMs !== undefined ? (

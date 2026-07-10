@@ -75,6 +75,7 @@ export function SessionProgressControls({
               {formatBenchmarkValue(benchmark, benchmark.bestValue)}
             </strong>
           </span>
+          {benchmark.isNewBest ? <small className="new-record-label">新纪录！</small> : null}
         </div>
       ) : null}
       <div className="segmented" aria-label="答对进度口径">

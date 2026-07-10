@@ -640,6 +640,15 @@ button.primary.backup-decision-button .backup-action-summary {
   color: var(--success);
 }
 
+.staff-recall-summary .metric .new-record-label,
+.session-progress-benchmark .new-record-label {
+  color: var(--success);
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
 .staff-recall-trend-heading {
   margin-top: 18px;
 }
@@ -885,6 +894,42 @@ main.has-backup-reminder .setup-grid::after {
 
 .action-row {
   margin-top: 20px;
+}
+
+.practice-start-action {
+  display: inline-flex;
+  position: relative;
+}
+
+.practice-start-action:focus-visible {
+  border-radius: 8px;
+  outline: 2px solid rgba(37, 111, 103, 0.34);
+  outline-offset: 2px;
+}
+
+.practice-start-tooltip {
+  background: var(--ink);
+  border-radius: 7px;
+  bottom: calc(100% + 8px);
+  color: white;
+  font-size: 11px;
+  left: 50%;
+  opacity: 0;
+  padding: 6px 9px;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, 3px);
+  transition: opacity 0.14s ease, transform 0.14s ease, visibility 0.14s ease;
+  visibility: hidden;
+  white-space: nowrap;
+  z-index: 5;
+}
+
+.practice-start-action:hover .practice-start-tooltip,
+.practice-start-action:focus-visible .practice-start-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  visibility: visible;
 }
 
 .practice-topline {
@@ -1591,16 +1636,24 @@ main.has-backup-reminder .setup-grid::after {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+}
+
+.note-heat-row-heading h3 {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .range-legend {
   color: var(--muted);
   display: flex;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px 10px;
+  justify-content: flex-end;
+  gap: 6px;
   font-size: 11px;
+  min-width: 0;
 }
 
 .range-legend span {
@@ -1624,6 +1677,7 @@ main.has-backup-reminder .setup-grid::after {
   min-height: 232px;
   overflow-x: hidden;
   overflow-y: hidden;
+  position: relative;
   width: 100%;
 }
 
@@ -1638,6 +1692,82 @@ main.has-backup-reminder .setup-grid::after {
   height: auto;
   max-width: 100%;
   width: 100%;
+}
+
+.stats-range-note-hotspot {
+  cursor: help;
+  fill: rgba(0, 0, 0, 0);
+  pointer-events: all;
+  stroke: none;
+}
+
+.stats-range-confusion-hint {
+  bottom: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  text-align: center;
+  opacity: 0.62;
+}
+
+.stats-range-confusion-tooltip {
+  background: rgba(255, 253, 250, 0.98);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(46, 37, 28, 0.14);
+  box-sizing: border-box;
+  color: var(--ink);
+  padding: 9px 10px;
+  pointer-events: none;
+  position: absolute;
+  width: 156px;
+  z-index: 3;
+}
+
+.stats-range-confusion-tooltip-title {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.stats-range-confusion-tooltip-title strong {
+  font-size: 13px;
+}
+
+.stats-range-confusion-tooltip-title span,
+.stats-range-confusion-tooltip p {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.stats-range-confusion-tooltip ol {
+  display: grid;
+  gap: 3px;
+  list-style: none;
+  margin: 7px 0 0;
+  padding: 0;
+}
+
+.stats-range-confusion-tooltip li {
+  align-items: baseline;
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+}
+
+.stats-range-confusion-tooltip li span {
+  color: var(--muted);
+}
+
+.stats-range-confusion-tooltip li b {
+  color: var(--danger);
+}
+
+.stats-range-confusion-tooltip p {
+  margin-top: 8px;
 }
 
 .empty-state,
@@ -1866,11 +1996,6 @@ main.has-backup-reminder .setup-grid::after {
 
   .note-heat-stack {
     grid-template-columns: 1fr;
-  }
-
-  .note-heat-row-heading {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .stats-range-filter {
