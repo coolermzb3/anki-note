@@ -1,54 +1,38 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Formatter, GhostNote, Renderer, Stave, StaveConnector, StaveNote, Stem, Voice } from "vexflow";
+import { Formatter, GhostNote, StaveNote, Voice } from "vexflow";
 import { noteToVexKey } from "../domain/notes";
 import type { PromptNoteDuration, TargetNote } from "../domain/types";
+import { PRACTICE_PAGE_STAFF_LAYOUT } from "./staffLayoutProfiles";
+import {
+  createStaffRenderSurface,
+  drawGrandStaff,
+  getFixedStaffFrame,
+  getGrandStaffAnchors,
+  getGrandStaffNoteArea,
+  getLedgerStemDirection,
+  logicalPx,
+  type DrawnGrandStaff,
+} from "./staffGeometry";
 
 interface StaffPagePromptProps {
   notes: TargetNote[];
   completedCount: number;
   noteDuration: PromptNoteDuration;
+  useLedgerGap: boolean;
   wrongIndex?: number;
 }
 
-const NOTES_PER_ROW = 16;
-const ROW_HEIGHT = 220;
-const BOTTOM_PADDING = 30;
 const NEUTRAL_COLOR = "#211c18";
 const COMPLETE_COLOR = "#2f8f5f";
 const WRONG_COLOR = "#c84c3d";
-const BARLINE_INTERVAL = 4;
 const BARLINE_COLOR = "#211c18";
-const NOTE_NAME_ORDER = {
-  C: 0,
-  D: 1,
-  E: 2,
-  F: 3,
-  G: 4,
-  A: 5,
-  B: 6,
-} as const;
-
-function pitchOrder(note: Pick<TargetNote, "noteName" | "octave">): number {
-  return note.octave * 7 + NOTE_NAME_ORDER[note.noteName];
-}
-
-const STAFF_PITCH_BOUNDS = {
-  treble: {
-    lowest: pitchOrder({ noteName: "E", octave: 4 }),
-    highest: pitchOrder({ noteName: "F", octave: 5 }),
-  },
-  bass: {
-    lowest: pitchOrder({ noteName: "G", octave: 2 }),
-    highest: pitchOrder({ noteName: "A", octave: 3 }),
-  },
-} as const;
-
 function chunkNotes(notes: TargetNote[]): TargetNote[][] {
   const rows: TargetNote[][] = [];
-  for (let index = 0; index < notes.length; index += NOTES_PER_ROW) {
-    rows.push(notes.slice(index, index + NOTES_PER_ROW));
+  const { notesPerRow } = PRACTICE_PAGE_STAFF_LAYOUT.multirow;
+  for (let index = 0; index < notes.length; index += notesPerRow) {
+    rows.push(notes.slice(index, index + notesPerRow));
   }
-  return rows;
+  return rows.slice(0, PRACTICE_PAGE_STAFF_LAYOUT.multirow.rows);
 }
 
 function noteDurationToVexDuration(noteDuration: PromptNoteDuration): "q" | "w" {
@@ -59,20 +43,8 @@ function noteDurationToBeats(noteDuration: PromptNoteDuration): number {
   return noteDuration === "quarter" ? 1 : 4;
 }
 
-function ledgerStemDirection(note: TargetNote): typeof Stem.UP | typeof Stem.DOWN | undefined {
-  const order = pitchOrder(note);
-  const bounds = STAFF_PITCH_BOUNDS[note.staff];
-  if (order < bounds.lowest) {
-    return Stem.UP;
-  }
-  if (order > bounds.highest) {
-    return Stem.DOWN;
-  }
-  return undefined;
-}
-
 function makeStaveNote(note: TargetNote, color: string, noteDuration: PromptNoteDuration): StaveNote {
-  const stemDirection = ledgerStemDirection(note);
+  const stemDirection = getLedgerStemDirection(note);
   const staveNote = new StaveNote({
     clef: note.staff,
     duration: noteDurationToVexDuration(noteDuration),
@@ -94,7 +66,7 @@ function colorForIndex(index: number, completedCount: number, wrongIndex: number
   return NEUTRAL_COLOR;
 }
 
-function addBarline(svg: SVGSVGElement, x: number, y1: number, y2: number): void {
+function addBarline(parent: SVGElement, x: number, y1: number, y2: number): void {
   const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
   line.setAttribute("class", "staff-page-barline");
   line.setAttribute("x1", x.toFixed(2));
@@ -104,13 +76,14 @@ function addBarline(svg: SVGSVGElement, x: number, y1: number, y2: number): void
   line.setAttribute("stroke", BARLINE_COLOR);
   line.setAttribute("stroke-width", "1.6");
   line.setAttribute("shape-rendering", "crispEdges");
-  svg.appendChild(line);
+  parent.appendChild(line);
 }
 
 export function StaffPagePrompt({
   notes,
   completedCount,
   noteDuration,
+  useLedgerGap,
   wrongIndex,
 }: StaffPagePromptProps): JSX.Element {
   const frameRef = useRef<HTMLDivElement | null>(null);
@@ -132,27 +105,58 @@ export function StaffPagePrompt({
       rendererTarget.innerHTML = "";
       const rowCount = Math.max(1, rows.length);
       const containerWidth = frame.clientWidth || 920;
-      const width = Math.max(720, Math.min(980, containerWidth));
-      const height = rowCount * ROW_HEIGHT + BOTTOM_PADDING;
-      const renderer = new Renderer(rendererTarget, Renderer.Backends.SVG);
-      renderer.resize(width, height);
-      const context = renderer.getContext();
-      const svg = rendererTarget.querySelector("svg");
-      const x = 24;
-      const staveWidth = width - 48;
+      const displayWidth = Math.max(
+        PRACTICE_PAGE_STAFF_LAYOUT.width.minPx,
+        Math.min(PRACTICE_PAGE_STAFF_LAYOUT.width.maxPx, containerWidth),
+      );
+      const surface = createStaffRenderSurface(
+        rendererTarget,
+        displayWidth,
+        rowCount * PRACTICE_PAGE_STAFF_LAYOUT.vertical.viewHeightPx +
+          Math.max(0, rowCount - 1) * PRACTICE_PAGE_STAFF_LAYOUT.multirow.rowGapPx,
+        PRACTICE_PAGE_STAFF_LAYOUT.notationScale,
+      );
+      const { context } = surface;
+      const frameMetrics = getFixedStaffFrame(
+        surface,
+        PRACTICE_PAGE_STAFF_LAYOUT.horizontal.staffSidePaddingPx,
+      );
+      const anchors = getGrandStaffAnchors(
+        surface.scale,
+        PRACTICE_PAGE_STAFF_LAYOUT.vertical.centerYPx,
+        useLedgerGap
+          ? PRACTICE_PAGE_STAFF_LAYOUT.vertical.ledgerGapPx
+          : PRACTICE_PAGE_STAFF_LAYOUT.vertical.gapPx,
+      );
+
+      const getSystemNoteArea = (staves: DrawnGrandStaff) =>
+        getGrandStaffNoteArea(
+          staves,
+          PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow,
+          surface.scale,
+          PRACTICE_PAGE_STAFF_LAYOUT.horizontal,
+        );
 
       rows.forEach((rowNotes, rowIndex) => {
-        const y = 14 + rowIndex * ROW_HEIGHT;
-        const treble = new Stave(x, y, staveWidth).addClef("treble");
-        const bass = new Stave(x, y + 80, staveWidth).addClef("bass");
-        treble.setContext(context).draw();
-        bass.setContext(context).draw();
-        new StaveConnector(treble, bass).setType("brace").setContext(context).draw();
-        new StaveConnector(treble, bass).setType("singleLeft").setContext(context).draw();
-        new StaveConnector(treble, bass).setType("singleRight").setContext(context).draw();
+        const rowStep = logicalPx(
+          PRACTICE_PAGE_STAFF_LAYOUT.vertical.viewHeightPx +
+            PRACTICE_PAGE_STAFF_LAYOUT.multirow.rowGapPx,
+          surface.scale,
+        );
+        const baseY = rowIndex * rowStep;
+        const rowGroup = context.openGroup("staff-page-system");
+        const grandStaff = drawGrandStaff(context, frameMetrics, anchors, {
+          brace: true,
+          yOffset: baseY,
+        });
+        const { bass, treble } = grandStaff;
+        const noteArea = getSystemNoteArea(grandStaff);
 
-        const rowStartIndex = rowIndex * NOTES_PER_ROW;
-        const rowSlots = Array.from({ length: NOTES_PER_ROW }, (_, slotIndex) => rowNotes[slotIndex]);
+        const rowStartIndex = rowIndex * PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow;
+        const rowSlots = Array.from(
+          { length: PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow },
+          (_, slotIndex) => rowNotes[slotIndex],
+        );
         const vexDuration = noteDurationToVexDuration(noteDuration);
         const trebleTickables = rowSlots.map((note, slotIndex) =>
           note?.staff === "treble"
@@ -164,28 +168,34 @@ export function StaffPagePrompt({
             ? makeStaveNote(note, colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex), noteDuration)
             : new GhostNote(vexDuration),
         );
-        const voiceOptions = { beatValue: 4, numBeats: NOTES_PER_ROW * noteDurationToBeats(noteDuration) };
+        const voiceOptions = {
+          beatValue: 4,
+          numBeats: PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow * noteDurationToBeats(noteDuration),
+        };
         const trebleVoice = new Voice(voiceOptions).addTickables(trebleTickables);
         const bassVoice = new Voice(voiceOptions).addTickables(bassTickables);
-        new Formatter().joinVoices([trebleVoice, bassVoice]).format([trebleVoice, bassVoice], staveWidth - 90, {
+        treble.setNoteStartX(noteArea.left);
+        bass.setNoteStartX(noteArea.left);
+        treble.setWidth(Math.max(1, noteArea.right - frameMetrics.x));
+        bass.setWidth(Math.max(1, noteArea.right - frameMetrics.x));
+        new Formatter().joinVoices([trebleVoice, bassVoice]).formatToStave([trebleVoice, bassVoice], treble, {
           context,
+          stave: treble,
         });
         trebleVoice.draw(context, treble);
         bassVoice.draw(context, bass);
 
-        if (!svg) {
-          return;
-        }
         for (
-          let boundaryIndex = BARLINE_INTERVAL;
-          boundaryIndex <= rowNotes.length && boundaryIndex < NOTES_PER_ROW;
-          boundaryIndex += BARLINE_INTERVAL
+          let boundaryIndex = PRACTICE_PAGE_STAFF_LAYOUT.multirow.barlineInterval;
+          boundaryIndex <= rowNotes.length && boundaryIndex < PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow;
+          boundaryIndex += PRACTICE_PAGE_STAFF_LAYOUT.multirow.barlineInterval
         ) {
           const previousTickable = trebleTickables[boundaryIndex - 1];
           const nextTickable = trebleTickables[boundaryIndex];
           const barlineX = (previousTickable.getAbsoluteX() + nextTickable.getAbsoluteX()) / 2;
-          addBarline(svg, barlineX, treble.getYForLine(0), bass.getYForLine(4));
+          addBarline(rowGroup, barlineX, treble.getYForLine(0), bass.getYForLine(4));
         }
+        context.closeGroup();
       });
     }
 
@@ -193,7 +203,7 @@ export function StaffPagePrompt({
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [completedCount, noteDuration, rows, wrongIndex]);
+  }, [completedCount, noteDuration, rows, useLedgerGap, wrongIndex]);
 
   return (
     <div ref={frameRef} className="staff-page" aria-label="谱页">

@@ -536,20 +536,20 @@ button.primary.backup-decision-button .backup-action-summary {
 .staff-recall-column-status {
   fill: var(--muted);
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  font-size: 8.667px;
+  font-size: var(--staff-recall-status-font-size, 8.667px);
   font-weight: 600;
   pointer-events: none;
   stroke: none;
 }
 
 .staff-recall-column-status .status-label {
-  font-size: 8px;
+  font-size: var(--staff-recall-status-label-font-size, 8px);
   font-weight: 600;
 }
 
 .staff-recall-column-status .status-value {
   fill: var(--ink);
-  font-size: 10px;
+  font-size: var(--staff-recall-status-value-font-size, 10px);
   font-weight: 700;
 }
 
@@ -986,11 +986,6 @@ main.has-backup-reminder .setup-grid::after {
   height: auto;
   display: block;
   filter: drop-shadow(0 10px 18px rgba(66, 50, 34, 0.08));
-}
-
-.staff-compact {
-  width: 210px;
-  min-height: 150px;
 }
 
 .staff-page-stage {
@@ -1971,10 +1966,6 @@ main.has-backup-reminder .setup-grid::after {
 
   .answer-button {
     font-size: 20px;
-  }
-
-  .staff-compact {
-    width: 100%;
   }
 
   .staff-page-stage {

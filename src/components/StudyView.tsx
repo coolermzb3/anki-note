@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Formatter, Renderer, Stave, StaveConnector, StaveNote, Voice } from "vexflow";
+import { Formatter, Renderer, StaveNote, Voice } from "vexflow";
 import { playTargetNote, startTargetNote, type SustainedPianoNote } from "../audio/piano";
 import { formatTargetNoteLabel, getNotesForGroups, noteToVexKey } from "../domain/notes";
 import {
@@ -18,6 +18,19 @@ import {
   type StudyColumnOrderId,
 } from "./StudyDisplayControls";
 import { StaffRecallView } from "./StaffRecallView";
+import { STUDY_STAFF_LAYOUT } from "./staffLayoutProfiles";
+import {
+  alignStaveNotesToCenters,
+  createStaffRenderSurface,
+  drawGrandStaff,
+  getEvenlySpacedCenters,
+  getGrandStaffAnchors,
+  getGrandStaffNoteArea,
+  getResponsiveStaffFrame,
+  logicalPx,
+  staveNoteCenterX,
+  type StaffRenderSurface,
+} from "./staffGeometry";
 import { useLocalStorageState } from "./useLocalStorageState";
 
 type FixedStudyColumnOrderId = Exclude<StudyColumnOrderId, "random">;
@@ -46,51 +59,6 @@ const DEFAULT_STUDY_UI_PREFERENCES: StudyUiPreferences = {
   isColumnOrderReversed: false,
   showLabels: true,
 };
-// 学习页五线谱排版在这里手调。
-const STUDY_MAP_LAYOUT = {
-  // x: 压缩判断用常量；谱号占用的保守宽度，通常先不调。
-  clefReserveWidth: 72,
-
-  // x: 压缩判断用常量；相邻列中心的目标距离，通常先不调。
-  preferredColumnGap: 76,
-
-  // x: 五线谱到画布左右边缘的空白。
-  staffSidePadding: 200,
-  // x: 音符区域到五线谱左右边缘的空白；剩余宽度决定音符间距。
-  noteAreaSidePadding: 80,
-  // x: 窄屏时音符区域到五线谱左右边缘至少保留的空白。
-  minNoteAreaSidePadding: 40,
-
-  // y: SVG 的基础上下留白，影响学习图整体高度。
-  staffVerticalPadding: 120,
-  // y: 高低音谱号之间的间隔，按图分别设置。
-  clefGap: {
-    default: 80,
-    withLedgerVariants: 140,
-  },
-  // y: 下方 label 到高音谱号五线谱的间隔。
-  labelStaffGap: 52,
-  // y: 上下两行 label 之间的间隔。
-  labelLineGap: 22,
-  topLabelFontSize: 18,
-  bottomLabelFontSize: 12,
-  // x: 整列高亮框的最大宽度。
-  columnHighlightMaxWidth: 74,
-  // x: 整列高亮框到相邻列中心距离保留的空白。
-  columnHighlightSpacingPadding: 8,
-
-  // 音符播放间隔，单位毫秒。
-  columnNoteDelayMs: 0,
-};
-
-const STAVE_RENDER_HEIGHT = 160;
-const LABEL_HIT_PADDING = 10;
-
-const COMMON_STUDY_MAP_HEIGHT =
-  STUDY_MAP_LAYOUT.staffVerticalPadding * 2 +
-  Math.max(STUDY_MAP_LAYOUT.clefGap.default, STUDY_MAP_LAYOUT.clefGap.withLedgerVariants) +
-  STAVE_RENDER_HEIGHT;
-
 interface HeldColumnPlayback {
   cancelled: boolean;
   noteName: NoteName;
@@ -127,13 +95,12 @@ interface StudyViewProps {
 
 interface StudyMapMetrics {
   bassY: number;
-  bottomLabelY: number;
+  fixedDoNumberY: number;
   height: number;
   labelHitHeight: number;
   labelHitTop: number;
-  noteAreaSidePadding: number;
   staveWidth: number;
-  topLabelY: number;
+  noteNameY: number;
   trebleY: number;
   width: number;
   x: number;
@@ -226,61 +193,59 @@ function drawCenteredText(context: ReturnType<Renderer["getContext"]>, text: str
   context.fillText(text, x - width / 2, y);
 }
 
-function columnCenterX(chord: StaveNote): number {
-  return (chord.getNoteHeadBeginX() + chord.getNoteHeadEndX()) / 2;
-}
-
 function noteHeadCenterX(chord: StaveNote, index: number): number {
   const noteHead = chord.noteHeads[index];
-  return noteHead ? noteHead.getAbsoluteX() + noteHead.getWidth() / 2 : columnCenterX(chord);
+  return noteHead ? noteHead.getAbsoluteX() + noteHead.getWidth() / 2 : staveNoteCenterX(chord);
 }
 
 function noteHeadHitRadius(chord: StaveNote, index: number): number {
   return chord.noteHeads[index]?.getWidth() ?? chord.getGlyphWidth();
 }
 
-function getResponsiveHorizontalPadding(width: number, columnCount: number): { noteAreaSidePadding: number; staffSidePadding: number } {
-  const preferredNoteAreaWidth =
-    STUDY_MAP_LAYOUT.clefReserveWidth + Math.max(0, columnCount - 1) * STUDY_MAP_LAYOUT.preferredColumnGap;
-  const staffSidePadding = Math.min(
-    STUDY_MAP_LAYOUT.staffSidePadding,
-    Math.max(0, (width - preferredNoteAreaWidth - STUDY_MAP_LAYOUT.noteAreaSidePadding * 2) / 2),
+function getStudyMapMetrics(
+  includeLedgerVariants: boolean,
+  surface: StaffRenderSurface,
+  columnCount: number,
+): StudyMapMetrics {
+  const frame = getResponsiveStaffFrame(surface, columnCount, STUDY_STAFF_LAYOUT.horizontal);
+  const clefGapPx = includeLedgerVariants
+    ? STUDY_STAFF_LAYOUT.vertical.ledgerGapPx
+    : STUDY_STAFF_LAYOUT.vertical.gapPx;
+  const anchors = getGrandStaffAnchors(
+    surface.scale,
+    STUDY_STAFF_LAYOUT.vertical.centerYPx,
+    clefGapPx,
   );
-  const staveWidth = Math.max(1, width - staffSidePadding * 2);
-  const noteAreaSidePadding = Math.min(
-    STUDY_MAP_LAYOUT.noteAreaSidePadding,
-    Math.max(STUDY_MAP_LAYOUT.minNoteAreaSidePadding, (staveWidth - preferredNoteAreaWidth) / 2),
+  const noteNameY = logicalPx(STUDY_STAFF_LAYOUT.labels.noteNameYPx, surface.scale);
+  const fixedDoNumberY = noteNameY + logicalPx(STUDY_STAFF_LAYOUT.labels.lineGapPx, surface.scale);
+  const labelHitTop = noteNameY - logicalPx(
+    STUDY_STAFF_LAYOUT.labels.noteNameFontSizePx + STUDY_STAFF_LAYOUT.labelHitPaddingPx,
+    surface.scale,
   );
-
-  return { noteAreaSidePadding, staffSidePadding };
-}
-
-function getStudyMapMetrics(includeLedgerVariants: boolean, containerWidth: number, columnCount: number): StudyMapMetrics {
-  const width = Math.max(1, containerWidth);
-  const { noteAreaSidePadding, staffSidePadding } = getResponsiveHorizontalPadding(width, columnCount);
-  const clefGap = includeLedgerVariants ? STUDY_MAP_LAYOUT.clefGap.withLedgerVariants : STUDY_MAP_LAYOUT.clefGap.default;
-  const trebleY = (COMMON_STUDY_MAP_HEIGHT - clefGap - STAVE_RENDER_HEIGHT) / 2;
-  const bassY = trebleY + clefGap;
-  const topLabelY = trebleY - STUDY_MAP_LAYOUT.labelStaffGap - STUDY_MAP_LAYOUT.labelLineGap;
-  const bottomLabelY = trebleY - STUDY_MAP_LAYOUT.labelStaffGap;
-  const labelHitTop = topLabelY - STUDY_MAP_LAYOUT.topLabelFontSize - LABEL_HIT_PADDING;
   return {
-    bassY,
-    bottomLabelY,
-    height: COMMON_STUDY_MAP_HEIGHT,
-    labelHitHeight: bottomLabelY - labelHitTop + STUDY_MAP_LAYOUT.bottomLabelFontSize + LABEL_HIT_PADDING,
+    bassY: anchors.bassY,
+    fixedDoNumberY,
+    height: surface.height,
+    labelHitHeight:
+      fixedDoNumberY -
+      labelHitTop +
+      logicalPx(
+        STUDY_STAFF_LAYOUT.labels.fixedDoNumberFontSizePx + STUDY_STAFF_LAYOUT.labelHitPaddingPx,
+        surface.scale,
+      ),
     labelHitTop,
-    noteAreaSidePadding,
-    staveWidth: Math.max(1, width - staffSidePadding * 2),
-    topLabelY,
-    trebleY,
-    width,
-    x: staffSidePadding,
+    staveWidth: frame.staveWidth,
+    noteNameY,
+    trebleY: anchors.trebleY,
+    width: surface.width,
+    x: frame.x,
   };
 }
 
-function getStudyColumnLayouts(tickables: StaveNote[]): StudyColumnLayout[] {
-  const centers = tickables.map(columnCenterX);
+function getStudyColumnLayouts(tickables: StaveNote[], scale: number): StudyColumnLayout[] {
+  const centers = tickables.map(staveNoteCenterX);
+  const spacingPadding = logicalPx(STUDY_STAFF_LAYOUT.columnHighlight.spacingPaddingPx, scale);
+  const maxWidth = logicalPx(STUDY_STAFF_LAYOUT.columnHighlight.maxWidthPx, scale);
   return centers.map((centerX, index) => {
     const neighborDistances = [
       index > 0 ? centerX - centers[index - 1] : undefined,
@@ -288,25 +253,12 @@ function getStudyColumnLayouts(tickables: StaveNote[]): StudyColumnLayout[] {
     ].filter((distance): distance is number => distance !== undefined);
     const spacingWidth =
       (neighborDistances.length > 0
-        ? Math.min(...neighborDistances) - STUDY_MAP_LAYOUT.columnHighlightSpacingPadding * 2
-        : STUDY_MAP_LAYOUT.columnHighlightMaxWidth);
+        ? Math.min(...neighborDistances) - spacingPadding * 2
+        : maxWidth);
     return {
       centerX,
-      highlightWidth: Math.max(1, Math.min(STUDY_MAP_LAYOUT.columnHighlightMaxWidth, spacingWidth)),
+      highlightWidth: Math.max(1, Math.min(maxWidth, spacingWidth)),
     };
-  });
-}
-
-function alignStudyColumnsToNoteArea(tickables: StaveNote[], noteAreaLeft: number, noteAreaRight: number): void {
-  if (tickables.length < 2) {
-    return;
-  }
-
-  const span = Math.max(1, noteAreaRight - noteAreaLeft);
-  tickables.forEach((tickable, index) => {
-    const targetCenterX = noteAreaLeft + (span * index) / (tickables.length - 1);
-    const context = tickable.checkTickContext();
-    context.setX(context.getX() + targetCenterX - columnCenterX(tickable));
   });
 }
 
@@ -316,7 +268,17 @@ function addColumnHighlight(svg: SVGSVGElement, layout: StudyColumnLayout, metri
   highlight.setAttribute("x", String(layout.centerX - layout.highlightWidth / 2));
   highlight.setAttribute("y", String(metrics.labelHitTop));
   highlight.setAttribute("width", String(layout.highlightWidth));
-  highlight.setAttribute("height", String(metrics.height - metrics.labelHitTop - STUDY_MAP_LAYOUT.staffVerticalPadding / 2));
+  highlight.setAttribute(
+    "height",
+    String(
+      metrics.height -
+        metrics.labelHitTop -
+        logicalPx(
+          STUDY_STAFF_LAYOUT.columnHighlight.bottomPaddingPx,
+          STUDY_STAFF_LAYOUT.notationScale,
+        ),
+    ),
+  );
   highlight.setAttribute("rx", "8");
   highlight.setAttribute("fill", ACTIVE_FILL);
   highlight.setAttribute("stroke", ACTIVE_COLOR);
@@ -457,19 +419,21 @@ function StudyNoteMap({
       rendererTarget.innerHTML = "";
       const measuredWidth = frame.getBoundingClientRect().width || frame.clientWidth || frame.parentElement?.clientWidth || 1;
       const containerWidth = Math.max(1, Math.floor(measuredWidth));
-      const metrics = getStudyMapMetrics(includeLedgerVariants, containerWidth, columns.length);
-      const renderer = new Renderer(rendererTarget, Renderer.Backends.SVG);
-      renderer.resize(metrics.width, metrics.height);
-      const context = renderer.getContext();
-      const svg = rendererTarget.querySelector("svg");
-      const treble = new Stave(metrics.x, metrics.trebleY, metrics.staveWidth).addClef("treble");
-      const bass = new Stave(metrics.x, metrics.bassY, metrics.staveWidth).addClef("bass");
-
-      treble.setContext(context).draw();
-      bass.setContext(context).draw();
-      new StaveConnector(treble, bass).setType("brace").setContext(context).draw();
-      new StaveConnector(treble, bass).setType("singleLeft").setContext(context).draw();
-      new StaveConnector(treble, bass).setType("singleRight").setContext(context).draw();
+      const surface = createStaffRenderSurface(
+        rendererTarget,
+        containerWidth,
+        STUDY_STAFF_LAYOUT.vertical.viewHeightPx,
+        STUDY_STAFF_LAYOUT.notationScale,
+      );
+      const metrics = getStudyMapMetrics(includeLedgerVariants, surface, columns.length);
+      const { context, svg } = surface;
+      const grandStaff = drawGrandStaff(
+        context,
+        { x: metrics.x, staveWidth: metrics.staveWidth },
+        { bassY: metrics.bassY, trebleY: metrics.trebleY },
+        { brace: true },
+      );
+      const { bass, treble } = grandStaff;
 
       const trebleTickables = columns.map((column) =>
         makeChord(column.trebleNotes, "treble", highlightedNoteNames, highlightedNoteId),
@@ -481,18 +445,27 @@ function StudyNoteMap({
       const trebleVoice = new Voice(voiceOptions).addTickables(trebleTickables);
       const bassVoice = new Voice(voiceOptions).addTickables(bassTickables);
 
-      const noteAreaLeft = Math.max(treble.getNoteStartX(), bass.getNoteStartX()) + metrics.noteAreaSidePadding;
-      const noteAreaRight = Math.min(treble.getNoteEndX(), bass.getNoteEndX()) - metrics.noteAreaSidePadding;
-      treble.setNoteStartX(noteAreaLeft);
-      treble.setWidth(Math.max(1, noteAreaRight - metrics.x));
+      const noteArea = getGrandStaffNoteArea(
+        grandStaff,
+        columns.length,
+        surface.scale,
+        STUDY_STAFF_LAYOUT.horizontal,
+      );
+      treble.setNoteStartX(noteArea.left);
+      bass.setNoteStartX(noteArea.left);
+      treble.setWidth(Math.max(1, noteArea.right - metrics.x));
+      bass.setWidth(Math.max(1, noteArea.right - metrics.x));
       new Formatter().joinVoices([trebleVoice, bassVoice]).formatToStave([trebleVoice, bassVoice], treble, {
         context,
         stave: treble,
       });
-      alignStudyColumnsToNoteArea(trebleTickables, noteAreaLeft, noteAreaRight);
+      alignStaveNotesToCenters(
+        trebleTickables,
+        getEvenlySpacedCenters(columns.length, noteArea.left, noteArea.right),
+      );
       trebleVoice.draw(context, treble);
       bassVoice.draw(context, bass);
-      const columnLayouts = getStudyColumnLayouts(trebleTickables);
+      const columnLayouts = getStudyColumnLayouts(trebleTickables, surface.scale);
 
       if (svg && highlightedNoteNames && highlightedNoteNames.size > 0) {
         columns.forEach((column, index) => {
@@ -503,15 +476,19 @@ function StudyNoteMap({
       }
 
       if (showLabels) {
-        context.setFont("Inter", STUDY_MAP_LAYOUT.topLabelFontSize, 800).setFillStyle(NEUTRAL_COLOR);
+        context
+          .setFont("Inter", logicalPx(STUDY_STAFF_LAYOUT.labels.noteNameFontSizePx, surface.scale), 800)
+          .setFillStyle(NEUTRAL_COLOR);
         columns.forEach((column, index) => {
           const centerX = columnLayouts[index].centerX;
-          drawCenteredText(context, column.noteName, centerX, metrics.topLabelY);
+          drawCenteredText(context, column.noteName, centerX, metrics.noteNameY);
         });
-        context.setFont("Inter", STUDY_MAP_LAYOUT.bottomLabelFontSize, 700).setFillStyle(MUTED_COLOR);
+        context
+          .setFont("Inter", logicalPx(STUDY_STAFF_LAYOUT.labels.fixedDoNumberFontSizePx, surface.scale), 700)
+          .setFillStyle(MUTED_COLOR);
         columns.forEach((column, index) => {
           const centerX = columnLayouts[index].centerX;
-          drawCenteredText(context, column.answerNumber, centerX, metrics.bottomLabelY);
+          drawCenteredText(context, column.answerNumber, centerX, metrics.fixedDoNumberY);
         });
       }
 
@@ -651,7 +628,7 @@ function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
       void (async () => {
         for (const note of dedupeTargetNotePitches(column.notes).sort(compareTargetNotePitch)) {
           void playTargetNote(note).catch(() => undefined);
-          await delay(STUDY_MAP_LAYOUT.columnNoteDelayMs);
+          await delay(STUDY_STAFF_LAYOUT.columnNoteDelayMs);
         }
       })();
     },
@@ -701,8 +678,8 @@ function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
             break;
           }
           held.releases.push(sustained.release);
-          if (STUDY_MAP_LAYOUT.columnNoteDelayMs > 0) {
-            await delay(STUDY_MAP_LAYOUT.columnNoteDelayMs);
+          if (STUDY_STAFF_LAYOUT.columnNoteDelayMs > 0) {
+            await delay(STUDY_STAFF_LAYOUT.columnNoteDelayMs);
           }
         }
       })();

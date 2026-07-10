@@ -1,8 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Formatter, Renderer, Stave, StaveConnector, StaveNote, Voice } from "vexflow";
+import { Formatter, Renderer, StaveNote, Voice } from "vexflow";
 import { formatTargetNoteLabel, noteToVexKey } from "../domain/notes";
 import { positiveTertileLevel, type NoteConfusionStat } from "../domain/stats";
 import type { NoteName, Staff, TargetNote } from "../domain/types";
+import { STATS_RANGE_STAFF_LAYOUT } from "./staffLayoutProfiles";
+import {
+  alignStaveNotesToCenters,
+  createStaffRenderSurface,
+  drawGrandStaff,
+  getEvenlySpacedCenters,
+  getGrandStaffAnchors,
+  getGrandStaffNoteArea,
+  getResponsiveStaffFrame,
+  logicalPx,
+  staveNoteCenterX,
+  type StaffRenderSurface,
+} from "./staffGeometry";
 import { STATS_COLORS, type StatsRangeTone } from "./statsColors";
 
 export interface StaffHeatNote {
@@ -30,11 +43,10 @@ interface RangeColumn {
 
 interface RangeMapMetrics {
   bassY: number;
-  bottomLabelY: number;
+  fixedDoNumberY: number;
   height: number;
-  noteAreaSidePadding: number;
   staveWidth: number;
-  topLabelY: number;
+  noteNameY: number;
   trebleY: number;
   width: number;
   x: number;
@@ -66,24 +78,9 @@ const NOTE_NAME_ORDER: Record<NoteName, number> = {
   A: 5,
   B: 6,
 };
-const RANGE_STAFF_GAP_PX = 130;
 const CONFUSION_TOOLTIP_WIDTH = 156;
 const CONFUSION_TOOLTIP_HEIGHT = 116;
 const CONFUSION_TOOLTIP_OFFSET = 10;
-const RANGE_MAP_LAYOUT = {
-  clefReserveWidth: 32,
-  preferredColumnGap: 10,
-  staffSidePadding: 2,
-  noteAreaSidePadding: 18,
-  minNoteAreaSidePadding: 10,
-  labelTopPadding: 5,
-  labelStaffGap: 27,
-  labelLineGap: 15,
-  lowerStaffReserve: 130,
-  topLabelFontSize: 13,
-  bottomLabelFontSize: 11,
-};
-
 function pitchOrder(note: Pick<TargetNote, "noteName" | "octave">): number {
   return note.octave * 7 + NOTE_NAME_ORDER[note.noteName];
 }
@@ -141,13 +138,9 @@ function drawCenteredText(context: ReturnType<Renderer["getContext"]>, text: str
   context.fillText(text, x - width / 2, y);
 }
 
-function columnCenterX(chord: StaveNote): number {
-  return (chord.getNoteHeadBeginX() + chord.getNoteHeadEndX()) / 2;
-}
-
 function noteHeadCenterX(chord: StaveNote, index: number): number {
   const noteHead = chord.noteHeads[index];
-  return noteHead ? noteHead.getAbsoluteX() + noteHead.getWidth() / 2 : columnCenterX(chord);
+  return noteHead ? noteHead.getAbsoluteX() + noteHead.getWidth() / 2 : staveNoteCenterX(chord);
 }
 
 function addConfusionHotspots(
@@ -174,53 +167,26 @@ function addConfusionHotspots(
   });
 }
 
-function getResponsiveHorizontalPadding(width: number, columnCount: number): { noteAreaSidePadding: number; staffSidePadding: number } {
-  const preferredNoteAreaWidth =
-    RANGE_MAP_LAYOUT.clefReserveWidth + Math.max(0, columnCount - 1) * RANGE_MAP_LAYOUT.preferredColumnGap;
-  const staffSidePadding = Math.min(
-    RANGE_MAP_LAYOUT.staffSidePadding,
-    Math.max(0, (width - preferredNoteAreaWidth - RANGE_MAP_LAYOUT.noteAreaSidePadding * 2) / 2),
+function getRangeMapMetrics(surface: StaffRenderSurface, columnCount: number, useLedgerGap: boolean): RangeMapMetrics {
+  const frame = getResponsiveStaffFrame(surface, columnCount, STATS_RANGE_STAFF_LAYOUT.horizontal);
+  const anchors = getGrandStaffAnchors(
+    surface.scale,
+    STATS_RANGE_STAFF_LAYOUT.vertical.centerYPx,
+    useLedgerGap
+      ? STATS_RANGE_STAFF_LAYOUT.vertical.ledgerGapPx
+      : STATS_RANGE_STAFF_LAYOUT.vertical.gapPx,
   );
-  const staveWidth = Math.max(1, width - staffSidePadding * 2);
-  const noteAreaSidePadding = Math.min(
-    RANGE_MAP_LAYOUT.noteAreaSidePadding,
-    Math.max(RANGE_MAP_LAYOUT.minNoteAreaSidePadding, (staveWidth - preferredNoteAreaWidth) / 2),
-  );
-
-  return { noteAreaSidePadding, staffSidePadding };
-}
-
-function getRangeMapMetrics(containerWidth: number, columnCount: number): RangeMapMetrics {
-  const width = Math.max(1, containerWidth);
-  const { noteAreaSidePadding, staffSidePadding } = getResponsiveHorizontalPadding(width, columnCount);
-  const topLabelY = RANGE_MAP_LAYOUT.labelTopPadding + RANGE_MAP_LAYOUT.topLabelFontSize;
-  const bottomLabelY = topLabelY + RANGE_MAP_LAYOUT.labelLineGap;
-  const trebleY = bottomLabelY + RANGE_MAP_LAYOUT.labelStaffGap;
-  const bassY = trebleY + RANGE_STAFF_GAP_PX;
+  const noteNameY = logicalPx(STATS_RANGE_STAFF_LAYOUT.labels.noteNameYPx, surface.scale);
   return {
-    bassY,
-    bottomLabelY,
-    height: bassY + RANGE_MAP_LAYOUT.lowerStaffReserve,
-    noteAreaSidePadding,
-    staveWidth: Math.max(1, width - staffSidePadding * 2),
-    topLabelY,
-    trebleY,
-    width,
-    x: staffSidePadding,
+    bassY: anchors.bassY,
+    fixedDoNumberY: noteNameY + logicalPx(STATS_RANGE_STAFF_LAYOUT.labels.lineGapPx, surface.scale),
+    height: surface.height,
+    staveWidth: frame.staveWidth,
+    noteNameY,
+    trebleY: anchors.trebleY,
+    width: surface.width,
+    x: frame.x,
   };
-}
-
-function alignColumnsToNoteArea(tickables: StaveNote[], noteAreaLeft: number, noteAreaRight: number): void {
-  if (tickables.length < 2) {
-    return;
-  }
-
-  const span = Math.max(1, noteAreaRight - noteAreaLeft);
-  tickables.forEach((tickable, index) => {
-    const targetCenterX = noteAreaLeft + (span * index) / (tickables.length - 1);
-    const context = tickable.checkTickContext();
-    context.setX(context.getX() + targetCenterX - columnCenterX(tickable));
-  });
 }
 
 export function StatsRangeStaff({ label, notes, tone }: StatsRangeStaffProps): JSX.Element {
@@ -228,6 +194,7 @@ export function StatsRangeStaff({ label, notes, tone }: StatsRangeStaffProps): J
   const rendererTargetRef = useRef<HTMLDivElement | null>(null);
   const [confusionTooltip, setConfusionTooltip] = useState<ConfusionTooltipState | undefined>();
   const columns = useMemo(() => getRangeColumns(notes, tone), [notes, tone]);
+  const useLedgerGap = notes.some((item) => item.note.isLedgerVariant);
   const showsConfusionDetails = notes.some((note) => note.confusions !== undefined);
 
   useEffect(() => {
@@ -244,18 +211,20 @@ export function StatsRangeStaff({ label, notes, tone }: StatsRangeStaffProps): J
 
       rendererTarget.innerHTML = "";
       const measuredWidth = frame.getBoundingClientRect().width || frame.clientWidth || frame.parentElement?.clientWidth || 1;
-      const metrics = getRangeMapMetrics(Math.floor(measuredWidth), columns.length);
-      const renderer = new Renderer(rendererTarget, Renderer.Backends.SVG);
-      renderer.resize(metrics.width, metrics.height);
-      const context = renderer.getContext();
-      const svg = rendererTarget.querySelector("svg");
-      const treble = new Stave(metrics.x, metrics.trebleY, metrics.staveWidth).addClef("treble");
-      const bass = new Stave(metrics.x, metrics.bassY, metrics.staveWidth).addClef("bass");
-
-      treble.setContext(context).draw();
-      bass.setContext(context).draw();
-      new StaveConnector(treble, bass).setType("singleLeft").setContext(context).draw();
-      new StaveConnector(treble, bass).setType("singleRight").setContext(context).draw();
+      const surface = createStaffRenderSurface(
+        rendererTarget,
+        Math.floor(measuredWidth),
+        STATS_RANGE_STAFF_LAYOUT.vertical.viewHeightPx,
+        STATS_RANGE_STAFF_LAYOUT.notationScale,
+      );
+      const metrics = getRangeMapMetrics(surface, columns.length, useLedgerGap);
+      const { context, svg } = surface;
+      const grandStaff = drawGrandStaff(
+        context,
+        { x: metrics.x, staveWidth: metrics.staveWidth },
+        { bassY: metrics.bassY, trebleY: metrics.trebleY },
+      );
+      const { bass, treble } = grandStaff;
 
       const trebleTickables = columns.map((column) => makeChord(column.trebleNotes, "treble"));
       const bassTickables = columns.map((column) => makeChord(column.bassNotes, "bass"));
@@ -263,25 +232,38 @@ export function StatsRangeStaff({ label, notes, tone }: StatsRangeStaffProps): J
       const trebleVoice = new Voice(voiceOptions).addTickables(trebleTickables);
       const bassVoice = new Voice(voiceOptions).addTickables(bassTickables);
 
-      const noteAreaLeft = Math.max(treble.getNoteStartX(), bass.getNoteStartX()) + metrics.noteAreaSidePadding;
-      const noteAreaRight = Math.min(treble.getNoteEndX(), bass.getNoteEndX()) - metrics.noteAreaSidePadding;
-      treble.setNoteStartX(noteAreaLeft);
-      treble.setWidth(Math.max(1, noteAreaRight - metrics.x));
+      const noteArea = getGrandStaffNoteArea(
+        grandStaff,
+        columns.length,
+        surface.scale,
+        STATS_RANGE_STAFF_LAYOUT.horizontal,
+      );
+      treble.setNoteStartX(noteArea.left);
+      bass.setNoteStartX(noteArea.left);
+      treble.setWidth(Math.max(1, noteArea.right - metrics.x));
+      bass.setWidth(Math.max(1, noteArea.right - metrics.x));
       new Formatter().joinVoices([trebleVoice, bassVoice]).formatToStave([trebleVoice, bassVoice], treble, {
         context,
         stave: treble,
       });
-      alignColumnsToNoteArea(trebleTickables, noteAreaLeft, noteAreaRight);
+      alignStaveNotesToCenters(
+        trebleTickables,
+        getEvenlySpacedCenters(columns.length, noteArea.left, noteArea.right),
+      );
       trebleVoice.draw(context, treble);
       bassVoice.draw(context, bass);
 
-      context.setFont("Inter", RANGE_MAP_LAYOUT.topLabelFontSize, 800).setFillStyle(STATS_COLORS.range.neutral);
+      context
+        .setFont("Inter", logicalPx(STATS_RANGE_STAFF_LAYOUT.labels.noteNameFontSizePx, surface.scale), 800)
+        .setFillStyle(STATS_COLORS.range.neutral);
       columns.forEach((column, index) => {
-        drawCenteredText(context, column.noteName, columnCenterX(trebleTickables[index]), metrics.topLabelY);
+        drawCenteredText(context, column.noteName, staveNoteCenterX(trebleTickables[index]), metrics.noteNameY);
       });
-      context.setFont("Inter", RANGE_MAP_LAYOUT.bottomLabelFontSize, 700).setFillStyle(STATS_COLORS.range.muted);
+      context
+        .setFont("Inter", logicalPx(STATS_RANGE_STAFF_LAYOUT.labels.fixedDoNumberFontSizePx, surface.scale), 700)
+        .setFillStyle(STATS_COLORS.range.muted);
       columns.forEach((column, index) => {
-        drawCenteredText(context, column.answerNumber, columnCenterX(trebleTickables[index]), metrics.bottomLabelY);
+        drawCenteredText(context, column.answerNumber, staveNoteCenterX(trebleTickables[index]), metrics.fixedDoNumberY);
       });
 
       if (!svg) {
@@ -317,7 +299,7 @@ export function StatsRangeStaff({ label, notes, tone }: StatsRangeStaffProps): J
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [columns]);
+  }, [columns, useLedgerGap]);
 
   return (
     <div

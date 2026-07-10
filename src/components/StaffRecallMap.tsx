@@ -1,9 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Formatter, Renderer, Stave, StaveConnector, StaveNote, Voice } from "vexflow";
+import { Formatter, Renderer, type Stave, StaveNote, Voice } from "vexflow";
 import { noteToVexKey } from "../domain/notes";
 import { compareTargetNotePitch, formatStaffRecallDeltaMs, type NoteNameColumn } from "../domain/staffRecall";
 import { formatMs } from "../domain/stats";
 import type { NoteName, Staff, TargetNote, TargetNoteId } from "../domain/types";
+import { STAFF_RECALL_LAYOUT } from "./staffLayoutProfiles";
+import {
+  alignStaveNotesToCenters,
+  createStaffRenderSurface,
+  drawGrandStaff,
+  getEvenlySpacedCenters,
+  getGrandStaffAnchors,
+  getGrandStaffNoteArea,
+  getResponsiveStaffFrame,
+  logicalPx,
+} from "./staffGeometry";
 
 export interface StaffRecallColumnState {
   activeMs?: number;
@@ -37,7 +48,10 @@ interface ColumnGeometry {
 interface MapGeometry {
   columns: ColumnGeometry[];
   height: number;
+  placementHitRadius: number;
   width: number;
+  x: number;
+  y: number;
 }
 
 const NOTE_DURATION = "w";
@@ -47,53 +61,15 @@ const MUTED_COLOR = "#766b5f";
 const CORRECT_COLOR = "#2f8f5f";
 const WRONG_COLOR = "#c84c3d";
 const HOVER_COLOR = "rgba(37, 111, 103, 0.42)";
-const RECALL_MAP_LAYOUT = {
-  // 默写谱表排版在这里手调。VexFlow 使用下方逻辑尺寸绘制，再由 SVG viewBox 整体放大。
-  scale: 2,
-  height: 730,
-
-  // x: 宽度不足时依次压缩谱表外侧空白、音符区域空白和列距。
-  staffSidePadding: 50,
-  clefReserveWidth: 72, // 预留给谱号 无需调整
-  noteAreaSidePadding: 40,
-  minNoteAreaSidePadding: 18,
-  preferredColumnGap: 36,
-
-  // y: 高低音谱表锚点的中点；调整它可整体上下移动大谱表。
-  staffCenterY: 120,
-
-  clefGap: {
-    default: 72,
-    withLedgerVariants: 130,
-  },
-  labelY: 26,
-  answerNumberY: 38,
-  statusLineGap: 11,
-  statusBottomPadding: 15,
-  maskTop: 62,
-  maskBottom: 412,
-  ledgerGuideHalfWidth: 10,
-  placementHitRadius: 5,
-};
-
 function getStatusLineY(lineIndex: 0 | 1 | 2): number {
-  const lastLineY = RECALL_MAP_LAYOUT.height / RECALL_MAP_LAYOUT.scale - RECALL_MAP_LAYOUT.statusBottomPadding;
-  return lastLineY - (2 - lineIndex) * RECALL_MAP_LAYOUT.statusLineGap;
-}
-
-function columnCenterX(note: StaveNote): number {
-  return (note.getNoteHeadBeginX() + note.getNoteHeadEndX()) / 2;
-}
-
-function alignTickablesToCenters(tickables: StaveNote[], centers: readonly number[]): void {
-  tickables.forEach((tickable, index) => {
-    const center = centers[index];
-    if (center === undefined) {
-      return;
-    }
-    const tickContext = tickable.checkTickContext();
-    tickContext.setX(tickContext.getX() + center - columnCenterX(tickable));
-  });
+  const lastLineY = logicalPx(
+    STAFF_RECALL_LAYOUT.vertical.viewHeightPx - STAFF_RECALL_LAYOUT.status.bottomLineOffsetPx,
+    STAFF_RECALL_LAYOUT.notationScale,
+  );
+  return lastLineY - logicalPx(
+    (2 - lineIndex) * STAFF_RECALL_LAYOUT.status.lineGapPx,
+    STAFF_RECALL_LAYOUT.notationScale,
+  );
 }
 
 function makeChord(
@@ -142,7 +118,7 @@ function formatAndDrawLayer({
     Math.max(1, noteAreaRight - noteAreaLeft),
     { context },
   );
-  alignTickablesToCenters(trebleTickables, centers);
+  alignStaveNotesToCenters(trebleTickables, centers);
   trebleVoice.draw(context, treble);
   bassVoice.draw(context, bass);
 }
@@ -150,17 +126,6 @@ function formatAndDrawLayer({
 function drawCenteredText(context: ReturnType<Renderer["getContext"]>, text: string, x: number, y: number): void {
   const { width } = context.measureText(text);
   context.fillText(text, x - width / 2, y);
-}
-
-function getEvenlySpacedCenters(count: number, left: number, right: number): number[] {
-  if (count <= 0) {
-    return [];
-  }
-  if (count === 1) {
-    return [(left + right) / 2];
-  }
-  const span = Math.max(1, right - left);
-  return Array.from({ length: count }, (_, index) => left + (span * index) / (count - 1));
 }
 
 function getColumnBounds(
@@ -216,7 +181,7 @@ function getLedgerLines(notes: readonly TargetNote[]): number[] {
 }
 
 function addLedgerGuides(
-  svg: SVGSVGElement,
+  parent: SVGElement,
   centers: readonly number[],
   notes: readonly TargetNote[],
   stave: Stave,
@@ -226,11 +191,15 @@ function addLedgerGuides(
     ledgerLines.forEach((line) => {
       const guide = document.createElementNS("http://www.w3.org/2000/svg", "line");
       guide.setAttribute("class", "staff-recall-ledger-guide");
-      guide.setAttribute("x1", String(centerX - RECALL_MAP_LAYOUT.ledgerGuideHalfWidth));
-      guide.setAttribute("x2", String(centerX + RECALL_MAP_LAYOUT.ledgerGuideHalfWidth));
+      const halfWidth = logicalPx(
+        STAFF_RECALL_LAYOUT.ledgerGuideHalfWidthPx,
+        STAFF_RECALL_LAYOUT.notationScale,
+      );
+      guide.setAttribute("x1", String(centerX - halfWidth));
+      guide.setAttribute("x2", String(centerX + halfWidth));
       guide.setAttribute("y1", String(stave.getYForNote(line)));
       guide.setAttribute("y2", String(stave.getYForNote(line)));
-      svg.appendChild(guide);
+      parent.appendChild(guide);
     });
   });
 }
@@ -239,14 +208,14 @@ function addStatusText({
   active,
   centerX,
   comparisonMedianMs,
+  parent,
   state,
-  svg,
 }: {
   active: boolean;
   centerX: number;
   comparisonMedianMs?: number;
+  parent: SVGElement;
   state: StaffRecallColumnState;
-  svg: SVGSVGElement;
 }): void {
   const status = document.createElementNS("http://www.w3.org/2000/svg", "text");
   status.setAttribute("class", "staff-recall-column-status");
@@ -279,7 +248,7 @@ function addStatusText({
     addLine("中位", 0, "status-label");
     addLine(formatMs(comparisonMedianMs), 1, "status-value");
   }
-  svg.appendChild(status);
+  parent.appendChild(status);
 }
 
 function noteById(notes: readonly TargetNote[], noteId: TargetNoteId | undefined): TargetNote | undefined {
@@ -327,71 +296,58 @@ export function StaffRecallMap({
         return;
       }
       const displayWidth = Math.max(1, Math.floor(frame.clientWidth || frame.parentElement?.clientWidth || 1));
-      const displayHeight = RECALL_MAP_LAYOUT.height;
+      const displayHeight = STAFF_RECALL_LAYOUT.vertical.viewHeightPx;
       // 悬浮音改变时会重画 SVG；先固定容器高度，避免清空节点触发页面滚动锚定。
       rendererTarget.style.height = `${displayHeight}px`;
       rendererTarget.innerHTML = "";
-      const width = displayWidth / RECALL_MAP_LAYOUT.scale;
-      const height = displayHeight / RECALL_MAP_LAYOUT.scale;
-      const renderer = new Renderer(rendererTarget, Renderer.Backends.SVG);
-      renderer.resize(displayWidth, displayHeight);
-      const context = renderer.getContext();
-      context.scale(RECALL_MAP_LAYOUT.scale, RECALL_MAP_LAYOUT.scale);
-      const svg = rendererTarget.querySelector("svg");
-      const preferredMapContentWidth =
-        RECALL_MAP_LAYOUT.clefReserveWidth +
-        Math.max(0, columns.length - 1) * RECALL_MAP_LAYOUT.preferredColumnGap +
-        RECALL_MAP_LAYOUT.noteAreaSidePadding * 2;
-      const staffSidePadding = Math.min(
-        RECALL_MAP_LAYOUT.staffSidePadding,
-        Math.max(0, (width - preferredMapContentWidth) / 2),
+      const surface = createStaffRenderSurface(
+        rendererTarget,
+        displayWidth,
+        displayHeight,
+        STAFF_RECALL_LAYOUT.notationScale,
       );
-      const staveWidth = Math.max(1, width - staffSidePadding * 2);
+      const { context, svg } = surface;
+      frame.style.setProperty(
+        "--staff-recall-status-font-size",
+        `${logicalPx(STAFF_RECALL_LAYOUT.status.fontSizePx, surface.scale)}px`,
+      );
+      frame.style.setProperty(
+        "--staff-recall-status-label-font-size",
+        `${logicalPx(STAFF_RECALL_LAYOUT.status.labelFontSizePx, surface.scale)}px`,
+      );
+      frame.style.setProperty(
+        "--staff-recall-status-value-font-size",
+        `${logicalPx(STAFF_RECALL_LAYOUT.status.valueFontSizePx, surface.scale)}px`,
+      );
+      const frameMetrics = getResponsiveStaffFrame(surface, columns.length, STAFF_RECALL_LAYOUT.horizontal);
       const includeLedgerVariants = inputNotes.some((note) => note.isLedgerVariant);
-      const clefGap = (
+      const clefGapPx = (
         includeLedgerVariants
-          ? RECALL_MAP_LAYOUT.clefGap.withLedgerVariants
-          : RECALL_MAP_LAYOUT.clefGap.default
+          ? STAFF_RECALL_LAYOUT.vertical.ledgerGapPx
+          : STAFF_RECALL_LAYOUT.vertical.gapPx
       );
-      const trebleY = RECALL_MAP_LAYOUT.staffCenterY - clefGap / 2;
-      const bassY = RECALL_MAP_LAYOUT.staffCenterY + clefGap / 2;
-      const treble = new Stave(
-        staffSidePadding,
-        trebleY,
-        staveWidth,
-      ).addClef("treble");
-      const bass = new Stave(
-        staffSidePadding,
-        bassY,
-        staveWidth,
-      ).addClef("bass");
-      treble.setContext(context).draw();
-      bass.setContext(context).draw();
-      new StaveConnector(treble, bass).setType("brace").setContext(context).draw();
-      new StaveConnector(treble, bass).setType("singleLeft").setContext(context).draw();
-      new StaveConnector(treble, bass).setType("singleRight").setContext(context).draw();
+      const anchors = getGrandStaffAnchors(
+        surface.scale,
+        STAFF_RECALL_LAYOUT.vertical.centerYPx,
+        clefGapPx,
+      );
+      const grandStaff = drawGrandStaff(context, frameMetrics, anchors, { brace: true });
+      const { bass, treble } = grandStaff;
 
       const trebleInputNotes = inputNotes.filter((note) => note.staff === "treble").sort(compareTargetNotePitch);
       const bassInputNotes = inputNotes.filter((note) => note.staff === "bass").sort(compareTargetNotePitch);
       const commonNoteStartX = Math.max(treble.getNoteStartX(), bass.getNoteStartX());
       treble.setNoteStartX(commonNoteStartX);
       bass.setNoteStartX(commonNoteStartX);
-      const noteEndX = Math.min(treble.getNoteEndX(), bass.getNoteEndX());
-      const preferredColumnAreaWidth = Math.max(0, columns.length - 1) * RECALL_MAP_LAYOUT.preferredColumnGap;
-      const noteAreaSidePadding = Math.min(
-        RECALL_MAP_LAYOUT.noteAreaSidePadding,
-        Math.max(
-          RECALL_MAP_LAYOUT.minNoteAreaSidePadding,
-          (noteEndX - commonNoteStartX - preferredColumnAreaWidth) / 2,
-        ),
+      const noteArea = getGrandStaffNoteArea(
+        grandStaff,
+        columns.length,
+        surface.scale,
+        STAFF_RECALL_LAYOUT.horizontal,
       );
-      const noteAreaLeft = commonNoteStartX + noteAreaSidePadding;
-      const noteAreaRight = noteEndX - noteAreaSidePadding;
-      const centers = getEvenlySpacedCenters(columns.length, noteAreaLeft, noteAreaRight);
-      if (svg) {
-        addLedgerGuides(svg, centers, trebleInputNotes, treble);
-        addLedgerGuides(svg, centers, bassInputNotes, bass);
-      }
+      const centers = getEvenlySpacedCenters(columns.length, noteArea.left, noteArea.right);
+      addLedgerGuides(svg, centers, trebleInputNotes, treble);
+      addLedgerGuides(svg, centers, bassInputNotes, bass);
 
       const correctNotesForColumn = (column: NoteNameColumn, staff: Staff): TargetNote[] => {
         const correctIds = new Set(columnStates[column.noteName].correctNoteIds);
@@ -402,8 +358,8 @@ export function StaffRecallMap({
         bassTickables: columns.map((column) => makeChord(correctNotesForColumn(column, "bass"), "bass", CORRECT_COLOR)),
         centers,
         context,
-        noteAreaLeft,
-        noteAreaRight,
+        noteAreaLeft: noteArea.left,
+        noteAreaRight: noteArea.right,
         treble,
         trebleTickables: columns.map((column) => makeChord(correctNotesForColumn(column, "treble"), "treble", CORRECT_COLOR)),
       });
@@ -417,8 +373,8 @@ export function StaffRecallMap({
         bassTickables: columns.map((column) => makeChord(wrongNoteForColumn(column, "bass"), "bass", WRONG_COLOR)),
         centers,
         context,
-        noteAreaLeft,
-        noteAreaRight,
+        noteAreaLeft: noteArea.left,
+        noteAreaRight: noteArea.right,
         treble,
         trebleTickables: columns.map((column) => makeChord(wrongNoteForColumn(column, "treble"), "treble", WRONG_COLOR)),
       });
@@ -438,8 +394,8 @@ export function StaffRecallMap({
         bassTickables: columns.map((column) => makeChord(hoverNoteForColumn(column, "bass"), "bass", HOVER_COLOR)),
         centers,
         context,
-        noteAreaLeft,
-        noteAreaRight,
+        noteAreaLeft: noteArea.left,
+        noteAreaRight: noteArea.right,
         treble,
         trebleTickables: columns.map((column) => makeChord(hoverNoteForColumn(column, "treble"), "treble", HOVER_COLOR)),
       });
@@ -449,7 +405,7 @@ export function StaffRecallMap({
         ...getPlacements(bassInputNotes, bass),
       ];
       const columnGeometry = columns.map((column, index): ColumnGeometry => {
-        const { left, right } = getColumnBounds(centers, index, width);
+        const { left, right } = getColumnBounds(centers, index, surface.width);
         return {
           centerX: centers[index],
           left,
@@ -458,11 +414,6 @@ export function StaffRecallMap({
           right,
         };
       });
-      geometryRef.current = { columns: columnGeometry, height, width };
-
-      if (!svg) {
-        return;
-      }
       columnGeometry.forEach((geometry, index) => {
         const column = columns[index];
         const state = columnStates[column.noteName];
@@ -471,40 +422,86 @@ export function StaffRecallMap({
           const mask = document.createElementNS("http://www.w3.org/2000/svg", "rect");
           mask.setAttribute("class", "staff-recall-column-mask");
           mask.setAttribute("x", String(geometry.left));
-          mask.setAttribute("y", String(RECALL_MAP_LAYOUT.maskTop));
+          mask.setAttribute("y", String(logicalPx(STAFF_RECALL_LAYOUT.overlay.maskTopPx, surface.scale)));
           mask.setAttribute("width", String(Math.max(1, geometry.right - geometry.left)));
-          mask.setAttribute("height", String(RECALL_MAP_LAYOUT.maskBottom - RECALL_MAP_LAYOUT.maskTop));
+          mask.setAttribute(
+            "height",
+            String(
+              logicalPx(
+                STAFF_RECALL_LAYOUT.overlay.maskBottomPx - STAFF_RECALL_LAYOUT.overlay.maskTopPx,
+                surface.scale,
+              ),
+            ),
+          );
           svg.appendChild(mask);
         } else if (activeNoteName === column.noteName) {
           const active = document.createElementNS("http://www.w3.org/2000/svg", "rect");
           active.setAttribute("class", "staff-recall-column-active");
           active.setAttribute("x", String(geometry.left + 4));
-          active.setAttribute("y", String(RECALL_MAP_LAYOUT.maskTop));
+          active.setAttribute("y", String(logicalPx(STAFF_RECALL_LAYOUT.overlay.maskTopPx, surface.scale)));
           active.setAttribute("width", String(Math.max(1, geometry.right - geometry.left - 8)));
-          active.setAttribute("height", String(RECALL_MAP_LAYOUT.maskBottom - RECALL_MAP_LAYOUT.maskTop));
+          active.setAttribute(
+            "height",
+            String(
+              logicalPx(
+                STAFF_RECALL_LAYOUT.overlay.maskBottomPx - STAFF_RECALL_LAYOUT.overlay.maskTopPx,
+                surface.scale,
+              ),
+            ),
+          );
           active.setAttribute("rx", "8");
           svg.insertBefore(active, svg.firstChild);
         }
+      });
+
+      const uiGroup = context.openGroup("staff-recall-ui");
+      columnGeometry.forEach((geometry, index) => {
+        const column = columns[index];
+        const state = columnStates[column.noteName];
         addStatusText({
           active: activeNoteName === column.noteName,
           centerX: geometry.centerX,
           comparisonMedianMs: comparisonMedianMsByNoteName[column.noteName],
+          parent: uiGroup,
           state,
-          svg,
         });
       });
       context
-        .setFont("Inter", 18 / RECALL_MAP_LAYOUT.scale, 800)
+        .setFont("Inter", logicalPx(STAFF_RECALL_LAYOUT.labels.noteNameFontSizePx, surface.scale), 800)
         .setFillStyle(NEUTRAL_COLOR);
       columnGeometry.forEach((geometry) => {
-        drawCenteredText(context, geometry.noteName, geometry.centerX, RECALL_MAP_LAYOUT.labelY);
+        drawCenteredText(
+          context,
+          geometry.noteName,
+          geometry.centerX,
+          logicalPx(STAFF_RECALL_LAYOUT.labels.noteNameYPx, surface.scale),
+        );
       });
       context
-        .setFont("Inter", 12 / RECALL_MAP_LAYOUT.scale, 700)
+        .setFont("Inter", logicalPx(STAFF_RECALL_LAYOUT.labels.fixedDoNumberFontSizePx, surface.scale), 700)
         .setFillStyle(MUTED_COLOR);
       columnGeometry.forEach((geometry, index) => {
-        drawCenteredText(context, columns[index].answerNumber, geometry.centerX, RECALL_MAP_LAYOUT.answerNumberY);
+        drawCenteredText(
+          context,
+          columns[index].answerNumber,
+          geometry.centerX,
+          logicalPx(
+            STAFF_RECALL_LAYOUT.labels.noteNameYPx + STAFF_RECALL_LAYOUT.labels.lineGapPx,
+            surface.scale,
+          ),
+        );
       });
+      context.closeGroup();
+
+      geometryRef.current = {
+        columns: columnGeometry,
+        height: surface.height,
+        placementHitRadius:
+          treble.getSpacingBetweenLines() * STAFF_RECALL_LAYOUT.placementHitRadiusInStaffSpaces,
+        width: surface.width,
+        x: 0,
+        y: 0,
+      };
     }
 
     render();
@@ -524,8 +521,8 @@ export function StaffRecallMap({
     if (bounds.width <= 0 || bounds.height <= 0) {
       return null;
     }
-    const x = ((clientX - bounds.left) / bounds.width) * geometry.width;
-    const y = ((clientY - bounds.top) / bounds.height) * geometry.height;
+    const x = geometry.x + ((clientX - bounds.left) / bounds.width) * geometry.width;
+    const y = geometry.y + ((clientY - bounds.top) / bounds.height) * geometry.height;
     const column = geometry.columns.find((candidate) => x >= candidate.left && x <= candidate.right);
     if (!column) {
       return null;
@@ -541,7 +538,7 @@ export function StaffRecallMap({
       },
       undefined,
     );
-    if (!nearest || nearest.distance > RECALL_MAP_LAYOUT.placementHitRadius) {
+    if (!nearest || nearest.distance > geometry.placementHitRadius) {
       return null;
     }
     return { columnNoteName: column.noteName, note: nearest.placement.note };

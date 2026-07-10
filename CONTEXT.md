@@ -8,8 +8,12 @@ This context defines the language for a web app that trains piano staff note rec
 A flashcard whose answer is one of the seven natural piano note names, without sharps or flats. The first practice set contains 48 natural-note cards from F1 through G6, because pitches E3 through A4 each appear as separate treble-staff and bass-staff cards.
 _Avoid_: Piano card, note card
 
+**Fixed-do number**:
+The numeric fixed-do label paired with a natural note name: 1=C, 2=D, 3=E, 4=F, 5=G, 6=A, and 7=B. The mapping does not change with key or tonic.
+_Avoid_: Scale degree, movable-do number, arbitrary answer number
+
 **Target note**:
-The exact card prompt shown to the learner, including its pitch, octave, and staff placement when a pitch has both treble-staff and bass-staff spellings. The target note determines the staff position and audio pitch, but the learner answers only its natural note name.
+The exact card prompt shown to the learner, including its pitch, octave, and staff placement. A target note is the same learning and history identity wherever that pitch and staff placement appears; it determines staff position and audio pitch, but the learner answers only its natural note name.
 _Avoid_: Correct pitch
 
 **Inter-staff ledger spelling**:
@@ -58,7 +62,7 @@ _Avoid_: Game, round
 
 **Comparable practice session**:
 A fixed-count or fixed-duration practice session that can be compared with another session because it used the same
-practice range, inter-staff ledger spelling setting, prompt display mode, and practice queue strategy.
+practice range, staff notation mode, applicable inter-staff ledger spelling setting, prompt display mode, and practice queue strategy.
 Prompt note duration and automatic target-note playback do not make sessions incomparable.
 _Avoid_: Same round, identical UI state
 
@@ -78,12 +82,16 @@ _Avoid_: Song mode, generated sheet music
 A practice queue strategy that restricts prompts to one or more selected answer note names across the enabled practice range. When exactly one answer note name is selected, completed prompts are kept only as session activity; when multiple answer note names are selected, prompts are ordinary reviews scoped to those names.
 _Avoid_: Separate deck, filtered group
 
+**Staff notation mode**:
+The app-wide choice of which staff spellings are available for enabled pitches: treble only, bass only, or grand staff. A state with neither staff selected is not a notation mode and cannot define a practice session. A single-clef mode has one target note per pitch in the selected clef, while grand-staff mode uses the ordinary spellings plus any enabled inter-staff ledger spellings.
+_Avoid_: Clef visibility, visual style
+
 **Grand-staff prompt**:
-A card prompt that always shows both treble and bass staves while asking for a single note. Outside the inter-staff ledger range, notes C4 and above appear on the treble staff and notes B3 and below appear on the bass staff. In the inter-staff ledger range E3 through A4, each pitch has a treble-staff card and a bass-staff card.
+A card prompt in grand-staff notation mode that shows both treble and bass staves while asking for a single note. Outside the inter-staff ledger range, notes C4 and above appear on the treble staff and notes B3 and below appear on the bass staff. In the inter-staff ledger range E3 through A4, each pitch has a treble-staff card and a bass-staff card.
 _Avoid_: Staff image, sheet image
 
 **Staff-page prompt**:
-A practice presentation that shows a batch of target notes together on one grand-staff page while the learner answers them one at a time in a fixed order. Each answered target note on the page produces its own review; unstarted target notes on an interrupted page do not.
+A practice presentation that shows a batch of target notes together on one page using the current staff notation mode while the learner answers them one at a time in a fixed order. Each answered target note on the page produces its own review; unstarted target notes on an interrupted page do not.
 _Avoid_: Aggregate card, multi-note card
 
 **Answer button**:

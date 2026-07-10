@@ -54,6 +54,7 @@ import {
 import { PauseOverlay } from "./PauseOverlay";
 import { StaffPagePrompt } from "./StaffPagePrompt";
 import { StaffPrompt } from "./StaffPrompt";
+import { PRACTICE_PAGE_STAFF_LAYOUT } from "./staffLayoutProfiles";
 import { useLocalStorageState } from "./useLocalStorageState";
 
 interface PracticeViewProps {
@@ -145,7 +146,8 @@ function inputMinutesToDurationSeconds(value: string): number {
 }
 
 const ALL_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS.map((group) => group.id);
-const STAFF_PAGE_SIZE = 48;
+const STAFF_PAGE_SIZE =
+  PRACTICE_PAGE_STAFF_LAYOUT.multirow.rows * PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow;
 const MELODY_BUFFER_SIZE = 16;
 const PRACTICE_SETUP_UI_PREFERENCES_KEY = "anki-note.practiceSetupUiPreferences";
 const PRACTICE_MODES: readonly PracticeMode[] = ["open-ended", "fixed-count", "fixed-duration"];
@@ -354,6 +356,7 @@ export function PracticeView({
     () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
     [settings.enabledGroupIds, settings.includeLedgerVariants],
   );
+  const useLedgerGap = enabledNotes.some((note) => note.isLedgerVariant);
   const fullPracticeCount = useMemo(
     () => getNotesForGroups(ALL_GROUP_IDS, settings.includeLedgerVariants).length,
     [settings.includeLedgerVariants],
@@ -1441,10 +1444,16 @@ export function PracticeView({
             notes={staffPageNotes}
             completedCount={staffPageCompletedCount}
             noteDuration={promptNoteDuration}
+            useLedgerGap={useLedgerGap}
             wrongIndex={feedback?.type === "wrong" ? staffPageIndex : undefined}
           />
         ) : currentNote ? (
-          <StaffPrompt note={currentNote} noteDuration={promptNoteDuration} wrong={feedback?.type === "wrong"} />
+          <StaffPrompt
+            note={currentNote}
+            noteDuration={promptNoteDuration}
+            useLedgerGap={useLedgerGap}
+            wrong={feedback?.type === "wrong"}
+          />
         ) : null}
       </div>
 
