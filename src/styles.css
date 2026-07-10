@@ -1453,6 +1453,21 @@ main.has-backup-reminder .setup-grid::after {
   border: 1px solid rgba(66, 50, 34, 0.08);
 }
 
+.heatmap-tooltip {
+  background: rgba(255, 253, 250, 0.98);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(46, 37, 28, 0.14);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 9px;
+  pointer-events: none;
+  position: fixed;
+  white-space: nowrap;
+  z-index: 20;
+}
+
 .chart-panel,
 .note-heat-panel {
   margin-top: 0;
@@ -1696,19 +1711,7 @@ main.has-backup-reminder .setup-grid::after {
   stroke: none;
 }
 
-.stats-range-confusion-hint {
-  bottom: 6px;
-  color: var(--muted);
-  font-size: 10px;
-  left: 0;
-  pointer-events: none;
-  position: absolute;
-  right: 0;
-  text-align: center;
-  opacity: 0.62;
-}
-
-.stats-range-confusion-tooltip {
+.stats-range-note-tooltip {
   background: rgba(255, 253, 250, 0.98);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1718,27 +1721,32 @@ main.has-backup-reminder .setup-grid::after {
   padding: 9px 10px;
   pointer-events: none;
   position: absolute;
-  width: 156px;
+  width: 180px;
   z-index: 3;
 }
 
-.stats-range-confusion-tooltip-title {
+.stats-range-note-tooltip-title {
   align-items: baseline;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  text-align: center;
 }
 
-.stats-range-confusion-tooltip-title strong {
-  font-size: 13px;
+.stats-range-note-tooltip-title strong {
+  font-size: 14px;
 }
 
-.stats-range-confusion-tooltip-title span,
-.stats-range-confusion-tooltip p {
+.stats-range-note-tooltip-title span,
+.stats-range-note-tooltip p {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
-.stats-range-confusion-tooltip ol {
+.stats-range-note-tooltip-title span {
+  font-weight: 700;
+}
+
+.stats-range-note-tooltip ol {
   display: grid;
   gap: 3px;
   list-style: none;
@@ -1746,22 +1754,20 @@ main.has-backup-reminder .setup-grid::after {
   padding: 0;
 }
 
-.stats-range-confusion-tooltip li {
+.stats-range-note-tooltip li {
   align-items: baseline;
-  display: flex;
-  font-size: 12px;
-  justify-content: space-between;
+  display: grid;
+  font-size: 13px;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  text-align: center;
 }
 
-.stats-range-confusion-tooltip li span {
+.stats-range-note-tooltip li span {
   color: var(--muted);
+  font-weight: 700;
 }
 
-.stats-range-confusion-tooltip li b {
-  color: var(--danger);
-}
-
-.stats-range-confusion-tooltip p {
+.stats-range-note-tooltip p {
   margin-top: 8px;
 }
 

@@ -142,26 +142,29 @@ function filterByRange(reviews: ReviewRecord[], range: RangeKey): ReviewRecord[]
 
 function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const daily = buildDailyStats(reviews);
-  const byDate = new Map(daily.map((day) => [day.date, day]));
-  const today = new Date();
-  const todayStart = new Date(today);
-  todayStart.setHours(0, 0, 0, 0);
-  const firstWeekStart = startOfWeek(today);
-  firstWeekStart.setDate(firstWeekStart.getDate() - (HEATMAP_WEEK_COUNT - 1) * 7);
-  const weekStarts = Array.from({ length: HEATMAP_WEEK_COUNT }, (_, index) => {
-    const date = new Date(firstWeekStart);
-    date.setDate(firstWeekStart.getDate() + index * 7);
-    return date;
-  });
-  const days = weekStarts.flatMap((weekStart) => {
-    return Array.from({ length: 7 }, (_, dayOffset) => {
-      const date = new Date(weekStart);
-      date.setDate(weekStart.getDate() + dayOffset);
-      const key = formatDateKey(date);
-      return { date, key, stat: byDate.get(key) };
-    }).filter((day) => day.date.getTime() <= todayStart.getTime());
-  });
+  const [tooltip, setTooltip] = useState<{ label: string; left: number; top: number } | undefined>();
+  const todayKey = formatDateKey(new Date());
+  const { days, weekStarts } = useMemo(() => {
+    const daily = buildDailyStats(reviews);
+    const byDate = new Map(daily.map((day) => [day.date, day]));
+    const todayStart = new Date(`${todayKey}T00:00:00`);
+    const firstWeekStart = startOfWeek(todayStart);
+    firstWeekStart.setDate(firstWeekStart.getDate() - (HEATMAP_WEEK_COUNT - 1) * 7);
+    const nextWeekStarts = Array.from({ length: HEATMAP_WEEK_COUNT }, (_, index) => {
+      const date = new Date(firstWeekStart);
+      date.setDate(firstWeekStart.getDate() + index * 7);
+      return date;
+    });
+    const nextDays = nextWeekStarts.flatMap((weekStart) => {
+      return Array.from({ length: 7 }, (_, dayOffset) => {
+        const date = new Date(weekStart);
+        date.setDate(weekStart.getDate() + dayOffset);
+        const key = formatDateKey(date);
+        return { date, key, stat: byDate.get(key) };
+      }).filter((day) => day.date.getTime() <= todayStart.getTime());
+    });
+    return { days: nextDays, weekStarts: nextWeekStarts };
+  }, [reviews, todayKey]);
 
   useEffect(() => {
     const scroll = scrollRef.current;
@@ -185,7 +188,7 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
           <span key={`${index}-${label}`}>{label ? <span className="heatmap-weekday-label">{label}</span> : null}</span>
         ))}
       </div>
-      <div className="heatmap-scroll" ref={scrollRef}>
+      <div className="heatmap-scroll" ref={scrollRef} onScroll={() => setTooltip(undefined)}>
         <div className="heatmap-track">
           <div className="heatmap-months" aria-hidden="true">
             {weekStarts.map((weekStart, index) => (
@@ -202,14 +205,27 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
                   aria-label={`${day.key}: ${day.stat?.completedReviews ?? 0} 次`}
                   className="heat-cell"
                   key={day.key}
+                  onPointerEnter={(event) => {
+                    const tooltipWidth = 150;
+                    setTooltip({
+                      label: `${day.key} · ${day.stat?.completedReviews ?? 0} 次`,
+                      left: Math.max(8, Math.min(event.clientX + 10, window.innerWidth - tooltipWidth - 8)),
+                      top: Math.max(8, event.clientY - 36),
+                    });
+                  }}
+                  onPointerLeave={() => setTooltip(undefined)}
                   style={{ backgroundColor: STATS_COLORS.heatmap[heatLevel] }}
-                  title={`${day.key}: ${day.stat?.completedReviews ?? 0}`}
                 />
               );
             })}
           </div>
         </div>
       </div>
+      {tooltip ? (
+        <div className="heatmap-tooltip" role="tooltip" style={{ left: tooltip.left, top: tooltip.top }}>
+          {tooltip.label}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -660,7 +676,16 @@ export function StatsView({
     [rangeStaffNotes],
   );
   const timeStaffNotes = useMemo<StaffHeatNote[]>(
-    () => rangeStaffNotes.map(({ note, stat }) => ({ note, value: stat?.medianMs })),
+    () =>
+      rangeStaffNotes.map(({ note, stat }) => ({
+        durations: {
+          medianMs: stat?.medianMs,
+          p10Ms: stat?.p10Ms,
+          p90Ms: stat?.p90Ms,
+        },
+        note,
+        value: stat?.medianMs,
+      })),
     [rangeStaffNotes],
   );
   const timeTertileThresholds = useMemo(

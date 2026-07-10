@@ -16,6 +16,7 @@ export interface NoteStat {
   groupId: PracticeGroupId;
   reviewCount: number;
   errorCount: number;
+  p10Ms?: number;
   medianMs?: number;
   p90Ms?: number;
   errorRate: number;
@@ -208,6 +209,7 @@ export function buildNoteStats(
     const times = noteReviews.map((review) => review.activeMs);
     const reviewsWithErrors = noteReviews.filter((review) => review.wrongAnswers.length > 0).length;
     const errorCount = noteReviews.reduce((count, review) => count + review.wrongAnswers.length, 0);
+    const p10Ms = percentile(times, 0.1);
     const medianMs = percentile(times, 0.5);
     const p90Ms = percentile(times, 0.9);
     const errorRate = noteReviews.length === 0 ? 0 : reviewsWithErrors / noteReviews.length;
@@ -218,6 +220,7 @@ export function buildNoteStats(
       groupId: note.groupId,
       reviewCount: noteReviews.length,
       errorCount,
+      p10Ms,
       medianMs,
       p90Ms,
       errorRate,

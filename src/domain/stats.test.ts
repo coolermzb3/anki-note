@@ -182,6 +182,7 @@ describe("stats", () => {
     const reviews = [
       makeReview({
         targetNoteId: "F3",
+        activeMs: 800,
         wrongAnswers: (["A", "D", "B", "C"] as const).map((noteName, index) => ({
           noteName,
           atActiveMs: 500 + index * 100,
@@ -189,6 +190,7 @@ describe("stats", () => {
       }),
       makeReview({
         targetNoteId: "F3",
+        activeMs: 1000,
         wrongAnswers: (["A", "D", "B"] as const).map((noteName, index) => ({
           noteName,
           atActiveMs: 500 + index * 100,
@@ -196,12 +198,17 @@ describe("stats", () => {
       }),
       makeReview({
         targetNoteId: "F3",
+        activeMs: 1200,
         wrongAnswers: (["A", "D"] as const).map((noteName, index) => ({
           noteName,
           atActiveMs: 500 + index * 100,
         })),
       }),
-      makeReview({ targetNoteId: "F3", wrongAnswers: [{ noteName: "A", atActiveMs: 500 }] }),
+      makeReview({
+        targetNoteId: "F3",
+        activeMs: 1400,
+        wrongAnswers: [{ noteName: "A", atActiveMs: 500 }],
+      }),
     ];
 
     const f3 = buildNoteStats(reviews).find((stat) => stat.targetNoteId === "F3")!;
@@ -213,6 +220,9 @@ describe("stats", () => {
       { noteName: "D", count: 3 },
       { noteName: "B", count: 2 },
     ]);
+    expect(f3.p10Ms).toBe(860);
+    expect(f3.medianMs).toBe(1100);
+    expect(f3.p90Ms).toBe(1340);
     expect(Math.round(f3.errorRate * 100)).toBe(100);
   });
 

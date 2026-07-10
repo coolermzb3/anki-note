@@ -20,8 +20,15 @@ import { STATS_COLORS, type StatsRangeTone } from "./statsColors";
 
 export interface StaffHeatNote {
   confusions?: NoteConfusionStat[];
+  durations?: StaffHeatDurations;
   note: TargetNote;
   value?: number;
+}
+
+export interface StaffHeatDurations {
+  medianMs?: number;
+  p10Ms?: number;
+  p90Ms?: number;
 }
 
 interface StatsRangeStaffProps {
@@ -52,10 +59,19 @@ interface RangeMapMetrics {
   x: number;
 }
 
-interface ConfusionTooltipState {
-  confusions: NoteConfusionStat[];
+interface NoteTooltipRow {
+  label: string;
+  labelColor?: string;
+  value: string;
+  valueColor?: string;
+}
+
+interface NoteTooltipState {
+  emptyText: string;
   label: string;
   left: number;
+  rows: NoteTooltipRow[];
+  subtitle: string;
   top: number;
 }
 
@@ -78,9 +94,9 @@ const NOTE_NAME_ORDER: Record<NoteName, number> = {
   A: 5,
   B: 6,
 };
-const CONFUSION_TOOLTIP_WIDTH = 156;
-const CONFUSION_TOOLTIP_HEIGHT = 116;
-const CONFUSION_TOOLTIP_OFFSET = 10;
+const NOTE_TOOLTIP_WIDTH = 180;
+const NOTE_TOOLTIP_HEIGHT = 116;
+const NOTE_TOOLTIP_OFFSET = 10;
 function pitchOrder(note: Pick<TargetNote, "noteName" | "octave">): number {
   return note.octave * 7 + NOTE_NAME_ORDER[note.noteName];
 }
@@ -143,7 +159,11 @@ function noteHeadCenterX(chord: StaveNote, index: number): number {
   return noteHead ? noteHead.getAbsoluteX() + noteHead.getWidth() / 2 : staveNoteCenterX(chord);
 }
 
-function addConfusionHotspots(
+function formatTooltipSeconds(ms: number | undefined): string {
+  return ms === undefined ? "-" : `${(ms / 1000).toFixed(1)}s`;
+}
+
+function addNoteTooltipHotspots(
   svg: SVGSVGElement,
   chord: StaveNote,
   notes: ColoredStaffHeatNote[],
@@ -152,7 +172,7 @@ function addConfusionHotspots(
 ): void {
   const ys = chord.getYs();
   notes.forEach((note, index) => {
-    if (note.confusions === undefined || ys[index] === undefined) {
+    if ((note.confusions === undefined && note.durations === undefined) || ys[index] === undefined) {
       return;
     }
     const hotspot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -160,7 +180,7 @@ function addConfusionHotspots(
     hotspot.setAttribute("cx", String(noteHeadCenterX(chord, index)));
     hotspot.setAttribute("cy", String(ys[index]));
     hotspot.setAttribute("r", String(Math.max(7, chord.noteHeads[index]?.getWidth() ?? chord.getGlyphWidth())));
-    hotspot.setAttribute("aria-label", `${formatTargetNoteLabel(note.note)} 常见混淆`);
+    hotspot.setAttribute("aria-label", `查看 ${formatTargetNoteLabel(note.note)} 统计`);
     hotspot.addEventListener("pointerenter", (event) => onHover(note, event));
     hotspot.addEventListener("pointerleave", onLeave);
     svg.appendChild(hotspot);
@@ -192,10 +212,9 @@ function getRangeMapMetrics(surface: StaffRenderSurface, columnCount: number, us
 export function StatsRangeStaff({ label, notes, tone }: StatsRangeStaffProps): JSX.Element {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const rendererTargetRef = useRef<HTMLDivElement | null>(null);
-  const [confusionTooltip, setConfusionTooltip] = useState<ConfusionTooltipState | undefined>();
+  const [noteTooltip, setNoteTooltip] = useState<NoteTooltipState | undefined>();
   const columns = useMemo(() => getRangeColumns(notes, tone), [notes, tone]);
   const useLedgerGap = notes.some((item) => item.note.isLedgerVariant);
-  const showsConfusionDetails = notes.some((note) => note.confusions !== undefined);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -269,29 +288,59 @@ export function StatsRangeStaff({ label, notes, tone }: StatsRangeStaffProps): J
       if (!svg) {
         return;
       }
-      const showConfusionTooltip = (note: ColoredStaffHeatNote, event: PointerEvent): void => {
+      const showNoteTooltip = (note: ColoredStaffHeatNote, event: PointerEvent): void => {
         const bounds = frame.getBoundingClientRect();
         const cursorLeft = event.clientX - bounds.left;
         const cursorTop = event.clientY - bounds.top;
         const left = Math.max(
           6,
-          Math.min(cursorLeft + CONFUSION_TOOLTIP_OFFSET, bounds.width - CONFUSION_TOOLTIP_WIDTH - 6),
+          Math.min(cursorLeft + NOTE_TOOLTIP_OFFSET, bounds.width - NOTE_TOOLTIP_WIDTH - 6),
         );
-        const preferredTop = cursorTop + CONFUSION_TOOLTIP_OFFSET;
-        const top = preferredTop + CONFUSION_TOOLTIP_HEIGHT <= bounds.height
+        const preferredTop = cursorTop + NOTE_TOOLTIP_OFFSET;
+        const top = preferredTop + NOTE_TOOLTIP_HEIGHT <= bounds.height
           ? preferredTop
-          : Math.max(6, cursorTop - CONFUSION_TOOLTIP_HEIGHT - CONFUSION_TOOLTIP_OFFSET);
-        setConfusionTooltip({
-          confusions: note.confusions ?? [],
+          : Math.max(6, cursorTop - NOTE_TOOLTIP_HEIGHT - NOTE_TOOLTIP_OFFSET);
+        const durationRows = note.durations
+          ? [
+              {
+                label: "P10",
+                labelColor: STATS_COLORS.recognitionChart.p10,
+                value: formatTooltipSeconds(note.durations.p10Ms),
+                valueColor: STATS_COLORS.recognitionChart.p10,
+              },
+              {
+                label: "中位",
+                labelColor: STATS_COLORS.recognitionChart.median,
+                value: formatTooltipSeconds(note.durations.medianMs),
+                valueColor: STATS_COLORS.recognitionChart.median,
+              },
+              {
+                label: "P90",
+                labelColor: STATS_COLORS.recognitionChart.p90,
+                value: formatTooltipSeconds(note.durations.p90Ms),
+                valueColor: STATS_COLORS.recognitionChart.p90,
+              },
+            ]
+          : [];
+        const confusionRows = (note.confusions ?? []).map((confusion) => ({
+          label: confusion.noteName,
+          labelColor: STATS_COLORS.recognitionChart.p90,
+          value: `${confusion.count}次`,
+        }));
+        const hasDurations = note.durations && Object.values(note.durations).some((value) => value !== undefined);
+        setNoteTooltip({
+          emptyText: note.durations ? "暂无时长记录" : "暂无混淆记录",
           label: formatTargetNoteLabel(note.note),
           left,
+          rows: hasDurations ? durationRows : confusionRows,
+          subtitle: note.durations ? "识别时长" : "常见混淆",
           top,
         });
       };
-      const hideConfusionTooltip = (): void => setConfusionTooltip(undefined);
+      const hideNoteTooltip = (): void => setNoteTooltip(undefined);
       columns.forEach((column, index) => {
-        addConfusionHotspots(svg, trebleTickables[index], column.trebleNotes, showConfusionTooltip, hideConfusionTooltip);
-        addConfusionHotspots(svg, bassTickables[index], column.bassNotes, showConfusionTooltip, hideConfusionTooltip);
+        addNoteTooltipHotspots(svg, trebleTickables[index], column.trebleNotes, showNoteTooltip, hideNoteTooltip);
+        addNoteTooltipHotspots(svg, bassTickables[index], column.bassNotes, showNoteTooltip, hideNoteTooltip);
       });
     }
 
@@ -306,33 +355,30 @@ export function StatsRangeStaff({ label, notes, tone }: StatsRangeStaffProps): J
       className="stats-range-staff"
       ref={frameRef}
       aria-label={label}
-      onPointerLeave={() => setConfusionTooltip(undefined)}
+      onPointerLeave={() => setNoteTooltip(undefined)}
     >
       <div className="stats-range-staff-renderer" ref={rendererTargetRef} />
-      {showsConfusionDetails ? (
-        <p className="stats-range-confusion-hint">移动到音符上以查看易混音</p>
-      ) : null}
-      {confusionTooltip ? (
+      {noteTooltip ? (
         <aside
-          className="stats-range-confusion-tooltip"
+          className="stats-range-note-tooltip"
           role="tooltip"
-          style={{ left: confusionTooltip.left, top: confusionTooltip.top }}
+          style={{ left: noteTooltip.left, top: noteTooltip.top }}
         >
-          <div className="stats-range-confusion-tooltip-title">
-            <strong>{confusionTooltip.label}</strong>
-            <span>常见混淆</span>
+          <div className="stats-range-note-tooltip-title">
+            <strong>{noteTooltip.label}</strong>
+            <span>{noteTooltip.subtitle}</span>
           </div>
-          {confusionTooltip.confusions.length > 0 ? (
+          {noteTooltip.rows.length > 0 ? (
             <ol>
-              {confusionTooltip.confusions.map((confusion) => (
-                <li key={confusion.noteName}>
-                  <b>{confusion.noteName}</b>
-                  <span>{confusion.count}次</span>
+              {noteTooltip.rows.map((row) => (
+                <li key={row.label}>
+                  <b style={{ color: row.labelColor }}>{row.label}</b>
+                  <span style={{ color: row.valueColor }}>{row.value}</span>
                 </li>
               ))}
             </ol>
           ) : (
-            <p>暂无混淆记录</p>
+            <p>{noteTooltip.emptyText}</p>
           )}
         </aside>
       ) : null}
