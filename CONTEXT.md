@@ -107,7 +107,7 @@ A practice presentation that shows a batch of target notes together on one page 
 _Avoid_: Aggregate card, multi-note card
 
 **Prompt note duration**:
-The visual note value used to draw each target note; it does not change audio playback, recognition timing, scoring, or queue behavior. Staff-page prompts beam consecutive eighth or sixteenth notes within each same-staff run, without crossing staff changes or barlines; isolated notes retain individual flags.
+The visual note value used to draw each target note; it does not change audio playback, recognition timing, scoring, or queue behavior. Staff-page prompts prioritize aligned pairs of eighth notes and aligned groups of four sixteenth notes, then beam same-staff subsequences within each group; isolated notes retain individual flags.
 _Avoid_: Prompt display mode, playback duration, rhythm mode
 
 **Answer button**:

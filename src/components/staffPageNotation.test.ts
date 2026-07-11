@@ -78,7 +78,7 @@ describe("staff-page notation", () => {
     ]);
   });
 
-  it("restarts beaming inside each same-staff run", () => {
+  it("prioritizes aligned four-note groups before splitting same-staff runs", () => {
     expect(
       getStaffPageBeamRuns(
         [note("treble"), note("treble"), note("treble"), note("bass"), note("bass"), note("bass"), note("bass")],
@@ -86,7 +86,7 @@ describe("staff-page notation", () => {
       ),
     ).toEqual([
       { size: 3, staff: "treble", startIndex: 0 },
-      { size: 4, staff: "bass", startIndex: 3 },
+      { size: 3, staff: "bass", startIndex: 4 },
     ]);
   });
 

@@ -9,7 +9,7 @@ export const PROMPT_NOTE_DURATIONS: readonly PromptNoteDuration[] = [
 
 interface PromptNoteDurationConfig {
   barlineInterval: number;
-  beamable?: true;
+  beamGroupSize?: number;
   quarterNoteBeats: number;
   vexDuration: "w" | "q" | "8" | "16";
 }
@@ -17,8 +17,8 @@ interface PromptNoteDurationConfig {
 const PROMPT_NOTE_DURATION_CONFIG: Record<PromptNoteDuration, PromptNoteDurationConfig> = {
   whole: { barlineInterval: 4, quarterNoteBeats: 4, vexDuration: "w" },
   quarter: { barlineInterval: 4, quarterNoteBeats: 1, vexDuration: "q" },
-  eighth: { barlineInterval: 8, beamable: true, quarterNoteBeats: 0.5, vexDuration: "8" },
-  sixteenth: { barlineInterval: 8, beamable: true, quarterNoteBeats: 0.25, vexDuration: "16" },
+  eighth: { barlineInterval: 8, beamGroupSize: 2, quarterNoteBeats: 0.5, vexDuration: "8" },
+  sixteenth: { barlineInterval: 8, beamGroupSize: 4, quarterNoteBeats: 0.25, vexDuration: "16" },
 };
 
 export interface StaffPageBeamRun {
@@ -48,17 +48,18 @@ export function getStaffPageBeamRuns(
   noteDuration: PromptNoteDuration,
 ): StaffPageBeamRun[] {
   const config = PROMPT_NOTE_DURATION_CONFIG[noteDuration];
-  if (!config.beamable) {
+  const groupSize = config.beamGroupSize;
+  if (groupSize === undefined) {
     return [];
   }
 
   const runs: StaffPageBeamRun[] = [];
-  for (let barStart = 0; barStart < notes.length; barStart += config.barlineInterval) {
-    const barEnd = Math.min(notes.length, barStart + config.barlineInterval);
+  for (let groupStart = 0; groupStart < notes.length; groupStart += groupSize) {
+    const groupEnd = Math.min(notes.length, groupStart + groupSize);
     let runStaff: Staff | undefined;
-    let runStart = barStart;
-    for (let index = barStart; index <= barEnd; index += 1) {
-      const staff = index < barEnd ? notes[index]?.staff : undefined;
+    let runStart = groupStart;
+    for (let index = groupStart; index <= groupEnd; index += 1) {
+      const staff = index < groupEnd ? notes[index]?.staff : undefined;
       if (staff === runStaff) {
         continue;
       }
