@@ -265,7 +265,7 @@ export function SettingsView({
           </label>
         </div>
         <p className="keyboard-settings-description">
-          预览音区 C4–B4，可按住多键试听和弦；练习页仅白键可作答，空间不足时会先缩空白，再缩小琴键。
+          预览音区 C4–C5，可按住多键试听和弦；练习页仅白键可作答，空间不足时会先缩空白，再缩小琴键。
         </p>
         <PlayableKeyboardPreview scale={answerKeyboardScaleDraft} />
       </div>

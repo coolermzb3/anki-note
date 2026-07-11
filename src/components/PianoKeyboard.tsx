@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -34,28 +35,51 @@ export function isNaturalPianoKey(keyName: PianoKeyName): keyName is NoteName {
 }
 
 const WHITE_KEY_WIDTH_PX = 72;
+export const UPPER_C_PIANO_KEY_ID = "upper-C" as const;
+export type PianoKeyId = PianoKeyName | typeof UPPER_C_PIANO_KEY_ID;
 
 interface PianoKeyDefinition {
+  id: PianoKeyId;
   keyName: PianoKeyName;
   label?: string;
   left: number;
   accidental: boolean;
+  octaveOffset: number;
 }
 
 const PIANO_KEY_DEFINITIONS: readonly PianoKeyDefinition[] = [
-  { keyName: "C", label: "1", left: 0, accidental: false },
-  { keyName: "C#", left: 1, accidental: true },
-  { keyName: "D", label: "2", left: 1, accidental: false },
-  { keyName: "D#", left: 2, accidental: true },
-  { keyName: "E", label: "3", left: 2, accidental: false },
-  { keyName: "F", label: "4", left: 3, accidental: false },
-  { keyName: "F#", left: 4, accidental: true },
-  { keyName: "G", label: "5", left: 4, accidental: false },
-  { keyName: "G#", left: 5, accidental: true },
-  { keyName: "A", label: "6", left: 5, accidental: false },
-  { keyName: "A#", left: 6, accidental: true },
-  { keyName: "B", label: "7", left: 6, accidental: false },
+  { id: "C", keyName: "C", label: "1", left: 0, accidental: false, octaveOffset: 0 },
+  { id: "C#", keyName: "C#", left: 1, accidental: true, octaveOffset: 0 },
+  { id: "D", keyName: "D", label: "2", left: 1, accidental: false, octaveOffset: 0 },
+  { id: "D#", keyName: "D#", left: 2, accidental: true, octaveOffset: 0 },
+  { id: "E", keyName: "E", label: "3", left: 2, accidental: false, octaveOffset: 0 },
+  { id: "F", keyName: "F", label: "4", left: 3, accidental: false, octaveOffset: 0 },
+  { id: "F#", keyName: "F#", left: 4, accidental: true, octaveOffset: 0 },
+  { id: "G", keyName: "G", label: "5", left: 4, accidental: false, octaveOffset: 0 },
+  { id: "G#", keyName: "G#", left: 5, accidental: true, octaveOffset: 0 },
+  { id: "A", keyName: "A", label: "6", left: 5, accidental: false, octaveOffset: 0 },
+  { id: "A#", keyName: "A#", left: 6, accidental: true, octaveOffset: 0 },
+  { id: "B", keyName: "B", label: "7", left: 6, accidental: false, octaveOffset: 0 },
 ];
+
+const UPPER_C_KEY_DEFINITION: PianoKeyDefinition = {
+  id: UPPER_C_PIANO_KEY_ID,
+  keyName: "C",
+  label: "8",
+  left: 7,
+  accidental: false,
+  octaveOffset: 1,
+};
+
+export interface PianoKeyboardKey {
+  id: PianoKeyId;
+  keyName: PianoKeyName;
+  octaveOffset: number;
+}
+
+export function getPianoKeyDefinitions(includeUpperC: boolean): readonly PianoKeyDefinition[] {
+  return includeUpperC ? [...PIANO_KEY_DEFINITIONS, UPPER_C_KEY_DEFINITION] : PIANO_KEY_DEFINITIONS;
+}
 
 export type PianoKeyInputId = string;
 
@@ -69,10 +93,11 @@ interface PianoKeyboardProps {
   className?: string;
   enabledKeys: ReadonlySet<PianoKeyName>;
   feedback?: PianoKeyFeedback;
+  includeUpperC?: boolean;
   keyOctave?: number;
-  onKeyPress: (keyName: PianoKeyName, inputId: PianoKeyInputId) => void;
-  onKeyRelease?: (keyName: PianoKeyName, inputId: PianoKeyInputId) => void;
-  pressedKeys?: ReadonlySet<PianoKeyName>;
+  onKeyPress: (key: PianoKeyboardKey, inputId: PianoKeyInputId) => void;
+  onKeyRelease?: (key: PianoKeyboardKey, inputId: PianoKeyInputId) => void;
+  pressedKeys?: ReadonlySet<PianoKeyId>;
   scale: number;
 }
 
@@ -84,6 +109,7 @@ interface DragState {
 
 type PianoKeyboardStyle = CSSProperties & {
   "--piano-preferred-white-key-width": string;
+  "--piano-white-key-count": number;
 };
 
 function displayKeyName(keyName: PianoKeyName): string {
@@ -94,11 +120,20 @@ function clampPanX(value: number, viewportWidth: number, keybedWidth: number): n
   return Math.min(0, Math.max(viewportWidth - keybedWidth, value));
 }
 
+export function getCenteredPianoPanX(viewportWidth: number, keybedWidth: number, includeUpperC: boolean): number {
+  if (!includeUpperC) {
+    return (viewportWidth - keybedWidth) / 2;
+  }
+  const sevenKeyWidth = keybedWidth * (7 / 8);
+  return Math.min((viewportWidth - sevenKeyWidth) / 2, viewportWidth - keybedWidth);
+}
+
 export function PianoKeyboard({
   ariaLabel,
   className,
   enabledKeys,
   feedback,
+  includeUpperC = false,
   keyOctave,
   onKeyPress,
   onKeyRelease,
@@ -107,13 +142,13 @@ export function PianoKeyboard({
 }: PianoKeyboardProps): JSX.Element {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const keybedRef = useRef<HTMLDivElement | null>(null);
-  const activeInputsRef = useRef(new Map<PianoKeyInputId, PianoKeyName>());
+  const activeInputsRef = useRef(new Map<PianoKeyInputId, PianoKeyboardKey>());
   const onKeyPressRef = useRef(onKeyPress);
   const onKeyReleaseRef = useRef(onKeyRelease);
   const dragRef = useRef<DragState | null>(null);
   const panXRef = useRef(0);
   const previousDimensionsRef = useRef({ keybedWidth: 0, overflowing: false, viewportWidth: 0 });
-  const [activeInputKeys, setActiveInputKeys] = useState<ReadonlySet<PianoKeyName>>(() => new Set());
+  const [activeInputKeys, setActiveInputKeys] = useState<ReadonlySet<PianoKeyId>>(() => new Set());
   const [dimensions, setDimensions] = useState({ keybedWidth: 0, viewportWidth: 0 });
   const [dragging, setDragging] = useState(false);
   const [panX, setPanX] = useState(0);
@@ -124,17 +159,17 @@ export function PianoKeyboard({
   panXRef.current = panX;
 
   const syncActiveInputKeys = useCallback((): void => {
-    setActiveInputKeys(new Set(activeInputsRef.current.values()));
+    setActiveInputKeys(new Set(Array.from(activeInputsRef.current.values(), (key) => key.id)));
   }, []);
 
   const releaseInput = useCallback(
     (inputId: PianoKeyInputId): void => {
-      const keyName = activeInputsRef.current.get(inputId);
-      if (!keyName) {
+      const key = activeInputsRef.current.get(inputId);
+      if (!key) {
         return;
       }
       activeInputsRef.current.delete(inputId);
-      onKeyReleaseRef.current?.(keyName, inputId);
+      onKeyReleaseRef.current?.(key, inputId);
       syncActiveInputKeys();
     },
     [syncActiveInputKeys],
@@ -142,8 +177,8 @@ export function PianoKeyboard({
 
   const releaseAllInputs = useCallback(
     (updateState = true): void => {
-      for (const [inputId, keyName] of activeInputsRef.current) {
-        onKeyReleaseRef.current?.(keyName, inputId);
+      for (const [inputId, key] of activeInputsRef.current) {
+        onKeyReleaseRef.current?.(key, inputId);
       }
       activeInputsRef.current.clear();
       if (updateState) {
@@ -154,18 +189,18 @@ export function PianoKeyboard({
   );
 
   const pressInput = useCallback(
-    (inputId: PianoKeyInputId, keyName: PianoKeyName): void => {
+    (inputId: PianoKeyInputId, key: PianoKeyboardKey): void => {
       if (activeInputsRef.current.has(inputId)) {
         return;
       }
-      activeInputsRef.current.set(inputId, keyName);
-      onKeyPressRef.current(keyName, inputId);
+      activeInputsRef.current.set(inputId, key);
+      onKeyPressRef.current(key, inputId);
       syncActiveInputKeys();
     },
     [syncActiveInputKeys],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const viewport = viewportRef.current;
     const keybed = keybedRef.current;
     if (!viewport || !keybed) {
@@ -182,7 +217,7 @@ export function PianoKeyboard({
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previous = previousDimensionsRef.current;
     if (!overflowing) {
       setPanX(0);
@@ -214,8 +249,8 @@ export function PianoKeyboard({
   }, [releaseAllInputs]);
 
   useEffect(() => {
-    for (const [inputId, keyName] of activeInputsRef.current) {
-      if (!enabledKeys.has(keyName)) {
+    for (const [inputId, key] of activeInputsRef.current) {
+      if (!enabledKeys.has(key.keyName)) {
         releaseInput(inputId);
       }
     }
@@ -225,10 +260,16 @@ export function PianoKeyboard({
     return () => releaseAllInputs(false);
   }, [releaseAllInputs]);
 
-  const renderedPanX = overflowing ? panX : (dimensions.viewportWidth - dimensions.keybedWidth) / 2;
+  const renderedPanX = overflowing
+    ? panX
+    : getCenteredPianoPanX(dimensions.viewportWidth, dimensions.keybedWidth, includeUpperC);
+  const keyDefinitions = getPianoKeyDefinitions(includeUpperC);
   const keyboardStyle = useMemo<PianoKeyboardStyle>(
-    () => ({ "--piano-preferred-white-key-width": `${WHITE_KEY_WIDTH_PX * scale}px` }),
-    [scale],
+    () => ({
+      "--piano-preferred-white-key-width": `${WHITE_KEY_WIDTH_PX * scale}px`,
+      "--piano-white-key-count": includeUpperC ? 8 : 7,
+    }),
+    [includeUpperC, scale],
   );
 
   function beginDrag(event: ReactPointerEvent<HTMLDivElement>): void {
@@ -276,14 +317,14 @@ export function PianoKeyboard({
     setPanX(clampPanX(nextPanX, dimensions.viewportWidth, dimensions.keybedWidth));
   }
 
-  function handleKeyPointerDown(event: ReactPointerEvent<HTMLButtonElement>, keyName: PianoKeyName): void {
-    if (event.button !== 0 || !enabledKeys.has(keyName)) {
+  function handleKeyPointerDown(event: ReactPointerEvent<HTMLButtonElement>, key: PianoKeyboardKey): void {
+    if (event.button !== 0 || !enabledKeys.has(key.keyName)) {
       return;
     }
     const inputId = `pointer:${event.pointerId}`;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    pressInput(inputId, keyName);
+    pressInput(inputId, key);
   }
 
   function handleKeyPointerEnd(event: ReactPointerEvent<HTMLButtonElement>): void {
@@ -294,20 +335,20 @@ export function PianoKeyboard({
     }
   }
 
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, keyName: PianoKeyName): void {
-    if ((event.key !== " " && event.key !== "Enter") || event.repeat || !enabledKeys.has(keyName)) {
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, key: PianoKeyboardKey): void {
+    if ((event.key !== " " && event.key !== "Enter") || event.repeat || !enabledKeys.has(key.keyName)) {
       return;
     }
     event.preventDefault();
-    pressInput(`focus:${keyName}`, keyName);
+    pressInput(`focus:${key.id}`, key);
   }
 
-  function handleKeyUp(event: ReactKeyboardEvent<HTMLButtonElement>, keyName: PianoKeyName): void {
+  function handleKeyUp(event: ReactKeyboardEvent<HTMLButtonElement>, key: PianoKeyboardKey): void {
     if (event.key !== " " && event.key !== "Enter") {
       return;
     }
     event.preventDefault();
-    releaseInput(`focus:${keyName}`);
+    releaseInput(`focus:${key.id}`);
   }
 
   return (
@@ -343,14 +384,20 @@ export function PianoKeyboard({
           ref={keybedRef}
           style={{ transform: `translateX(${renderedPanX}px)` }}
         >
-          {PIANO_KEY_DEFINITIONS.map((definition) => {
+          {keyDefinitions.map((definition) => {
+            const key: PianoKeyboardKey = {
+              id: definition.id,
+              keyName: definition.keyName,
+              octaveOffset: definition.octaveOffset,
+            };
             const enabled = enabledKeys.has(definition.keyName);
-            const pressed = activeInputKeys.has(definition.keyName) || pressedKeys?.has(definition.keyName);
+            const pressed = activeInputKeys.has(definition.id) || pressedKeys?.has(definition.id);
             const feedbackType = feedback?.keyName === definition.keyName ? feedback.type : undefined;
             const keyStyle = {
               left: `calc(var(--piano-white-key-width) * ${definition.left})`,
             };
-            const pitchLabel = `${displayKeyName(definition.keyName)}${keyOctave ?? ""}`;
+            const octave = keyOctave === undefined ? "" : keyOctave + definition.octaveOffset;
+            const pitchLabel = `${displayKeyName(definition.keyName)}${octave}`;
             return (
               <button
                 aria-label={definition.label ? `${definition.label} = ${pitchLabel}` : pitchLabel}
@@ -363,13 +410,13 @@ export function PianoKeyboard({
                   .filter(Boolean)
                   .join(" ")}
                 disabled={!enabled}
-                key={definition.keyName}
-                onBlur={() => releaseInput(`focus:${definition.keyName}`)}
+                key={definition.id}
+                onBlur={() => releaseInput(`focus:${definition.id}`)}
                 onFocus={handleKeyFocus}
-                onKeyDown={(event) => handleKeyDown(event, definition.keyName)}
-                onKeyUp={(event) => handleKeyUp(event, definition.keyName)}
+                onKeyDown={(event) => handleKeyDown(event, key)}
+                onKeyUp={(event) => handleKeyUp(event, key)}
                 onPointerCancel={handleKeyPointerEnd}
-                onPointerDown={(event) => handleKeyPointerDown(event, definition.keyName)}
+                onPointerDown={(event) => handleKeyPointerDown(event, key)}
                 onPointerUp={handleKeyPointerEnd}
                 style={keyStyle}
                 type="button"

@@ -136,7 +136,7 @@ One of the seven available white keys on the answer keyboard, labeled 1 through 
 _Avoid_: Number button, scale-degree button, accidental key
 
 **Playable keyboard preview**:
-The twelve-key piano control in settings used to calibrate answer-keyboard size and test sustained touch input in the fixed C4-B4 range. All white and accidental keys are playable there, but playing them does not create answer inputs, reviews, or practice history.
+The thirteen-key piano control in settings used to calibrate answer-keyboard size and test sustained pointer or hardware-key input in the fixed C4-C5 range. Its eight white keys are labeled 1 through 8 for the corresponding main-row or numpad number keys; all white and accidental keys are playable, but playing them does not create answer inputs, reviews, or practice history.
 _Avoid_: Answer keyboard, practice keyboard, size-only preview
 
 **Answer input**:

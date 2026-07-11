@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { startPianoNote } from "../audio/piano";
-import type { PianoKeyName } from "../domain/types";
 import {
   ALL_PIANO_KEYS,
-  NATURAL_PIANO_KEY_NAMES,
   PianoKeyboard,
+  type PianoKeyboardKey,
+  type PianoKeyId,
   type PianoKeyInputId,
 } from "./PianoKeyboard";
+import { getPlayablePreviewOctave, getPlayablePreviewShortcutKey } from "./playableKeyboardPreviewKeys";
 
 interface HeldPreviewNote {
   cancelled: boolean;
-  keyName: PianoKeyName;
+  key: PianoKeyboardKey;
   release?: () => void;
 }
 
@@ -24,22 +25,22 @@ function isFormControl(target: EventTarget | null): boolean {
 }
 
 export function PlayableKeyboardPreview({ scale }: PlayableKeyboardPreviewProps): JSX.Element {
-  const [heldPreviewKeys, setHeldPreviewKeys] = useState<ReadonlySet<PianoKeyName>>(() => new Set());
+  const [heldPreviewKeys, setHeldPreviewKeys] = useState<ReadonlySet<PianoKeyId>>(() => new Set());
   const heldPreviewNotesRef = useRef(new Map<PianoKeyInputId, HeldPreviewNote>());
 
   const syncHeldPreviewKeys = useCallback((): void => {
-    setHeldPreviewKeys(new Set(Array.from(heldPreviewNotesRef.current.values(), (note) => note.keyName)));
+    setHeldPreviewKeys(new Set(Array.from(heldPreviewNotesRef.current.values(), (note) => note.key.id)));
   }, []);
 
   const startPreviewNote = useCallback(
-    (keyName: PianoKeyName, inputId: PianoKeyInputId): void => {
+    (key: PianoKeyboardKey, inputId: PianoKeyInputId): void => {
       if (heldPreviewNotesRef.current.has(inputId)) {
         return;
       }
-      const heldNote: HeldPreviewNote = { cancelled: false, keyName };
+      const heldNote: HeldPreviewNote = { cancelled: false, key };
       heldPreviewNotesRef.current.set(inputId, heldNote);
       syncHeldPreviewKeys();
-      void startPianoNote(keyName, 4)
+      void startPianoNote(key.keyName, getPlayablePreviewOctave(key))
         .then(({ release }) => {
           if (heldNote.cancelled) {
             release();
@@ -53,7 +54,7 @@ export function PlayableKeyboardPreview({ scale }: PlayableKeyboardPreviewProps)
   );
 
   const releasePreviewNote = useCallback(
-    (_keyName: PianoKeyName, inputId: PianoKeyInputId): void => {
+    (_key: PianoKeyboardKey, inputId: PianoKeyInputId): void => {
       const heldNote = heldPreviewNotesRef.current.get(inputId);
       if (!heldNote) {
         return;
@@ -80,12 +81,12 @@ export function PlayableKeyboardPreview({ scale }: PlayableKeyboardPreviewProps)
       if (event.repeat || isFormControl(event.target)) {
         return;
       }
-      const keyName = NATURAL_PIANO_KEY_NAMES[Number(event.key) - 1];
-      if (!keyName) {
+      const key = getPlayablePreviewShortcutKey(event.key);
+      if (!key) {
         return;
       }
       event.preventDefault();
-      startPreviewNote(keyName, `hardware:${event.code}`);
+      startPreviewNote(key, `hardware:${event.code}`);
     }
 
     function handleKeyUp(event: KeyboardEvent): void {
@@ -95,7 +96,7 @@ export function PlayableKeyboardPreview({ scale }: PlayableKeyboardPreviewProps)
         return;
       }
       event.preventDefault();
-      releasePreviewNote(heldNote.keyName, inputId);
+      releasePreviewNote(heldNote.key, inputId);
     }
 
     function handleVisibilityChange(): void {
@@ -122,6 +123,7 @@ export function PlayableKeyboardPreview({ scale }: PlayableKeyboardPreviewProps)
       ariaLabel="可弹奏琴键预览"
       className="settings-piano-keyboard"
       enabledKeys={ALL_PIANO_KEYS}
+      includeUpperC
       keyOctave={4}
       onKeyPress={startPreviewNote}
       onKeyRelease={releasePreviewNote}

@@ -1778,9 +1778,9 @@ export function PracticeView({
         enabledKeys={NATURAL_PIANO_KEYS}
         feedback={feedback?.noteName ? { keyName: feedback.noteName, type: feedback.type } : undefined}
         keyOctave={currentNote?.octave}
-        onKeyPress={(keyName) => {
-          if (isNaturalPianoKey(keyName)) {
-            void submitAnswer(keyName);
+        onKeyPress={(key) => {
+          if (isNaturalPianoKey(key.keyName)) {
+            void submitAnswer(key.keyName);
           }
         }}
         pressedKeys={heldHardwareAnswerKeys}
