@@ -57,6 +57,7 @@ import { PauseOverlay } from "./PauseOverlay";
 import { StaffPagePrompt } from "./StaffPagePrompt";
 import { StaffPrompt } from "./StaffPrompt";
 import { PRACTICE_PAGE_STAFF_LAYOUT } from "./staffLayoutProfiles";
+import { PROMPT_NOTE_DURATIONS } from "./staffPageNotation";
 import { useLocalStorageState } from "./useLocalStorageState";
 
 interface PracticeViewProps {
@@ -154,7 +155,16 @@ const MELODY_BUFFER_SIZE = 16;
 const PRACTICE_SETUP_UI_PREFERENCES_KEY = "anki-note.practiceSetupUiPreferences";
 const PRACTICE_MODES: readonly PracticeMode[] = ["open-ended", "fixed-count", "fixed-duration"];
 const PROMPT_DISPLAY_MODES: readonly PromptDisplayMode[] = ["single-note", "staff-page"];
-const PROMPT_NOTE_DURATIONS: readonly PromptNoteDuration[] = ["whole", "quarter"];
+const PROMPT_NOTE_DURATION_OPTIONS: Array<{
+  ariaLabel: string;
+  label: string;
+  value: PromptNoteDuration;
+}> = [
+  { ariaLabel: "全音符", label: "全音符 𝅝", value: "whole" },
+  { ariaLabel: "四分音符", label: "四分 ♩", value: "quarter" },
+  { ariaLabel: "八分音符", label: "八分 ♪", value: "eighth" },
+  { ariaLabel: "十六分音符", label: "十六分 𝅘𝅥𝅯", value: "sixteenth" },
+];
 const PRACTICE_QUEUE_STRATEGIES: readonly PracticeQueueStrategy[] = ["adaptive", "focused", "melody", "note-drill"];
 const PRACTICE_QUEUE_OPTIONS: Array<{ strategy: PracticeQueueStrategy; label: string; description: string }> = [
   {
@@ -1217,18 +1227,16 @@ export function PracticeView({
                   </button>
                 </div>
                 <div className="segmented">
-                  <button
-                    className={promptNoteDuration === "whole" ? "active" : ""}
-                    onClick={() => setPromptNoteDuration("whole")}
-                  >
-                    全音符 𝅝
-                  </button>
-                  <button
-                    className={promptNoteDuration === "quarter" ? "active" : ""}
-                    onClick={() => setPromptNoteDuration("quarter")}
-                  >
-                    四分音符 ♩
-                  </button>
+                  {PROMPT_NOTE_DURATION_OPTIONS.map((option) => (
+                    <button
+                      aria-label={option.ariaLabel}
+                      className={promptNoteDuration === option.value ? "active" : ""}
+                      key={option.value}
+                      onClick={() => setPromptNoteDuration(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>

@@ -103,8 +103,12 @@ A card prompt in grand-staff notation mode that shows both treble and bass stave
 _Avoid_: Staff image, sheet image
 
 **Staff-page prompt**:
-A practice presentation that shows a batch of target notes together on one page using the current staff notation mode while the learner answers them one at a time in a fixed order. Each answered target note on the page produces its own review; unstarted target notes on an interrupted page do not.
+A practice presentation that shows a batch of target notes together on one page using the current staff notation mode while the learner answers them one at a time in a fixed order. Each answered target note on the page produces its own review; visual grouping never adds or removes target notes, and unstarted target notes on an interrupted page do not produce reviews.
 _Avoid_: Aggregate card, multi-note card
+
+**Prompt note duration**:
+The visual note value used to draw each target note; it does not change audio playback, recognition timing, scoring, or queue behavior. Staff-page prompts visually beam eighth notes in pairs and sixteenth notes in groups of four, while staff changes and incomplete final groups remain unbeamed.
+_Avoid_: Prompt display mode, playback duration, rhythm mode
 
 **Answer button**:
 One of the seven note-choice controls used to answer a card. In the first practice set, answer buttons are primarily labeled 1 through 7 and correspond to the absolute natural note names C, D, E, F, G, A, and B, not movable scale degrees.

@@ -14,7 +14,8 @@
 - 页面布局常量以最终显示像素为单位；进入 VexFlow 逻辑坐标时使用 `logicalPx(displayPx, scale)` 换算。Label 等无需随谱面放大的尺寸也按此方式保持屏幕尺寸不变。
 - 纵向位置和高度完全由 `vertical` 固定：大谱表使用 `centerYPx` 与 `gapPx` / `ledgerGapPx`，未来单谱号模式使用 `trebleOnlyYPx` / `bassOnlyYPx`，viewport 使用 `viewHeightPx`。渲染不会测量音符边界、移动锚点或增加高度。
 - 两行 Label 使用固定的 `noteNameYPx` 与 `lineGapPx`；第二行是固定调数字唱名，始终 `1=C`、`4=F`，不随调号变化。
-- 谱页的 `multirow.rows × multirow.notesPerRow` 决定每页最大题量；最后一页只画实际需要的行。每行固定占用 `vertical.viewHeightPx`，行间额外空白为 `multirow.rowGapPx`。SVG 高度为 `实际行数 × viewHeightPx + (实际行数 - 1) × rowGapPx`，第 N 行从 `(viewHeightPx + rowGapPx) × 行索引` 开始。
+- 谱页的 `multirow.rows × multirow.notesPerRow` 决定每页最大题量，当前为单行 24 音；最后一页只画实际题量，不会为了凑满视觉分组而增加题目。每行固定占用 `vertical.viewHeightPx`，行间额外空白为 `multirow.rowGapPx`。SVG 高度为 `实际行数 × viewHeightPx + (实际行数 - 1) × rowGapPx`，第 N 行从 `(viewHeightPx + rowGapPx) × 行索引` 开始。
+- 谱页中的八分音符每两个组成候选连梁组，十六分音符每四个组成候选连梁组。候选组必须完整且全部位于同一谱表；连梁不跨小节线，线条保持中性色，音符自身仍按答题状态着色。全音符和四分音符每 4 音画一条小节线，八分音符和十六分音符每 8 音画一条小节线。
 
 | 页面 / 区域 | 主要调整内容 | 代码入口 |
 | --- | --- | --- |
@@ -26,7 +27,7 @@
 | 默写完成区 | 结果面板与趋势图尺寸、间距和线条 | [`.staff-recall-summary` / `.staff-recall-trend-*`](../src/styles.css) |
 | 练习页单音谱表 | 固定高度、谱表宽度、高低音谱表位置和内容留白 | [`PRACTICE_SINGLE_STAFF_LAYOUT`](../src/components/staffLayoutProfiles.ts) |
 | 练习页单音区域 | 舞台高度、谱表容器尺寸与阴影 | [`.prompt-stage` / `.staff`](../src/styles.css) |
-| 练习页多音谱表 | 最大行数、每行音符数、单行固定高度和行间距 | [`PRACTICE_PAGE_STAFF_LAYOUT`](../src/components/staffLayoutProfiles.ts) |
+| 练习页谱页 | 最大行数、每行音符数、单行固定高度、时值分组、连梁和小节线 | [`PRACTICE_PAGE_STAFF_LAYOUT`](../src/components/staffLayoutProfiles.ts)、[`staffPageNotation.ts`](../src/components/staffPageNotation.ts) |
 | 练习页多音区域 | 页面谱表舞台和容器尺寸 | [`.staff-page-stage`](../src/styles.css) |
 | 统计页音域谱表 | 列距、谱表留白、Label 位置与字号 | [`STATS_RANGE_STAFF_LAYOUT`](../src/components/staffLayoutProfiles.ts) |
 | 统计页颜色 | 热力图、音域着色和识别曲线配色 | [`STATS_COLORS`](../src/components/statsColors.ts) |

@@ -194,7 +194,7 @@ export const PRACTICE_SINGLE_STAFF_LAYOUT = {
   },
 } as const satisfies StaffLayoutProfile;
 
-// 练习页“谱页显示模式”的多行大谱表。
+// 练习页“谱页显示模式”的大谱表。
 export const PRACTICE_PAGE_STAFF_LAYOUT = {
   notationScale: 1,
   horizontal: {
@@ -215,12 +215,11 @@ export const PRACTICE_PAGE_STAFF_LAYOUT = {
     minPx: 720,
     maxPx: 980,
   },
-  // 多行谱页的最大行数、每行题量、行间空白和小节线间隔。
+  // 谱页的最大行数、每行题量和行间空白。
   multirow: {
-    rows: 2,
-    notesPerRow: 16,
+    rows: 1,
+    notesPerRow: 24,
     // 相邻两个固定行 viewport 之间的额外空白。
     rowGapPx: 10,
-    barlineInterval: 4,
   },
 } as const satisfies StaffLayoutProfile;

@@ -11,6 +11,7 @@ import {
   getFixedStaffFrame,
   getLedgerStemDirection,
 } from "./staffGeometry";
+import { getQuarterNoteBeats, getVexNoteDuration } from "./staffPageNotation";
 
 interface StaffPromptProps {
   effectiveTargetNoteIds: ReadonlySet<TargetNoteId>;
@@ -23,20 +24,13 @@ interface StaffPromptProps {
 
 const NEUTRAL_COLOR = "#211c18";
 const WRONG_COLOR = "#c84c3d";
-function noteDurationToVexDuration(noteDuration: PromptNoteDuration): "q" | "w" {
-  return noteDuration === "quarter" ? "q" : "w";
-}
-
-function noteDurationToBeats(noteDuration: PromptNoteDuration): number {
-  return noteDuration === "quarter" ? 1 : 4;
-}
 
 function makePromptNote(note: TargetNote, noteDuration: PromptNoteDuration, color: string): StaveNote {
   const stemDirection = getLedgerStemDirection(note);
   const staveNote = new StaveNote({
     clef: note.staff,
     keys: [noteToVexKey(note)],
-    duration: noteDurationToVexDuration(noteDuration),
+    duration: getVexNoteDuration(noteDuration),
     ...(stemDirection === undefined ? {} : { stemDirection }),
   });
   staveNote.setStyle({ fillStyle: color, strokeStyle: color });
@@ -101,7 +95,7 @@ export function StaffPrompt({
       const noteCenter = getEvenlySpacedCenters(1, noteArea.left, noteArea.right);
       const drawNote = (targetNote: TargetNote, color: string): void => {
         const staveNote = makePromptNote(targetNote, noteDuration, color).setStave(targetStave);
-        const voice = new Voice({ numBeats: noteDurationToBeats(noteDuration), beatValue: 4 }).addTickables([staveNote]);
+        const voice = new Voice({ numBeats: getQuarterNoteBeats(noteDuration), beatValue: 4 }).addTickables([staveNote]);
         new Formatter().joinVoices([voice]).format([voice], Math.max(1, noteArea.right - noteArea.left), { context });
         alignStaveNotesToCenters([staveNote], noteCenter);
         voice.draw(context, targetStave);
