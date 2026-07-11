@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Staff } from "../domain/types";
 import {
-  getCompleteStaffPageBeamGroups,
+  getBarlineGapCenter,
   getQuarterNoteBeats,
   getStaffPageBarlineInterval,
+  getStaffPageBeamRuns,
   getVexNoteDuration,
   PROMPT_NOTE_DURATIONS,
 } from "./staffPageNotation";
@@ -39,9 +40,14 @@ describe("staff-page notation", () => {
     expect(getStaffPageBarlineInterval("sixteenth")).toBe(8);
   });
 
+  it("centers a barline in the visible gap and omits it when glyph bounds overlap", () => {
+    expect(getBarlineGapCenter(20, 40)).toBe(30);
+    expect(getBarlineGapCenter(40, 30)).toBeUndefined();
+  });
+
   it("beams complete same-staff eighth-note pairs", () => {
     expect(
-      getCompleteStaffPageBeamGroups(
+      getStaffPageBeamRuns(
         [note("treble"), note("treble"), note("bass"), note("treble"), note("bass"), note("bass")],
         "eighth",
       ),
@@ -53,7 +59,7 @@ describe("staff-page notation", () => {
 
   it("beams complete same-staff sixteenth-note groups of four", () => {
     expect(
-      getCompleteStaffPageBeamGroups(
+      getStaffPageBeamRuns(
         [
           note("treble"),
           note("treble"),
@@ -72,17 +78,52 @@ describe("staff-page notation", () => {
     ]);
   });
 
-  it("leaves staff changes and incomplete final groups unbeamed", () => {
+  it("restarts beaming inside each same-staff run", () => {
     expect(
-      getCompleteStaffPageBeamGroups(
+      getStaffPageBeamRuns(
         [note("treble"), note("treble"), note("treble"), note("bass"), note("bass"), note("bass"), note("bass")],
         "sixteenth",
       ),
-    ).toEqual([]);
+    ).toEqual([
+      { size: 3, staff: "treble", startIndex: 0 },
+      { size: 4, staff: "bass", startIndex: 3 },
+    ]);
+  });
+
+  it("beams short final runs but leaves isolated notes unbeamed", () => {
+    expect(
+      getStaffPageBeamRuns(
+        [note("treble"), note("bass"), note("bass"), note("treble"), note("bass")],
+        "sixteenth",
+      ),
+    ).toEqual([{ size: 2, staff: "bass", startIndex: 1 }]);
+  });
+
+  it("does not beam across an eight-note barline", () => {
+    expect(
+      getStaffPageBeamRuns(
+        [
+          note("treble"),
+          note("bass"),
+          note("treble"),
+          note("bass"),
+          note("treble"),
+          note("bass"),
+          note("treble"),
+          note("treble"),
+          note("treble"),
+          note("treble"),
+        ],
+        "sixteenth",
+      ),
+    ).toEqual([
+      { size: 2, staff: "treble", startIndex: 6 },
+      { size: 2, staff: "treble", startIndex: 8 },
+    ]);
   });
 
   it("does not beam whole or quarter notes", () => {
-    expect(getCompleteStaffPageBeamGroups([note("treble"), note("treble")], "whole")).toEqual([]);
-    expect(getCompleteStaffPageBeamGroups([note("treble"), note("treble")], "quarter")).toEqual([]);
+    expect(getStaffPageBeamRuns([note("treble"), note("treble")], "whole")).toEqual([]);
+    expect(getStaffPageBeamRuns([note("treble"), note("treble")], "quarter")).toEqual([]);
   });
 });

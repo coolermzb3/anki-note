@@ -11,9 +11,10 @@ import {
   logicalPx,
 } from "./staffGeometry";
 import {
-  getCompleteStaffPageBeamGroups,
+  getBarlineGapCenter,
   getQuarterNoteBeats,
   getStaffPageBarlineInterval,
+  getStaffPageBeamRuns,
   getVexNoteDuration,
 } from "./staffPageNotation";
 
@@ -69,7 +70,7 @@ function makeStaffPageBeams(
   tickablesByStaff: Partial<Record<Staff, readonly StaffPageTickable[]>>,
   noteDuration: PromptNoteDuration,
 ): Beam[] {
-  return getCompleteStaffPageBeamGroups(rowSlots, noteDuration).flatMap(({ size, staff, startIndex }) => {
+  return getStaffPageBeamRuns(rowSlots, noteDuration).flatMap(({ size, staff, startIndex }) => {
     const tickables = tickablesByStaff[staff]?.slice(startIndex, startIndex + size);
     if (!tickables || !tickables.every((tickable) => tickable instanceof StaveNote)) {
       return [];
@@ -91,6 +92,22 @@ function addBarline(parent: SVGElement, x: number, y1: number, y2: number): void
   line.setAttribute("stroke-width", "1.6");
   line.setAttribute("shape-rendering", "crispEdges");
   parent.appendChild(line);
+}
+
+function getBarlineX(
+  nextTickable: StaffPageTickable,
+  previousNote: StaveNote | undefined,
+  nextNote: StaveNote | undefined,
+): number | undefined {
+  if (!previousNote) {
+    return undefined;
+  }
+  const previousBounds = previousNote.getBoundingBox();
+  const nextBounds = nextNote?.getBoundingBox();
+  return getBarlineGapCenter(
+    previousBounds.getX() + previousBounds.getW(),
+    nextBounds?.getX() ?? nextTickable.getAbsoluteX(),
+  );
 }
 
 export function StaffPagePrompt({
@@ -155,7 +172,8 @@ export function StaffPagePrompt({
           numBeats: PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow * getQuarterNoteBeats(noteDuration),
         };
         let beams: Beam[];
-        let layoutTickables;
+        let layoutTickables: StaffPageTickable[];
+        let visibleTickables: Array<StaveNote | undefined>;
         let barlineTopY: number;
         let barlineBottomY: number;
         const system = drawStaffSystem({
@@ -197,6 +215,13 @@ export function StaffPagePrompt({
           trebleVoice.draw(context, treble);
           bassVoice.draw(context, bass);
           layoutTickables = trebleTickables;
+          visibleTickables = rowSlots.map((note, index) => {
+            if (!note) {
+              return undefined;
+            }
+            const tickable = note.staff === "treble" ? trebleTickables[index] : bassTickables[index];
+            return tickable instanceof StaveNote ? tickable : undefined;
+          });
           barlineTopY = treble.getYForLine(0);
           barlineBottomY = bass.getYForLine(4);
         } else {
@@ -213,6 +238,9 @@ export function StaffPagePrompt({
           new Formatter().joinVoices([voice]).formatToStave([voice], stave, { context, stave });
           voice.draw(context, stave);
           layoutTickables = tickables;
+          visibleTickables = tickables.map((tickable, index) =>
+            rowSlots[index] && tickable instanceof StaveNote ? tickable : undefined,
+          );
           barlineTopY = stave.getYForLine(0);
           barlineBottomY = stave.getYForLine(4);
         }
@@ -225,10 +253,15 @@ export function StaffPagePrompt({
           boundaryIndex <= rowNotes.length && boundaryIndex < PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow;
           boundaryIndex += barlineInterval
         ) {
-          const previousTickable = layoutTickables[boundaryIndex - 1];
           const nextTickable = layoutTickables[boundaryIndex];
-          const barlineX = (previousTickable.getAbsoluteX() + nextTickable.getAbsoluteX()) / 2;
-          addBarline(rowGroup, barlineX, barlineTopY, barlineBottomY);
+          const barlineX = getBarlineX(
+            nextTickable,
+            visibleTickables[boundaryIndex - 1],
+            visibleTickables[boundaryIndex],
+          );
+          if (barlineX !== undefined) {
+            addBarline(rowGroup, barlineX, barlineTopY, barlineBottomY);
+          }
         }
         context.closeGroup();
       });
