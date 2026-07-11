@@ -1,4 +1,4 @@
-import { selectMelodyNotes } from "./melody";
+import { selectMelodyNotes, type MelodyGenerationState } from "./melody";
 import { isStatisticalReview } from "./reviews";
 import type { NoteName, PracticeQueueStrategy, ReviewRecord, TargetNote, TargetNoteId } from "./types";
 
@@ -13,6 +13,7 @@ export interface SelectNextNoteOptions {
   focusedTraining?: boolean;
   focusedTrainingRate?: number;
   rng?: () => number;
+  melodyState?: MelodyGenerationState;
 }
 
 interface NotePerformance {
@@ -128,6 +129,7 @@ export function selectNextNote({
   drillNoteNames,
   focusedTraining = false,
   focusedTrainingRate = 0.8,
+  melodyState,
   rng = Math.random,
 }: SelectNextNoteOptions): TargetNote {
   if (notes.length === 0) {
@@ -136,7 +138,7 @@ export function selectNextNote({
 
   const effectiveQueueStrategy = resolvePracticeQueueStrategy({ queueStrategy, focusedTraining });
   if (effectiveQueueStrategy === "melody") {
-    return selectMelodyNotes({ notes, count: 1, lastTargetNoteId, rng })[0];
+    return selectMelodyNotes({ notes, count: 1, lastTargetNoteId, state: melodyState, rng })[0];
   }
 
   const strategyNotes = effectiveQueueStrategy === "note-drill" ? getDrillNotes(notes, drillNoteNames) : notes;
@@ -185,6 +187,7 @@ export function selectNotePage({ count, ...options }: SelectNotePageOptions): Ta
       notes: options.notes,
       count,
       lastTargetNoteId: options.lastTargetNoteId,
+      state: options.melodyState,
       rng: options.rng,
     });
   }

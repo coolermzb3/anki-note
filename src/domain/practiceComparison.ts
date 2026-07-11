@@ -34,7 +34,7 @@ export function getEffectiveQueueAlgorithm(strategy: PracticeQueueStrategy): Eff
     return "focused-v1";
   }
   if (strategy === "melody") {
-    return "melody-v1";
+    return "melody-v2";
   }
   return "adaptive-v1";
 }

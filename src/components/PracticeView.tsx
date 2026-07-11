@@ -4,6 +4,7 @@ import { playPianoNote, playTargetNote, unlockAudio } from "../audio/piano";
 import { db, deletePracticeSessionWithReviews, resolveDrillNoteNames, resolveQueueStrategy, saveReview } from "../data/db";
 import { writeBackupIfSafe, writeBackupNow } from "../data/backup";
 import { createUuid } from "../domain/id";
+import { createMelodyGenerationState } from "../domain/melody";
 import {
   ANSWER_BUTTONS,
   formatTargetNoteLabel,
@@ -348,6 +349,7 @@ export function PracticeView({
   const sessionReviewsRef = useRef<ReviewRecord[]>([]);
   const lastTargetNoteIdRef = useRef<TargetNote["id"] | undefined>();
   const melodyQueueRef = useRef<TargetNote[]>([]);
+  const melodyGenerationStateRef = useRef(createMelodyGenerationState());
   const staffPageRef = useRef<StaffPageRuntime | null>(null);
   const endingRef = useRef(false);
   const sessionActiveBaseMsRef = useRef(0);
@@ -680,6 +682,7 @@ export function PracticeView({
         queueStrategy: sourceQueueStrategy,
         drillNoteNames: sourceDrillNoteNames,
         lastTargetNoteId: lastTargetNoteIdRef.current,
+        melodyState: melodyGenerationStateRef.current,
         count,
       });
       const page = {
@@ -702,6 +705,7 @@ export function PracticeView({
         reviews: [],
         queueStrategy: "melody",
         lastTargetNoteId: lastTargetNoteIdRef.current,
+        melodyState: melodyGenerationStateRef.current,
         count,
       });
     }
@@ -915,6 +919,7 @@ export function PracticeView({
     sessionReviewsRef.current = [];
     lastTargetNoteIdRef.current = undefined;
     melodyQueueRef.current = [];
+    melodyGenerationStateRef.current = createMelodyGenerationState();
     syncStaffPage(null);
     endingRef.current = false;
     lastBackupAtRef.current = performance.now();

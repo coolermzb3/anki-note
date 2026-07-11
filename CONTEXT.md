@@ -87,7 +87,7 @@ The stable, versioned scheduling behavior applied after the effective target-not
 _Avoid_: Selected strategy label, queue configuration
 
 **Melody queue**:
-A practice queue strategy that orders enabled target notes into a melody-like pitch sequence within the selected practice range. A melody queue still produces ordinary target-note reviews; it does not add rhythm, ear-training answers, or a separate scoring model.
+A practice queue strategy that generates eight-note local phrases while moving between the least-covered registers of the selected practice range. Register changes may use a direct leap or up to three non-equidistant transition notes; a melody queue still produces ordinary target-note reviews and does not add rhythm, ear-training answers, or a separate scoring model.
 _Avoid_: Song mode, generated sheet music
 
 **Single-note drill queue**:

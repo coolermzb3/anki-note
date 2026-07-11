@@ -32,4 +32,8 @@ describe("practice comparison snapshot", () => {
 
     expect(fullDrill).toEqual(adaptive);
   });
+
+  it("records the coverage-aware melody generator as melody-v2", () => {
+    expect(snapshot({ queueStrategy: "melody" })?.effectiveQueueAlgorithm).toBe("melody-v2");
+  });
 });

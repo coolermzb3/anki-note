@@ -42,6 +42,11 @@ pnpm test
 pnpm run build
 ```
 
+## 开发文档
+
+- [自动旋律生成规则](docs/melody-generation.md)
+- [UI 手调位置速查](docs/ui-tuning.md)
+
 ## 部署
 
 推送到 `main` 后，GitHub Actions 会构建 `dist` 并部署到 GitHub Pages。
