@@ -57,6 +57,30 @@ export function GlobalRangeControls({ disabled = false, settings, onSettingsSave
 
   return (
     <div className={disabled ? "global-range-controls global-range-controls-locked" : "global-range-controls"} aria-label="全局范围">
+      <div className="global-range-groups">
+        {PRACTICE_GROUPS.map((group) => {
+          const checked = settings.enabledGroupIds.includes(group.id);
+          return (
+            <label
+              className={checked ? "choice choice-active global-range-group-choice" : "choice global-range-group-choice"}
+              key={group.id}
+              onPointerDown={markPointerToggle}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                onChange={(event) => {
+                  toggleGroup(group.id, event.target.checked);
+                  blurAfterPointerToggle(event.currentTarget);
+                }}
+              />
+              <span>{group.label}</span>
+            </label>
+          );
+        })}
+      </div>
+      <span className="global-range-divider" aria-hidden="true" />
       <div
         className={
           settings.staffNotationMode === "grand"
@@ -102,30 +126,6 @@ export function GlobalRangeControls({ disabled = false, settings, onSettingsSave
             <small>E3–A4 同时练习两种谱号</small>
           </label>
         ) : null}
-      </div>
-      <span className="global-range-divider" aria-hidden="true" />
-      <div className="global-range-groups">
-        {PRACTICE_GROUPS.map((group) => {
-          const checked = settings.enabledGroupIds.includes(group.id);
-          return (
-            <label
-              className={checked ? "choice choice-active global-range-group-choice" : "choice global-range-group-choice"}
-              key={group.id}
-              onPointerDown={markPointerToggle}
-            >
-              <input
-                type="checkbox"
-                checked={checked}
-                disabled={disabled}
-                onChange={(event) => {
-                  toggleGroup(group.id, event.target.checked);
-                  blurAfterPointerToggle(event.currentTarget);
-                }}
-              />
-              <span>{group.label}</span>
-            </label>
-          );
-        })}
       </div>
     </div>
   );
