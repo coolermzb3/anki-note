@@ -8,7 +8,7 @@ import {
   isProgressChartEligible,
 } from "./sessionProgress";
 import { makeReview } from "./testFactories";
-import type { AppSettings, PracticeSessionRecordV1 } from "./types";
+import type { PracticeSessionRecordV1 } from "./types";
 
 const REVIEW_NOTE_IDS = ["C4", "D4", "E4", "F4", "G4"] as const;
 
@@ -29,31 +29,6 @@ function makeSession(
     completedCount: 0,
     interruptedCount: 0,
     ...rest,
-  };
-}
-
-function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
-  return {
-    id: "default",
-    schemaVersion: 2,
-    dataSetId: "test",
-    createdAt: "2026-07-04T00:00:00.000+08:00",
-    enabledGroupIds: ["G3-F4"],
-    staffNotationMode: "grand",
-    defaultMode: "fixed-duration",
-    promptDisplayMode: "staff-page",
-    promptNoteDuration: "quarter",
-    fixedCount: 20,
-    fixedDurationSeconds: 60,
-    autoPlayTarget: true,
-    includeInterStaffLedgerSpellings: true,
-    answerKeyboardScale: 1,
-    pianoVolume: 0.8,
-    queueStrategy: "adaptive",
-    drillNoteNames: [],
-    inactivityThresholdSeconds: 30,
-    correctDelayMs: 400,
-    ...overrides,
   };
 }
 
@@ -366,6 +341,30 @@ describe("session progress", () => {
     ).toEqual({ metric: "elapsed-ms", currentValue: 5000, bestValue: 5000, isNewBest: true });
   });
 
+  it("excludes short historical sessions from progress benchmarks", () => {
+    const current = makeSession({
+      id: "current",
+      startedAt: "2026-07-04T12:00:00.000+08:00",
+      mode: "fixed-duration",
+      fixedDurationSeconds: 6,
+      queueStrategy: "adaptive",
+    });
+    const short = makeSession({
+      ...current,
+      id: "short",
+      startedAt: "2026-07-04T11:00:00.000+08:00",
+    });
+
+    expect(
+      buildSessionProgressBenchmark({
+        currentSession: current,
+        currentReviews: makeSessionReviews("current", [1000, 1000, 1000, 1000, 1000]),
+        sessions: [short],
+        reviews: makeSessionReviews("short", [1000, 1000, 1000, 1000]),
+      }),
+    ).toEqual({ metric: "completed-count", currentValue: 5, bestValue: 5, isNewBest: false });
+  });
+
   it("uses the current fixed-count actual duration as the progress comparison window", () => {
     const current = makeSession({
       id: "current",
@@ -431,7 +430,7 @@ describe("session progress", () => {
     ]);
   });
 
-  it("selects the latest plottable session in the current global practice range", () => {
+  it("uses the latest eligible session as the progress baseline", () => {
     const older = makeSession({
       id: "older",
       startedAt: "2026-07-04T10:00:00.000+08:00",
@@ -441,10 +440,10 @@ describe("session progress", () => {
       promptDisplayMode: "staff-page",
       includeLedgerVariants: true,
     });
-    const latestDifferentRange = makeSession({
+    const olderDifferentRange = makeSession({
       ...older,
-      id: "latest-different-range",
-      startedAt: "2026-07-04T12:00:00.000+08:00",
+      id: "older-different-range",
+      startedAt: "2026-07-04T10:30:00.000+08:00",
       enabledGroupIds: ["G4-F5"],
     });
     const latestOpenEnded = makeSession({
@@ -457,6 +456,7 @@ describe("session progress", () => {
       ...older,
       id: "latest-short",
       startedAt: "2026-07-04T11:45:00.000+08:00",
+      queueStrategy: "melody",
     });
     const latest = makeSession({
       ...older,
@@ -465,11 +465,10 @@ describe("session progress", () => {
     });
 
     const series = buildLatestSessionProgressSeries({
-      settings: makeSettings(),
-      sessions: [older, latestDifferentRange, latestOpenEnded, latestShort, latest],
+      sessions: [older, olderDifferentRange, latestOpenEnded, latestShort, latest],
       reviews: [
         ...makeSessionReviews("older", [1100, 1200, 1300, 1400, 1500]),
-        ...makeSessionReviews("latest-different-range", [700, 800, 900, 1000, 1100]),
+        ...makeSessionReviews("older-different-range", [700, 800, 900, 1000, 1100]),
         ...makeSessionReviews("latest-open-ended", [500, 600, 700, 800, 900]),
         ...makeSessionReviews("latest-short", [700, 800, 900, 1000]),
         ...makeSessionReviews("latest", [900, 1000, 1100, 1200, 1300]),
@@ -481,11 +480,10 @@ describe("session progress", () => {
     expect(series.map((line) => line.sessionId)).toEqual(["older", "latest"]);
     expect(
       buildLatestSessionProgressBenchmark({
-        settings: makeSettings(),
-        sessions: [older, latestDifferentRange, latestOpenEnded, latestShort, latest],
+        sessions: [older, olderDifferentRange, latestOpenEnded, latestShort, latest],
         reviews: [
           ...makeSessionReviews("older", [1100, 1200, 1300, 1400, 1500]),
-          ...makeSessionReviews("latest-different-range", [700, 800, 900, 1000, 1100]),
+          ...makeSessionReviews("older-different-range", [700, 800, 900, 1000, 1100]),
           ...makeSessionReviews("latest-open-ended", [500, 600, 700, 800, 900]),
           ...makeSessionReviews("latest-short", [700, 800, 900, 1000]),
           ...makeSessionReviews("latest", [900, 1000, 1100, 1200, 1300]),

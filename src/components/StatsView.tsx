@@ -642,17 +642,16 @@ export function StatsView({
   const sessionProgressSeries = useMemo(
     () =>
       buildLatestSessionProgressSeries({
-        settings,
         sessions,
         reviews,
         historyLimit: sessionProgressHistoryLimit,
         mode: sessionProgressMode,
       }),
-    [reviews, sessions, sessionProgressHistoryLimit, sessionProgressMode, settings],
+    [reviews, sessions, sessionProgressHistoryLimit, sessionProgressMode],
   );
   const sessionProgressBenchmark = useMemo(
-    () => buildLatestSessionProgressBenchmark({ settings, sessions, reviews }),
-    [reviews, sessions, settings],
+    () => buildLatestSessionProgressBenchmark({ sessions, reviews }),
+    [reviews, sessions],
   );
   const noteStats = useMemo(() => {
     if (activeNotes.length === 0) {

@@ -1,8 +1,8 @@
 import { getPracticeSessionComparisonSnapshot } from "./legacyPracticeSessionCompatibility";
-import { buildPracticeComparisonSnapshot, type PracticeComparisonSnapshot } from "./practiceComparison";
+import type { PracticeComparisonSnapshot } from "./practiceComparison";
 import { isStatisticalReview } from "./reviews";
 import { hasEnoughStatReviews } from "./stats";
-import type { AppSettings, PracticeSessionRecord, ReviewRecord } from "./types";
+import type { PracticeSessionRecord, ReviewRecord } from "./types";
 
 export type SessionProgressMode = "actual-order" | "duration-cumsum";
 
@@ -29,7 +29,6 @@ export interface BuildSessionProgressSeriesOptions {
 }
 
 export interface BuildLatestSessionProgressSeriesOptions {
-  settings: AppSettings;
   sessions: PracticeSessionRecord[];
   reviews: ReviewRecord[];
   historyLimit: number;
@@ -38,7 +37,7 @@ export interface BuildLatestSessionProgressSeriesOptions {
 
 export type BuildLatestSessionProgressBenchmarkOptions = Pick<
   BuildLatestSessionProgressSeriesOptions,
-  "reviews" | "sessions" | "settings"
+  "reviews" | "sessions"
 >;
 
 export interface BuildSessionProgressBenchmarkOptions {
@@ -173,29 +172,13 @@ function groupReviewsBySession(reviews: ReviewRecord[]): Map<string, ReviewRecor
   return reviewsBySession;
 }
 
-function currentSettingsComparisonSnapshot(settings: AppSettings): PracticeComparisonSnapshot | undefined {
-  return buildPracticeComparisonSnapshot({
-    drillNoteNames: settings.drillNoteNames,
-    enabledGroupIds: settings.enabledGroupIds,
-    includeInterStaffLedgerSpellings: settings.includeInterStaffLedgerSpellings,
-    promptDisplayMode: settings.promptDisplayMode,
-    queueStrategy: settings.queueStrategy,
-    staffNotationMode: settings.staffNotationMode,
-  });
-}
-
 function findLatestProgressSession(
-  settings: AppSettings,
   sessions: PracticeSessionRecord[],
   reviewsBySession: Map<string, ReviewRecord[]>,
 ): PracticeSessionRecord | undefined {
-  const settingsSnapshot = currentSettingsComparisonSnapshot(settings);
+  // Follow qualified activity, not mutable app settings, so abandoned or short sessions cannot switch the chart.
   return [...sessions]
-    .filter(
-      (session) =>
-        isProgressChartEligible(session, reviewsBySession.get(session.id) ?? []) &&
-        sameComparisonSnapshot(settingsSnapshot, getPracticeSessionComparisonSnapshot(session)),
-    )
+    .filter((session) => isProgressChartEligible(session, reviewsBySession.get(session.id) ?? []))
     .sort(
       (a, b) =>
         new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime() || b.id.localeCompare(a.id),
@@ -220,6 +203,7 @@ export function buildSessionProgressBenchmark({
         const sessionReviews = reviewsBySession.get(session.id) ?? [];
         return (
           new Date(session.startedAt).getTime() < currentStartedAt &&
+          isProgressChartEligible(session, sessionReviews) &&
           isComparablePracticeSession(currentSession, session)
         );
       })
@@ -329,14 +313,13 @@ export function buildSessionProgressSeries({
 }
 
 export function buildLatestSessionProgressSeries({
-  settings,
   sessions,
   reviews,
   historyLimit,
   mode,
 }: BuildLatestSessionProgressSeriesOptions): SessionProgressSeries[] {
   const reviewsBySession = groupReviewsBySession(reviews);
-  const currentSession = findLatestProgressSession(settings, sessions, reviewsBySession);
+  const currentSession = findLatestProgressSession(sessions, reviewsBySession);
 
   if (!currentSession) {
     return [];
@@ -353,12 +336,11 @@ export function buildLatestSessionProgressSeries({
 }
 
 export function buildLatestSessionProgressBenchmark({
-  settings,
   sessions,
   reviews,
 }: BuildLatestSessionProgressBenchmarkOptions): SessionProgressBenchmark | undefined {
   const reviewsBySession = groupReviewsBySession(reviews);
-  const currentSession = findLatestProgressSession(settings, sessions, reviewsBySession);
+  const currentSession = findLatestProgressSession(sessions, reviewsBySession);
   if (!currentSession) {
     return undefined;
   }
