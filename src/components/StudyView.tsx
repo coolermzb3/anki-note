@@ -10,7 +10,7 @@ import {
   type NoteNameColumn,
   type NoteNameColumnDefinition,
 } from "../domain/staffRecall";
-import type { AppSettings, NoteName, Staff, StaffRecallRunRecord, TargetNote } from "../domain/types";
+import type { AppSettings, NoteName, Staff, StaffNotationMode, StaffRecallRunRecord, TargetNote } from "../domain/types";
 import { GlobalRangeControls } from "./GlobalRangeControls";
 import {
   StudyDisplayControls,
@@ -22,10 +22,8 @@ import { STUDY_STAFF_LAYOUT } from "./staffLayoutProfiles";
 import {
   alignStaveNotesToCenters,
   createStaffRenderSurface,
-  drawGrandStaff,
+  drawStaffSystem,
   getEvenlySpacedCenters,
-  getGrandStaffAnchors,
-  getGrandStaffNoteArea,
   getResponsiveStaffFrame,
   logicalPx,
   staveNoteCenterX,
@@ -69,7 +67,8 @@ interface StudyNoteMapProps {
   columns: NoteNameColumn[];
   highlightedNoteId?: string;
   highlightedNoteNames?: ReadonlySet<NoteName>;
-  includeLedgerVariants: boolean;
+  staffNotationMode: StaffNotationMode;
+  useLedgerGap: boolean;
   label: string;
   onPlayColumn: (noteName: NoteName) => void;
   onPlayNote: (note: TargetNote) => void;
@@ -94,14 +93,12 @@ interface StudyViewProps {
 }
 
 interface StudyMapMetrics {
-  bassY: number;
   fixedDoNumberY: number;
   height: number;
   labelHitHeight: number;
   labelHitTop: number;
   staveWidth: number;
   noteNameY: number;
-  trebleY: number;
   width: number;
   x: number;
 }
@@ -203,19 +200,10 @@ function noteHeadHitRadius(chord: StaveNote, index: number): number {
 }
 
 function getStudyMapMetrics(
-  includeLedgerVariants: boolean,
   surface: StaffRenderSurface,
   columnCount: number,
 ): StudyMapMetrics {
   const frame = getResponsiveStaffFrame(surface, columnCount, STUDY_STAFF_LAYOUT.horizontal);
-  const clefGapPx = includeLedgerVariants
-    ? STUDY_STAFF_LAYOUT.vertical.ledgerGapPx
-    : STUDY_STAFF_LAYOUT.vertical.gapPx;
-  const anchors = getGrandStaffAnchors(
-    surface.scale,
-    STUDY_STAFF_LAYOUT.vertical.centerYPx,
-    clefGapPx,
-  );
   const noteNameY = logicalPx(STUDY_STAFF_LAYOUT.labels.noteNameYPx, surface.scale);
   const fixedDoNumberY = noteNameY + logicalPx(STUDY_STAFF_LAYOUT.labels.lineGapPx, surface.scale);
   const labelHitTop = noteNameY - logicalPx(
@@ -223,7 +211,6 @@ function getStudyMapMetrics(
     surface.scale,
   );
   return {
-    bassY: anchors.bassY,
     fixedDoNumberY,
     height: surface.height,
     labelHitHeight:
@@ -236,7 +223,6 @@ function getStudyMapMetrics(
     labelHitTop,
     staveWidth: frame.staveWidth,
     noteNameY,
-    trebleY: anchors.trebleY,
     width: surface.width,
     x: frame.x,
   };
@@ -322,6 +308,7 @@ function addLabelHotspot({
 }
 
 function addNoteHotspot({
+  effectiveTargetNoteIds,
   note,
   onPlayNote,
   radius,
@@ -330,6 +317,7 @@ function addNoteHotspot({
   x,
   y,
 }: {
+  effectiveTargetNoteIds: ReadonlySet<TargetNote["id"]>;
   note: TargetNote;
   onPlayNote: (note: TargetNote) => void;
   radius: number;
@@ -345,7 +333,7 @@ function addNoteHotspot({
   hotspot.setAttribute("r", String(radius));
   hotspot.setAttribute("role", "button");
   hotspot.setAttribute("tabindex", "0");
-  hotspot.setAttribute("aria-label", `播放 ${formatTargetNoteLabel(note)}`);
+  hotspot.setAttribute("aria-label", `播放 ${formatTargetNoteLabel(note, effectiveTargetNoteIds)}`);
   hotspot.addEventListener("click", (event) => {
     event.stopPropagation();
     onPlayNote(note);
@@ -361,12 +349,14 @@ function addNoteHotspot({
 
 function addNoteHotspots({
   chord,
+  effectiveTargetNoteIds,
   highlightedNoteId,
   notes,
   onPlayNote,
   svg,
 }: {
   chord: StaveNote;
+  effectiveTargetNoteIds: ReadonlySet<TargetNote["id"]>;
   highlightedNoteId?: string;
   notes: TargetNote[];
   onPlayNote: (note: TargetNote) => void;
@@ -380,6 +370,7 @@ function addNoteHotspots({
       return;
     }
     addNoteHotspot({
+      effectiveTargetNoteIds,
       note,
       onPlayNote,
       radius: noteHeadHitRadius(chord, index),
@@ -395,14 +386,19 @@ function StudyNoteMap({
   columns,
   highlightedNoteId,
   highlightedNoteNames,
-  includeLedgerVariants,
+  staffNotationMode,
   label,
   onPlayColumn,
   onPlayNote,
   showLabels,
+  useLedgerGap,
 }: StudyNoteMapProps): JSX.Element {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const rendererTargetRef = useRef<HTMLDivElement | null>(null);
+  const effectiveTargetNoteIds = useMemo(
+    () => new Set(columns.flatMap((column) => column.notes.map((note) => note.id))),
+    [columns],
+  );
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -425,47 +421,65 @@ function StudyNoteMap({
         STUDY_STAFF_LAYOUT.vertical.viewHeightPx,
         STUDY_STAFF_LAYOUT.notationScale,
       );
-      const metrics = getStudyMapMetrics(includeLedgerVariants, surface, columns.length);
+      const metrics = getStudyMapMetrics(surface, columns.length);
       const { context, svg } = surface;
-      const grandStaff = drawGrandStaff(
+      const system = drawStaffSystem({
+        brace: true,
+        columnCount: columns.length,
         context,
-        { x: metrics.x, staveWidth: metrics.staveWidth },
-        { bassY: metrics.bassY, trebleY: metrics.trebleY },
-        { brace: true },
-      );
-      const { bass, treble } = grandStaff;
-
-      const trebleTickables = columns.map((column) =>
-        makeChord(column.trebleNotes, "treble", highlightedNoteNames, highlightedNoteId),
-      );
-      const bassTickables = columns.map((column) =>
-        makeChord(column.bassNotes, "bass", highlightedNoteNames, highlightedNoteId),
-      );
-      const voiceOptions = { beatValue: 4, numBeats: Math.max(1, columns.length) * 4 };
-      const trebleVoice = new Voice(voiceOptions).addTickables(trebleTickables);
-      const bassVoice = new Voice(voiceOptions).addTickables(bassTickables);
-
-      const noteArea = getGrandStaffNoteArea(
-        grandStaff,
-        columns.length,
-        surface.scale,
-        STUDY_STAFF_LAYOUT.horizontal,
-      );
-      treble.setNoteStartX(noteArea.left);
-      bass.setNoteStartX(noteArea.left);
-      treble.setWidth(Math.max(1, noteArea.right - metrics.x));
-      bass.setWidth(Math.max(1, noteArea.right - metrics.x));
-      new Formatter().joinVoices([trebleVoice, bassVoice]).formatToStave([trebleVoice, bassVoice], treble, {
-        context,
-        stave: treble,
+        frame: { x: metrics.x, staveWidth: metrics.staveWidth },
+        horizontal: STUDY_STAFF_LAYOUT.horizontal,
+        mode: staffNotationMode,
+        scale: surface.scale,
+        useLedgerGap,
+        vertical: STUDY_STAFF_LAYOUT.vertical,
       });
-      alignStaveNotesToCenters(
-        trebleTickables,
-        getEvenlySpacedCenters(columns.length, noteArea.left, noteArea.right),
-      );
-      trebleVoice.draw(context, treble);
-      bassVoice.draw(context, bass);
-      const columnLayouts = getStudyColumnLayouts(trebleTickables, surface.scale);
+      const { noteArea } = system;
+      const trebleTickables: StaveNote[] = [];
+      const bassTickables: StaveNote[] = [];
+      const voiceOptions = { beatValue: 4, numBeats: Math.max(1, columns.length) * 4 };
+      let layoutTickables: StaveNote[];
+      if (system.mode === "grand") {
+        const { bass, treble } = system;
+        trebleTickables.push(...columns.map((column) =>
+          makeChord(column.trebleNotes, "treble", highlightedNoteNames, highlightedNoteId),
+        ));
+        bassTickables.push(...columns.map((column) =>
+          makeChord(column.bassNotes, "bass", highlightedNoteNames, highlightedNoteId),
+        ));
+        const trebleVoice = new Voice(voiceOptions).addTickables(trebleTickables);
+        const bassVoice = new Voice(voiceOptions).addTickables(bassTickables);
+        treble.setNoteStartX(noteArea.left);
+        bass.setNoteStartX(noteArea.left);
+        treble.setWidth(Math.max(1, noteArea.right - metrics.x));
+        bass.setWidth(Math.max(1, noteArea.right - metrics.x));
+        new Formatter().joinVoices([trebleVoice, bassVoice]).formatToStave([trebleVoice, bassVoice], treble, {
+          context,
+          stave: treble,
+        });
+        alignStaveNotesToCenters(trebleTickables, getEvenlySpacedCenters(columns.length, noteArea.left, noteArea.right));
+        trebleVoice.draw(context, treble);
+        bassVoice.draw(context, bass);
+        layoutTickables = trebleTickables;
+      } else {
+        const { staff, stave } = system;
+        const tickables = columns.map((column) =>
+          makeChord(staff === "treble" ? column.trebleNotes : column.bassNotes, staff, highlightedNoteNames, highlightedNoteId),
+        );
+        if (staff === "treble") {
+          trebleTickables.push(...tickables);
+        } else {
+          bassTickables.push(...tickables);
+        }
+        const voice = new Voice(voiceOptions).addTickables(tickables);
+        stave.setNoteStartX(noteArea.left);
+        stave.setWidth(Math.max(1, noteArea.right - metrics.x));
+        new Formatter().joinVoices([voice]).formatToStave([voice], stave, { context, stave });
+        alignStaveNotesToCenters(tickables, getEvenlySpacedCenters(columns.length, noteArea.left, noteArea.right));
+        voice.draw(context, stave);
+        layoutTickables = tickables;
+      }
+      const columnLayouts = getStudyColumnLayouts(layoutTickables, surface.scale);
 
       if (svg && highlightedNoteNames && highlightedNoteNames.size > 0) {
         columns.forEach((column, index) => {
@@ -503,20 +517,28 @@ function StudyNoteMap({
           onPlayColumn,
           svg,
         });
-        addNoteHotspots({
-          chord: trebleTickables[index],
-          highlightedNoteId,
-          notes: column.trebleNotes,
-          onPlayNote,
-          svg,
-        });
-        addNoteHotspots({
-          chord: bassTickables[index],
-          highlightedNoteId,
-          notes: column.bassNotes,
-          onPlayNote,
-          svg,
-        });
+        const trebleTickable = trebleTickables[index];
+        const bassTickable = bassTickables[index];
+        if (trebleTickable) {
+          addNoteHotspots({
+            chord: trebleTickable,
+            effectiveTargetNoteIds,
+            highlightedNoteId,
+            notes: column.trebleNotes,
+            onPlayNote,
+            svg,
+          });
+        }
+        if (bassTickable) {
+          addNoteHotspots({
+            chord: bassTickable,
+            effectiveTargetNoteIds,
+            highlightedNoteId,
+            notes: column.bassNotes,
+            onPlayNote,
+            svg,
+          });
+        }
       });
     }
 
@@ -524,7 +546,17 @@ function StudyNoteMap({
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [columns, highlightedNoteId, highlightedNoteNames, includeLedgerVariants, onPlayColumn, onPlayNote, showLabels]);
+  }, [
+    columns,
+    effectiveTargetNoteIds,
+    highlightedNoteId,
+    highlightedNoteNames,
+    onPlayColumn,
+    onPlayNote,
+    showLabels,
+    staffNotationMode,
+    useLedgerGap,
+  ]);
 
   return (
     <div ref={frameRef} className="study-map" aria-label={label}>
@@ -584,12 +616,13 @@ function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
     () => getStudyColumnDefinitions(columnOrderId, isColumnOrderReversed, randomAnswerNumbers),
     [columnOrderId, isColumnOrderReversed, randomAnswerNumbers],
   );
+  const staffNotationMode = settings.staffNotationMode;
   const studyNotes = useMemo(
-    () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
-    [settings.enabledGroupIds, settings.includeLedgerVariants],
+    () => getNotesForGroups(settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode),
+    [settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode],
   );
   const columns = useMemo(() => buildNoteNameColumns(studyNotes, columnDefinitions), [columnDefinitions, studyNotes]);
-  const showInterStaffLedger = studyNotes.some((note) => note.isLedgerVariant);
+  const showInterStaffLedger = studyNotes.some((note) => note.isInterStaffLedgerSpelling);
 
   const flashColumn = useCallback((noteName: NoteName): void => {
     window.clearTimeout(columnFlashTimerRef.current);
@@ -761,16 +794,23 @@ function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
       />
       <div className="study-map-frame" aria-label="学习页音位图">
         <figure className="study-figure">
-          <StudyNoteMap
-            columns={columns}
-            highlightedNoteId={highlightedNoteId}
-            highlightedNoteNames={highlightedNoteNames}
-            includeLedgerVariants={showInterStaffLedger}
-            label="F1-G6 音符位置"
-            onPlayColumn={playColumn}
-            onPlayNote={playNote}
-            showLabels={showLabels}
-          />
+          {studyNotes.length > 0 ? (
+            <StudyNoteMap
+              columns={columns}
+              highlightedNoteId={highlightedNoteId}
+              highlightedNoteNames={highlightedNoteNames}
+              label="F1-G6 音符位置"
+              onPlayColumn={playColumn}
+              onPlayNote={playNote}
+              showLabels={showLabels}
+              staffNotationMode={staffNotationMode}
+              useLedgerGap={showInterStaffLedger}
+            />
+          ) : (
+            <div className="staff-notation-empty">
+              请选择至少一个音域组
+            </div>
+          )}
         </figure>
       </div>
     </>

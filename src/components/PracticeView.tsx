@@ -12,8 +12,9 @@ import {
   PRACTICE_GROUPS,
 } from "../domain/notes";
 import { shouldIgnoreReviewForSession, shouldKeepPracticeSession } from "../domain/practiceSession";
+import { buildPracticeActivitySnapshot, getEffectivePracticeNotes } from "../domain/practiceComparison";
 import { isCompletedReview } from "../domain/reviews";
-import { getDrillNotes, selectNextNote, selectNotePage } from "../domain/scheduler";
+import { selectNextNote, selectNotePage } from "../domain/scheduler";
 import {
   buildSessionProgressBenchmark,
   buildSessionProgressSeries,
@@ -25,6 +26,7 @@ import {
   formatMs,
   percentile,
 } from "../domain/stats";
+import { applicableLedgerSetting } from "../domain/staffNotation";
 import type {
   AppSettings,
   FocusLoss,
@@ -173,7 +175,7 @@ const PRACTICE_QUEUE_OPTIONS: Array<{ strategy: PracticeQueueStrategy; label: st
   {
     strategy: "note-drill",
     label: "单音强化",
-    description: "只抽所选音名，不写入统计",
+    description: "只抽所选音名；仅选择一个音名时不写入统计",
   },
 ];
 
@@ -352,19 +354,40 @@ export function PracticeView({
     setPracticeSetupPreferences(makeDefaultPracticeSetupUiPreferences(nextSettings));
   }, [setPracticeSetupPreferences]);
 
+  const staffNotationMode = settings.staffNotationMode;
   const enabledNotes = useMemo(
-    () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
-    [settings.enabledGroupIds, settings.includeLedgerVariants],
+    () => getNotesForGroups(settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode),
+    [settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode],
   );
-  const useLedgerGap = enabledNotes.some((note) => note.isLedgerVariant);
+  const useLedgerGap = enabledNotes.some((note) => note.isInterStaffLedgerSpelling);
   const fullPracticeCount = useMemo(
-    () => getNotesForGroups(ALL_GROUP_IDS, settings.includeLedgerVariants).length,
-    [settings.includeLedgerVariants],
+    () => getNotesForGroups(ALL_GROUP_IDS, settings.includeInterStaffLedgerSpellings, staffNotationMode).length,
+    [settings.includeInterStaffLedgerSpellings, staffNotationMode],
   );
-  const fixedCountPresets = useMemo(() => Array.from(new Set([10, 20, fullPracticeCount])), [fullPracticeCount]);
+  const fixedCountPresets = useMemo(
+    () => Array.from(new Set([10, 20, fullPracticeCount])).filter((count) => count > 0),
+    [fullPracticeCount],
+  );
   const queueNotes = useMemo(
-    () => (queueStrategy === "note-drill" ? getDrillNotes(enabledNotes, drillNoteNames) : enabledNotes),
-    [drillNoteNames, enabledNotes, queueStrategy],
+    () =>
+      getEffectivePracticeNotes({
+        drillNoteNames,
+        enabledGroupIds: settings.enabledGroupIds,
+        includeInterStaffLedgerSpellings: settings.includeInterStaffLedgerSpellings,
+        queueStrategy,
+        staffNotationMode,
+      }),
+    [
+      drillNoteNames,
+      queueStrategy,
+      settings.enabledGroupIds,
+      settings.includeInterStaffLedgerSpellings,
+      staffNotationMode,
+    ],
+  );
+  const effectiveTargetNoteIds = useMemo(
+    () => new Set(queueNotes.map((note) => note.id)),
+    [queueNotes],
   );
   const schedulerReviews = useMemo(() => filterLongTermReviews(reviews), [reviews]);
   const setupSettings = useMemo<AppSettings>(
@@ -836,16 +859,23 @@ export function PracticeView({
     const nextMode = nextSettings.defaultMode;
     const nextQueueStrategy = resolveQueueStrategy(nextSettings);
     const nextSchedulerReviews = preflightResult.reviews ? filterLongTermReviews(preflightResult.reviews) : schedulerReviews;
-    const nextEnabledNotes = getNotesForGroups(nextSettings.enabledGroupIds, nextSettings.includeLedgerVariants);
-    const nextQueueNotes =
-      nextQueueStrategy === "note-drill" ? getDrillNotes(nextEnabledNotes, nextSettings.drillNoteNames) : nextEnabledNotes;
-    if (nextQueueNotes.length === 0) {
+    const nextStaffNotationMode = nextSettings.staffNotationMode;
+    const activitySnapshot = buildPracticeActivitySnapshot({
+      drillNoteNames: nextSettings.drillNoteNames,
+      enabledGroupIds: nextSettings.enabledGroupIds,
+      includeInterStaffLedgerSpellings: nextSettings.includeInterStaffLedgerSpellings,
+      promptDisplayMode: nextSettings.promptDisplayMode,
+      queueStrategy: nextQueueStrategy,
+      staffNotationMode: nextStaffNotationMode,
+    });
+    if (!activitySnapshot) {
       return;
     }
+    const nextEnabledNotes = activitySnapshot.notes;
     const startedAt = new Date().toISOString();
     const nextSession: PracticeSessionRecord = {
       id: newSessionId(),
-      schemaVersion: 1,
+      schemaVersion: 2,
       mode: nextMode,
       enabledGroupIds: nextSettings.enabledGroupIds,
       fixedCount: nextMode === "fixed-count" ? nextSettings.fixedCount : undefined,
@@ -854,7 +884,13 @@ export function PracticeView({
       drillNoteNames: nextSettings.drillNoteNames,
       focusedTraining: nextQueueStrategy === "focused",
       promptDisplayMode: nextSettings.promptDisplayMode,
-      includeLedgerVariants: nextSettings.includeLedgerVariants,
+      staffNotationMode: nextStaffNotationMode,
+      includeInterStaffLedgerSpellings: applicableLedgerSetting(
+        nextStaffNotationMode,
+        nextSettings.includeInterStaffLedgerSpellings,
+      ),
+      targetNoteSetKey: activitySnapshot.targetNoteSetKey,
+      effectiveQueueAlgorithm: activitySnapshot.effectiveQueueAlgorithm,
       startedAt,
       completedCount: 0,
       interruptedCount: 0,
@@ -905,6 +941,7 @@ export function PracticeView({
     persistConfig,
     queueNotes.length,
     schedulerReviews,
+    staffNotationMode,
     startPrompt,
     startStaffPage,
     syncStaffPage,
@@ -1444,13 +1481,16 @@ export function PracticeView({
             notes={staffPageNotes}
             completedCount={staffPageCompletedCount}
             noteDuration={promptNoteDuration}
+            staffNotationMode={staffNotationMode}
             useLedgerGap={useLedgerGap}
             wrongIndex={feedback?.type === "wrong" ? staffPageIndex : undefined}
           />
         ) : currentNote ? (
           <StaffPrompt
+            effectiveTargetNoteIds={effectiveTargetNoteIds}
             note={currentNote}
             noteDuration={promptNoteDuration}
+            staffNotationMode={staffNotationMode}
             useLedgerGap={useLedgerGap}
             wrong={feedback?.type === "wrong"}
           />

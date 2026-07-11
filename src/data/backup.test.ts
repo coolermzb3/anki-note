@@ -8,8 +8,10 @@ import type {
   BackupManifest,
   BackupState,
   PracticeSessionRecord,
+  PracticeSessionRecordV1,
   ReviewRecord,
   StaffRecallRunRecord,
+  StaffRecallRunRecordV1,
 } from "../domain/types";
 import { backupText } from "../domain/backupText";
 import { db, makeDefaultSettings } from "./db";
@@ -117,7 +119,7 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
   };
 }
 
-function makeSession(overrides: Partial<PracticeSessionRecord> = {}): PracticeSessionRecord {
+function makeSession(overrides: Partial<PracticeSessionRecordV1> = {}): PracticeSessionRecordV1 {
   return {
     id: "session-browser",
     schemaVersion: 1,
@@ -136,7 +138,7 @@ function makeSession(overrides: Partial<PracticeSessionRecord> = {}): PracticeSe
   };
 }
 
-function makeStaffRecallRun(overrides: Partial<StaffRecallRunRecord> = {}): StaffRecallRunRecord {
+function makeStaffRecallRun(overrides: Partial<StaffRecallRunRecordV1> = {}): StaffRecallRunRecordV1 {
   return {
     id: "recall-backup",
     schemaVersion: 1,

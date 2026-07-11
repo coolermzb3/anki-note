@@ -338,7 +338,7 @@ button.primary.backup-decision-button .backup-action-summary {
 .global-range-controls {
   display: flex;
   flex-wrap: wrap;
-  align-items: stretch;
+  align-items: center;
   justify-content: center;
   gap: 8px;
   margin-bottom: 16px;
@@ -351,6 +351,44 @@ button.primary.backup-decision-button .backup-action-summary {
   gap: 8px;
 }
 
+.global-range-staff-section {
+  align-items: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 42px;
+  max-width: 100%;
+  overflow: clip;
+  padding: 1px;
+}
+
+.global-range-staffs.segmented {
+  background: transparent;
+  border: 0;
+  flex: 1;
+  flex-wrap: nowrap;
+  height: 38px;
+  padding: 0;
+}
+
+.global-range-staffs.segmented button {
+  height: 100%;
+  min-height: 0;
+  min-width: 104px;
+}
+
+.global-range-staff-section-grand {
+  height: 72px;
+}
+
+.global-range-staff-section-grand .global-range-staffs.segmented {
+  flex: none;
+  height: 42px;
+}
+
 .global-range-group-choice {
   min-width: 94px;
   justify-content: center;
@@ -358,13 +396,42 @@ button.primary.backup-decision-button .backup-action-summary {
 
 .global-range-divider {
   width: 1px;
-  min-height: 62px;
+  min-height: 72px;
   background: var(--border);
   margin: 0 4px;
 }
 
 .global-range-ledger-choice {
-  min-width: min(100%, 290px);
+  align-items: center;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 4px;
+  height: 26px;
+  justify-content: center;
+  line-height: 25px;
+  margin: 0;
+  padding: 0 8px;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.global-range-ledger-choice input {
+  height: 14px;
+  margin: 0;
+  width: 14px;
+}
+
+.global-range-ledger-choice small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.global-range-ledger-choice small::before {
+  content: "·";
+  margin-right: 6px;
 }
 
 .global-range-controls-locked {
@@ -589,6 +656,17 @@ button.primary.backup-decision-button .backup-action-summary {
   display: grid;
   min-height: 360px;
   place-items: center;
+}
+
+.staff-notation-empty {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  justify-content: center;
+  min-height: 320px;
+  opacity: 0.58;
+  text-align: center;
+  width: 100%;
 }
 
 .staff-recall-summary {
@@ -1933,8 +2011,20 @@ main.has-backup-reminder .setup-grid::after {
     justify-content: flex-start;
   }
 
-  .global-range-groups {
+  .global-range-groups,
+  .global-range-staffs {
     justify-content: flex-start;
+  }
+
+  .global-range-staff-section,
+  .global-range-staffs.segmented {
+    width: 100%;
+  }
+
+  .global-range-staffs.segmented button {
+    flex: 1;
+    min-width: 0;
+    padding-inline: 8px;
   }
 
   .global-range-divider {

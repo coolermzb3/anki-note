@@ -8,29 +8,51 @@ import {
   isProgressChartEligible,
 } from "./sessionProgress";
 import { makeReview } from "./testFactories";
-import type { PracticeSessionRecord } from "./types";
+import type { AppSettings, PracticeSessionRecordV1 } from "./types";
 
 const REVIEW_NOTE_IDS = ["C4", "D4", "E4", "F4", "G4"] as const;
 
 function makeSession(
-  overrides: Partial<PracticeSessionRecord> & { id: string; startedAt: string },
-): PracticeSessionRecord {
+  overrides: Partial<PracticeSessionRecordV1> & { id: string; startedAt: string },
+): PracticeSessionRecordV1 {
+  const { id, startedAt, ...rest } = overrides;
   return {
-    id: overrides.id,
+    id,
     schemaVersion: 1,
-    mode: overrides.mode ?? "open-ended",
-    enabledGroupIds: overrides.enabledGroupIds ?? ["G3-F4"],
-    fixedCount: overrides.fixedCount,
-    fixedDurationSeconds: overrides.fixedDurationSeconds,
-    queueStrategy: overrides.queueStrategy,
-    drillNoteNames: overrides.drillNoteNames,
-    promptDisplayMode: overrides.promptDisplayMode,
-    includeLedgerVariants: overrides.includeLedgerVariants,
-    startedAt: overrides.startedAt,
-    endedAt: overrides.endedAt,
-    endReason: overrides.endReason,
-    completedCount: overrides.completedCount ?? 0,
-    interruptedCount: overrides.interruptedCount ?? 0,
+    mode: "open-ended",
+    enabledGroupIds: ["G3-F4"],
+    queueStrategy: "adaptive",
+    drillNoteNames: [],
+    promptDisplayMode: "staff-page",
+    includeLedgerVariants: true,
+    startedAt,
+    completedCount: 0,
+    interruptedCount: 0,
+    ...rest,
+  };
+}
+
+function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
+  return {
+    id: "default",
+    schemaVersion: 2,
+    dataSetId: "test",
+    createdAt: "2026-07-04T00:00:00.000+08:00",
+    enabledGroupIds: ["G3-F4"],
+    staffNotationMode: "grand",
+    defaultMode: "fixed-duration",
+    promptDisplayMode: "staff-page",
+    promptNoteDuration: "quarter",
+    fixedCount: 20,
+    fixedDurationSeconds: 60,
+    autoPlayTarget: true,
+    includeInterStaffLedgerSpellings: true,
+    pianoVolume: 0.8,
+    queueStrategy: "adaptive",
+    drillNoteNames: [],
+    inactivityThresholdSeconds: 30,
+    correctDelayMs: 400,
+    ...overrides,
   };
 }
 
@@ -78,19 +100,17 @@ describe("session progress", () => {
           promptDisplayMode: undefined,
         }),
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isComparablePracticeSession(
         { ...reference, includeLedgerVariants: false },
         makeSession({ ...reference, id: "unknown-ledger-snapshot", includeLedgerVariants: undefined }),
-        [makeReview({ targetNoteId: "C4", sessionId: "unknown-ledger-snapshot" })],
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isComparablePracticeSession(
         { ...reference, includeLedgerVariants: false },
         makeSession({ ...reference, id: "observed-ledger-variant", includeLedgerVariants: undefined }),
-        [makeReview({ targetNoteId: "E3-treble", sessionId: "observed-ledger-variant" })],
       ),
     ).toBe(false);
     expect(
@@ -99,6 +119,17 @@ describe("session progress", () => {
         makeSession({ ...reference, id: "different-ledger", includeLedgerVariants: false }),
       ),
     ).toBe(false);
+    expect(
+      isComparablePracticeSession(
+        makeSession({
+          ...reference,
+          id: "full-note-drill",
+          queueStrategy: "note-drill",
+          drillNoteNames: ["C", "D", "E", "F", "G", "A", "B"],
+        }),
+        makeSession({ ...reference, id: "adaptive", queueStrategy: "adaptive", drillNoteNames: [] }),
+      ),
+    ).toBe(true);
     expect(
       isComparablePracticeSession(
         reference,
@@ -173,8 +204,8 @@ describe("session progress", () => {
       mode: "fixed-count",
       fixedCount: 2,
       fixedDurationSeconds: undefined,
-      promptDisplayMode: undefined,
-      includeLedgerVariants: undefined,
+      promptDisplayMode: "staff-page",
+      includeLedgerVariants: true,
     });
     const older = makeSession({
       ...current,
@@ -433,7 +464,7 @@ describe("session progress", () => {
     });
 
     const series = buildLatestSessionProgressSeries({
-      settings: { enabledGroupIds: ["G3-F4"], includeLedgerVariants: true },
+      settings: makeSettings(),
       sessions: [older, latestDifferentRange, latestOpenEnded, latestShort, latest],
       reviews: [
         ...makeSessionReviews("older", [1100, 1200, 1300, 1400, 1500]),
@@ -449,7 +480,7 @@ describe("session progress", () => {
     expect(series.map((line) => line.sessionId)).toEqual(["older", "latest"]);
     expect(
       buildLatestSessionProgressBenchmark({
-        settings: { enabledGroupIds: ["G3-F4"], includeLedgerVariants: true },
+        settings: makeSettings(),
         sessions: [older, latestDifferentRange, latestOpenEnded, latestShort, latest],
         reviews: [
           ...makeSessionReviews("older", [1100, 1200, 1300, 1400, 1500]),

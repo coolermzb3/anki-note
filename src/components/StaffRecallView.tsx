@@ -7,7 +7,6 @@ import { createUuid } from "../domain/id";
 import { getNotesForGroups, NOTE_NAMES } from "../domain/notes";
 import {
   buildNoteNameColumns,
-  buildStaffRecallAnswerSetKey,
   buildStaffRecallTargetNoteIds,
   columnDefinitionsForNoteNames,
   comparableStaffRecallRuns,
@@ -17,6 +16,8 @@ import {
   shuffleNoteNames,
   totalStaffRecallActiveMs,
 } from "../domain/staffRecall";
+import { applicableLedgerSetting } from "../domain/staffNotation";
+import { buildTargetNoteSetKey } from "../domain/targetNoteSet";
 import { formatMs, percentile } from "../domain/stats";
 import type { AppSettings, NoteName, StaffRecallRunRecord, TargetNote, TargetNoteId } from "../domain/types";
 import { HistoryLimitControl } from "./HistoryLimitControl";
@@ -108,21 +109,22 @@ export function StaffRecallView({
   const isPausedRef = useRef(false);
   const mapFrameRef = useRef<HTMLDivElement | null>(null);
 
+  const staffNotationMode = settings.staffNotationMode;
   const inputNotes = useMemo(
-    () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
-    [settings.enabledGroupIds, settings.includeLedgerVariants],
+    () => getNotesForGroups(settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode),
+    [settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode],
   );
   const targetNoteIds = useMemo(() => buildStaffRecallTargetNoteIds(inputNotes), [inputNotes]);
-  const answerSetKey = useMemo(() => buildStaffRecallAnswerSetKey(targetNoteIds), [targetNoteIds]);
-  const answerSetKeyRef = useRef(answerSetKey);
+  const targetNoteSetKey = useMemo(() => buildTargetNoteSetKey(targetNoteIds), [targetNoteIds]);
+  const targetNoteSetKeyRef = useRef(targetNoteSetKey);
   const columnDefinitions = useMemo(() => columnDefinitionsForNoteNames(columnOrder), [columnOrder]);
   const columns = useMemo(
     () => buildNoteNameColumns(inputNotes, columnDefinitions),
     [columnDefinitions, inputNotes],
   );
   const comparableRuns = useMemo(
-    () => comparableStaffRecallRuns(localRuns, answerSetKey),
-    [answerSetKey, localRuns],
+    () => comparableStaffRecallRuns(localRuns, targetNoteSetKey),
+    [localRuns, targetNoteSetKey],
   );
   const comparisonRuns = useMemo(
     () =>
@@ -236,12 +238,12 @@ export function StaffRecallView({
   }, [completedRun]);
 
   useEffect(() => {
-    if (answerSetKeyRef.current === answerSetKey) {
+    if (targetNoteSetKeyRef.current === targetNoteSetKey) {
       return;
     }
-    answerSetKeyRef.current = answerSetKey;
+    targetNoteSetKeyRef.current = targetNoteSetKey;
     resetRun();
-  }, [answerSetKey, resetRun]);
+  }, [resetRun, targetNoteSetKey]);
 
   useEffect(() => {
     function handleVisibilityOrBlur(): void {
@@ -280,9 +282,15 @@ export function StaffRecallView({
       const endedAt = new Date().toISOString();
       const run: StaffRecallRunRecord = {
         id: createUuid(),
-        schemaVersion: 1,
-        answerSetKey,
+        schemaVersion: 2,
+        targetNoteSetKey,
         targetNoteIds,
+        enabledGroupIds: settings.enabledGroupIds,
+        includeInterStaffLedgerSpellings: applicableLedgerSetting(
+          staffNotationMode,
+          settings.includeInterStaffLedgerSpellings,
+        ),
+        staffNotationMode,
         columnOrder,
         columnActiveMs: completeColumnActiveMs(nextStates),
         startedAt: runStartedAtRef.current ?? endedAt,
@@ -302,7 +310,17 @@ export function StaffRecallView({
         savingRef.current = false;
       }
     },
-    [answerSetKey, columnOrder, onDataChanged, onFinished, onRangeLockedChange, targetNoteIds],
+    [
+      columnOrder,
+      onDataChanged,
+      onFinished,
+      onRangeLockedChange,
+      settings.enabledGroupIds,
+      settings.includeInterStaffLedgerSpellings,
+      staffNotationMode,
+      targetNoteIds,
+      targetNoteSetKey,
+    ],
   );
 
   const startColumn = useCallback((noteName: NoteName): boolean => {
@@ -371,7 +389,7 @@ export function StaffRecallView({
   const completedComparableRuns = completedRun
     ? comparableStaffRecallRuns(
         [...localRuns.filter((run) => run.id !== completedRun.id), completedRun],
-        answerSetKey,
+        targetNoteSetKey,
       )
     : [];
   const currentTotalMs = completedRun ? totalStaffRecallActiveMs(completedRun) : undefined;
@@ -433,9 +451,10 @@ export function StaffRecallView({
               onPlacement={handlePlacement}
               comparisonMedianMsByNoteName={comparisonColumnMedianMs}
               runCompleted={completedRun !== undefined}
+              staffNotationMode={staffNotationMode}
             />
           ) : (
-            <div className="staff-recall-empty">请选择音域后开始默写</div>
+            <div className="staff-notation-empty">请选择音域后开始默写</div>
           )}
         </figure>
       </div>

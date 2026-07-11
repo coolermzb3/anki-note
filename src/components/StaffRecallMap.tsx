@@ -3,15 +3,13 @@ import { Formatter, Renderer, type Stave, StaveNote, Voice } from "vexflow";
 import { noteToVexKey } from "../domain/notes";
 import { compareTargetNotePitch, formatStaffRecallDeltaMs, type NoteNameColumn } from "../domain/staffRecall";
 import { formatMs } from "../domain/stats";
-import type { NoteName, Staff, TargetNote, TargetNoteId } from "../domain/types";
+import type { NoteName, Staff, StaffNotationMode, TargetNote, TargetNoteId } from "../domain/types";
 import { STAFF_RECALL_LAYOUT } from "./staffLayoutProfiles";
 import {
   alignStaveNotesToCenters,
   createStaffRenderSurface,
-  drawGrandStaff,
+  drawStaffSystem,
   getEvenlySpacedCenters,
-  getGrandStaffAnchors,
-  getGrandStaffNoteArea,
   getResponsiveStaffFrame,
   logicalPx,
 } from "./staffGeometry";
@@ -30,6 +28,7 @@ interface StaffRecallMapProps {
   inputNotes: TargetNote[];
   onPlacement: (columnNoteName: NoteName, note: TargetNote) => void;
   runCompleted: boolean;
+  staffNotationMode: StaffNotationMode;
 }
 
 interface PlacementGeometry {
@@ -121,6 +120,28 @@ function formatAndDrawLayer({
   alignStaveNotesToCenters(trebleTickables, centers);
   trebleVoice.draw(context, treble);
   bassVoice.draw(context, bass);
+}
+
+function formatAndDrawSingleLayer({
+  centers,
+  context,
+  noteAreaLeft,
+  noteAreaRight,
+  stave,
+  tickables,
+}: {
+  centers: readonly number[];
+  context: ReturnType<Renderer["getContext"]>;
+  noteAreaLeft: number;
+  noteAreaRight: number;
+  stave: Stave;
+  tickables: StaveNote[];
+}): void {
+  tickables.forEach((tickable) => tickable.setStave(stave));
+  const voice = new Voice({ beatValue: 4, numBeats: Math.max(1, tickables.length) * 4 }).addTickables(tickables);
+  new Formatter().joinVoices([voice]).format([voice], Math.max(1, noteAreaRight - noteAreaLeft), { context });
+  alignStaveNotesToCenters(tickables, centers);
+  voice.draw(context, stave);
 }
 
 function drawCenteredText(context: ReturnType<Renderer["getContext"]>, text: string, x: number, y: number): void {
@@ -278,6 +299,7 @@ export function StaffRecallMap({
   inputNotes,
   onPlacement,
   runCompleted,
+  staffNotationMode,
 }: StaffRecallMapProps): JSX.Element {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const rendererTargetRef = useRef<HTMLDivElement | null>(null);
@@ -320,64 +342,75 @@ export function StaffRecallMap({
         `${logicalPx(STAFF_RECALL_LAYOUT.status.valueFontSizePx, surface.scale)}px`,
       );
       const frameMetrics = getResponsiveStaffFrame(surface, columns.length, STAFF_RECALL_LAYOUT.horizontal);
-      const includeLedgerVariants = inputNotes.some((note) => note.isLedgerVariant);
-      const clefGapPx = (
-        includeLedgerVariants
-          ? STAFF_RECALL_LAYOUT.vertical.ledgerGapPx
-          : STAFF_RECALL_LAYOUT.vertical.gapPx
-      );
-      const anchors = getGrandStaffAnchors(
-        surface.scale,
-        STAFF_RECALL_LAYOUT.vertical.centerYPx,
-        clefGapPx,
-      );
-      const grandStaff = drawGrandStaff(context, frameMetrics, anchors, { brace: true });
-      const { bass, treble } = grandStaff;
-
+      const includeInterStaffLedgerSpellings =
+        staffNotationMode === "grand" && inputNotes.some((note) => note.isInterStaffLedgerSpelling);
       const trebleInputNotes = inputNotes.filter((note) => note.staff === "treble").sort(compareTargetNotePitch);
       const bassInputNotes = inputNotes.filter((note) => note.staff === "bass").sort(compareTargetNotePitch);
-      const commonNoteStartX = Math.max(treble.getNoteStartX(), bass.getNoteStartX());
-      treble.setNoteStartX(commonNoteStartX);
-      bass.setNoteStartX(commonNoteStartX);
-      const noteArea = getGrandStaffNoteArea(
-        grandStaff,
-        columns.length,
-        surface.scale,
-        STAFF_RECALL_LAYOUT.horizontal,
-      );
+      const system = drawStaffSystem({
+        brace: true,
+        columnCount: columns.length,
+        context,
+        frame: frameMetrics,
+        horizontal: STAFF_RECALL_LAYOUT.horizontal,
+        mode: staffNotationMode,
+        scale: surface.scale,
+        useLedgerGap: includeInterStaffLedgerSpellings,
+        vertical: STAFF_RECALL_LAYOUT.vertical,
+      });
+      const { noteArea } = system;
+      const treble = system.mode === "grand" ? system.treble : undefined;
+      const bass = system.mode === "grand" ? system.bass : undefined;
+      const singleStave = system.mode === "grand" ? undefined : system.stave;
+      const singleStaff = system.mode === "grand" ? undefined : system.staff;
       const centers = getEvenlySpacedCenters(columns.length, noteArea.left, noteArea.right);
-      addLedgerGuides(svg, centers, trebleInputNotes, treble);
-      addLedgerGuides(svg, centers, bassInputNotes, bass);
+      if (treble && bass) {
+        addLedgerGuides(svg, centers, trebleInputNotes, treble);
+        addLedgerGuides(svg, centers, bassInputNotes, bass);
+      } else if (singleStave) {
+        addLedgerGuides(svg, centers, inputNotes, singleStave);
+      }
+
+      const drawLayer = (
+        notesForColumn: (column: NoteNameColumn, staff: Staff) => TargetNote[],
+        color: string,
+      ): void => {
+        if (treble && bass) {
+          formatAndDrawLayer({
+            bass,
+            bassTickables: columns.map((column) => makeChord(notesForColumn(column, "bass"), "bass", color)),
+            centers,
+            context,
+            noteAreaLeft: noteArea.left,
+            noteAreaRight: noteArea.right,
+            treble,
+            trebleTickables: columns.map((column) => makeChord(notesForColumn(column, "treble"), "treble", color)),
+          });
+          return;
+        }
+        if (!singleStave || !singleStaff) {
+          return;
+        }
+        formatAndDrawSingleLayer({
+          centers,
+          context,
+          noteAreaLeft: noteArea.left,
+          noteAreaRight: noteArea.right,
+          stave: singleStave,
+          tickables: columns.map((column) => makeChord(notesForColumn(column, singleStaff), singleStaff, color)),
+        });
+      };
 
       const correctNotesForColumn = (column: NoteNameColumn, staff: Staff): TargetNote[] => {
         const correctIds = new Set(columnStates[column.noteName].correctNoteIds);
         return column.notes.filter((note) => note.staff === staff && correctIds.has(note.id));
       };
-      formatAndDrawLayer({
-        bass,
-        bassTickables: columns.map((column) => makeChord(correctNotesForColumn(column, "bass"), "bass", CORRECT_COLOR)),
-        centers,
-        context,
-        noteAreaLeft: noteArea.left,
-        noteAreaRight: noteArea.right,
-        treble,
-        trebleTickables: columns.map((column) => makeChord(correctNotesForColumn(column, "treble"), "treble", CORRECT_COLOR)),
-      });
+      drawLayer(correctNotesForColumn, CORRECT_COLOR);
 
       const wrongNoteForColumn = (column: NoteNameColumn, staff: Staff): TargetNote[] => {
         const note = noteById(inputNotes, columnStates[column.noteName].wrongNoteId);
         return note?.staff === staff ? [note] : [];
       };
-      formatAndDrawLayer({
-        bass,
-        bassTickables: columns.map((column) => makeChord(wrongNoteForColumn(column, "bass"), "bass", WRONG_COLOR)),
-        centers,
-        context,
-        noteAreaLeft: noteArea.left,
-        noteAreaRight: noteArea.right,
-        treble,
-        trebleTickables: columns.map((column) => makeChord(wrongNoteForColumn(column, "treble"), "treble", WRONG_COLOR)),
-      });
+      drawLayer(wrongNoteForColumn, WRONG_COLOR);
 
       const hoverNoteForColumn = (column: NoteNameColumn, staff: Staff): TargetNote[] => {
         if (hovered?.columnNoteName !== column.noteName) {
@@ -389,20 +422,12 @@ export function StaffRecallMap({
         }
         return [note];
       };
-      formatAndDrawLayer({
-        bass,
-        bassTickables: columns.map((column) => makeChord(hoverNoteForColumn(column, "bass"), "bass", HOVER_COLOR)),
-        centers,
-        context,
-        noteAreaLeft: noteArea.left,
-        noteAreaRight: noteArea.right,
-        treble,
-        trebleTickables: columns.map((column) => makeChord(hoverNoteForColumn(column, "treble"), "treble", HOVER_COLOR)),
-      });
+      drawLayer(hoverNoteForColumn, HOVER_COLOR);
 
       const placements = [
-        ...getPlacements(trebleInputNotes, treble),
-        ...getPlacements(bassInputNotes, bass),
+        ...(treble ? getPlacements(trebleInputNotes, treble) : []),
+        ...(bass ? getPlacements(bassInputNotes, bass) : []),
+        ...(singleStave ? getPlacements(inputNotes, singleStave) : []),
       ];
       const columnGeometry = columns.map((column, index): ColumnGeometry => {
         const { left, right } = getColumnBounds(centers, index, surface.width);
@@ -497,7 +522,8 @@ export function StaffRecallMap({
         columns: columnGeometry,
         height: surface.height,
         placementHitRadius:
-          treble.getSpacingBetweenLines() * STAFF_RECALL_LAYOUT.placementHitRadiusInStaffSpaces,
+          ((treble ?? singleStave)?.getSpacingBetweenLines() ?? 0) *
+          STAFF_RECALL_LAYOUT.placementHitRadiusInStaffSpaces,
         width: surface.width,
         x: 0,
         y: 0,
@@ -508,7 +534,16 @@ export function StaffRecallMap({
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [activeNoteName, columnStates, columns, comparisonMedianMsByNoteName, hovered, inputNotes, runCompleted]);
+  }, [
+    activeNoteName,
+    columnStates,
+    columns,
+    comparisonMedianMsByNoteName,
+    hovered,
+    inputNotes,
+    runCompleted,
+    staffNotationMode,
+  ]);
 
   const hitTest = useCallback((clientX: number, clientY: number): { columnNoteName: NoteName; note: TargetNote } | null => {
     const rendererTarget = rendererTargetRef.current;
@@ -571,7 +606,7 @@ export function StaffRecallMap({
   return (
     <div className="staff-recall-scroll">
       <div
-        aria-label="默写大谱表"
+        aria-label={staffNotationMode === "grand" ? "默写大谱表" : "默写单谱表"}
         className="staff-recall-map"
         onClick={handleClick}
         onPointerLeave={() => setHovered(null)}

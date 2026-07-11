@@ -1,7 +1,7 @@
 import { useRef } from "react";
 
 import { PRACTICE_GROUPS } from "../domain/notes";
-import type { AppSettings, PracticeGroupId } from "../domain/types";
+import type { AppSettings, PracticeGroupId, StaffNotationMode } from "../domain/types";
 
 interface GlobalRangeControlsProps {
   disabled?: boolean;
@@ -47,12 +47,63 @@ export function GlobalRangeControls({ disabled = false, settings, onSettingsSave
     save({ ...settings, enabledGroupIds: nextGroupIds });
   }
 
+  function selectStaffNotationMode(staffNotationMode: StaffNotationMode): void {
+    save({ ...settings, staffNotationMode });
+  }
+
   function toggleInterStaffLedger(checked: boolean): void {
-    save({ ...settings, includeLedgerVariants: checked });
+    save({ ...settings, includeInterStaffLedgerSpellings: checked });
   }
 
   return (
     <div className={disabled ? "global-range-controls global-range-controls-locked" : "global-range-controls"} aria-label="全局范围">
+      <div
+        className={
+          settings.staffNotationMode === "grand"
+            ? "global-range-staff-section global-range-staff-section-grand"
+            : "global-range-staff-section"
+        }
+      >
+        <div className="segmented global-range-staffs" aria-label="谱表选择">
+          {([
+            ["treble-only", "高音谱表"],
+            ["bass-only", "低音谱表"],
+            ["grand", "大谱表"],
+          ] as const).map(([staffNotationMode, label]) => {
+            return (
+              <button
+                aria-pressed={settings.staffNotationMode === staffNotationMode}
+                className={settings.staffNotationMode === staffNotationMode ? "active" : ""}
+                disabled={disabled}
+                key={staffNotationMode}
+                type="button"
+                onClick={() => selectStaffNotationMode(staffNotationMode)}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {settings.staffNotationMode === "grand" ? (
+          <label
+            className="global-range-ledger-choice"
+            onPointerDown={markPointerToggle}
+          >
+            <input
+              checked={settings.includeInterStaffLedgerSpellings}
+              disabled={disabled}
+              type="checkbox"
+              onChange={(event) => {
+                toggleInterStaffLedger(event.target.checked);
+                blurAfterPointerToggle(event.currentTarget);
+              }}
+            />
+            <span>谱表间加线</span>
+            <small>E3–A4 同时练习两种谱号</small>
+          </label>
+        ) : null}
+      </div>
+      <span className="global-range-divider" aria-hidden="true" />
       <div className="global-range-groups">
         {PRACTICE_GROUPS.map((group) => {
           const checked = settings.enabledGroupIds.includes(group.id);
@@ -76,29 +127,6 @@ export function GlobalRangeControls({ disabled = false, settings, onSettingsSave
           );
         })}
       </div>
-      <span className="global-range-divider" aria-hidden="true" />
-      <label
-        className={
-          settings.includeLedgerVariants
-            ? "choice choice-active choice-detail global-range-ledger-choice"
-            : "choice choice-detail global-range-ledger-choice"
-        }
-        onPointerDown={markPointerToggle}
-      >
-        <input
-          checked={settings.includeLedgerVariants}
-          disabled={disabled}
-          type="checkbox"
-          onChange={(event) => {
-            toggleInterStaffLedger(event.target.checked);
-            blurAfterPointerToggle(event.currentTarget);
-          }}
-        />
-        <div className="choice-body">
-          <strong>谱表间加线</strong>
-          <span>E3-A4 同时练高音谱号和低音谱号写法</span>
-        </div>
-      </label>
     </div>
   );
 }

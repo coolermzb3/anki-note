@@ -597,9 +597,10 @@ export function StatsView({
   };
 
   const longTermReviews = useMemo(() => filterLongTermReviews(reviews), [reviews]);
+  const staffNotationMode = settings.staffNotationMode;
   const activeNotes = useMemo(
-    () => getNotesForGroups(settings.enabledGroupIds, settings.includeLedgerVariants),
-    [settings.enabledGroupIds, settings.includeLedgerVariants],
+    () => getNotesForGroups(settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode),
+    [settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode],
   );
   const groupScopedReviews = useMemo(() => {
     const activeTargetNoteIds = new Set(activeNotes.map((note) => note.id));
@@ -908,7 +909,12 @@ export function StatsView({
                 </span>
               </div>
             </div>
-            <StatsRangeStaff label="识别速度音域分布" notes={timeStaffNotes} tone="blue" />
+            <StatsRangeStaff
+              label="识别速度音域分布"
+              notes={timeStaffNotes}
+              staffNotationMode={staffNotationMode}
+              tone="blue"
+            />
           </div>
           <div className="note-heat-row">
             <div className="note-heat-row-heading">
@@ -932,7 +938,12 @@ export function StatsView({
                 </span>
               </div>
             </div>
-            <StatsRangeStaff label="错误次数音域分布" notes={errorStaffNotes} tone="red" />
+            <StatsRangeStaff
+              label="错误次数音域分布"
+              notes={errorStaffNotes}
+              staffNotationMode={staffNotationMode}
+              tone="red"
+            />
           </div>
         </div>
       </div>

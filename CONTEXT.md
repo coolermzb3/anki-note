@@ -5,7 +5,7 @@ This context defines the language for a web app that trains piano staff note rec
 ## Language
 
 **Natural-note card**:
-A flashcard whose answer is one of the seven natural piano note names, without sharps or flats. The first practice set contains 48 natural-note cards from F1 through G6, because pitches E3 through A4 each appear as separate treble-staff and bass-staff cards.
+A flashcard whose answer is one of the seven natural piano note names, without sharps or flats. The available range contains 37 natural pitches from F1 through G6 and two staff-specific target notes for each pitch, for 74 potential cards across all staff notation modes.
 _Avoid_: Piano card, note card
 
 **Fixed-do number**:
@@ -16,12 +16,20 @@ _Avoid_: Scale degree, movable-do number, arbitrary answer number
 The exact card prompt shown to the learner, including its pitch, octave, and staff placement. A target note is the same learning and history identity wherever that pitch and staff placement appears; it determines staff position and audio pitch, but the learner answers only its natural note name.
 _Avoid_: Correct pitch
 
+**Effective target-note set**:
+The exact set of target notes produced after applying the enabled groups, staff notation mode, any applicable inter-staff ledger spelling setting, and any candidate filter such as selected single-note drill names. An activity snapshots this set when it starts; different settings may produce the same set, and activity comparability uses the resulting snapshot rather than those settings.
+_Avoid_: Matching settings, configured range
+
+**Target-note-set key**:
+The canonical, order-independent identifier of an effective target-note set, shared by practice sessions and staff-recall runs. It identifies only set membership, never prompt order, column order, or queue order.
+_Avoid_: Answer set key, sequence key
+
 **Inter-staff ledger spelling**:
-One of the treble-staff or bass-staff notations for pitches E3 through A4, the range written in the ledger-line space between the treble and bass staves on the grand staff. The UI labels this option as `谱表间加线`.
+One of the treble-staff or bass-staff notations for pitches E3 through A4, the range written in the ledger-line space between the treble and bass staves on the grand staff. The UI labels this option as `谱表间加线`; ledger-line-heavy spellings outside this range in a single-clef mode are not inter-staff ledger spellings and are not controlled by this setting.
 _Avoid_: Generic ledger note, overlapping grand staff, double clef
 
 **Practice range**:
-The closed set of notes that may appear as cards in a practice session. The first practice range is F1 through G6, grouped into five contiguous practice groups. Pitches E3 through A4 have two target-note cards so the learner can practice both inter-staff ledger spellings; this added spelling set can be disabled.
+The effective target-note set that may appear as cards in a practice session. The available pitches span F1 through G6 and are grouped into five contiguous practice groups.
 _Avoid_: Piano range, common range
 
 **Practice group**:
@@ -29,27 +37,27 @@ A contiguous subset of the practice range. The middle groups cover the natural p
 _Avoid_: Difficulty level, card group
 
 **Enabled group**:
-A practice group selected by the learner as part of the current app-wide note range. Enabled groups scope practice prompts, statistics filters, and study maps consistently. The first version does not have locked or unlocked groups; any practice group may be enabled freely.
+A practice group selected by the learner as part of the current app-wide note range. Enabled groups scope practice prompts, statistics filters, and study maps consistently. The first version does not have locked or unlocked groups; any practice group may be enabled freely. The app-wide selection may be empty while controls are being changed, but an activity cannot start until at least one group is enabled.
 _Avoid_: Unlocked group, available group
 
 **Staff recall**:
-The non-practice study activity labeled `默写`, where the learner reconstructs staff placements from written note-name prompts. For each prompt, the required placements are exactly the target notes shown for the same answer note name by the study map under the same enabled groups and inter-staff ledger spelling setting.
+The non-practice study activity labeled `默写`, where the learner reconstructs staff placements from written note-name prompts. For each prompt, the required placements are exactly the target notes shown for the same answer note name by the study map in the activity's effective target-note set.
 _Avoid_: Dictation practice, reverse practice mode
 
 **Staff-recall column**:
-One of the seven note-name answer areas in staff recall. Each column has its own answer state and completion time while sharing one grand staff with the other columns.
+One of the seven note-name answer areas in staff recall. Each column has its own answer state and completion time while sharing one notation surface in the current staff notation mode with the other columns.
 _Avoid_: Recall card, separate staff
 
 **Staff-recall input range**:
-The target-note placements available for input across all seven staff-recall columns, exactly matching the placements shown by the study map under the current enabled groups and inter-staff ledger spelling setting. Gaps between non-contiguous enabled groups are not input positions.
+The effective target-note set available for input across all seven staff-recall columns, exactly matching the placements shown by the study map. Gaps between non-contiguous enabled groups are not input positions.
 _Avoid_: Continuous staff range, every visible line and space
 
 **Staff-recall run**:
-A completed staff-recall activity in which the learner finishes all seven staff-recall columns under one practice range and inter-staff ledger spelling setting. Completed runs are persistent learner history, separate from practice sessions and reviews.
+A completed staff-recall activity in which the learner finishes all seven staff-recall columns under one effective target-note-set snapshot. Completed runs are persistent learner history, separate from practice sessions and reviews.
 _Avoid_: Practice session, incomplete recall attempt
 
 **Comparable staff-recall run**:
-A staff-recall run whose required target-note set exactly matches another run. Random staff-recall column order does not affect comparability.
+A staff-recall run whose effective target-note set exactly matches another run. The settings that produced the set and the random staff-recall column order do not affect comparability.
 _Avoid_: Same enabled-group labels, same column order
 
 **Staff-recall time**:
@@ -57,13 +65,13 @@ The active elapsed time from the first placement in a staff-recall column until 
 _Avoid_: Wall-clock time, time since entering recall
 
 **Practice session**:
-A contiguous period of practice using the currently enabled groups. A session may be an open-ended flow that continues until the learner stops, a fixed-count session that ends after a chosen number of completed reviews, or a fixed-duration session that ends after a chosen active practice duration.
+A contiguous period of practice using one effective target-note-set snapshot. A session may be an open-ended flow that continues until the learner stops, a fixed-count session that ends after a chosen number of completed reviews, or a fixed-duration session that ends after a chosen active practice duration.
 _Avoid_: Game, round
 
 **Comparable practice session**:
 A fixed-count or fixed-duration practice session that can be compared with another session because it used the same
-practice range, staff notation mode, applicable inter-staff ledger spelling setting, prompt display mode, and practice queue strategy.
-Prompt note duration and automatic target-note playback do not make sessions incomparable.
+effective target-note set, prompt display mode, and effective queue algorithm.
+Direct comparability governs shared progress benchmarks and record claims; showing sessions together for exploratory comparison does not make them directly comparable. Prompt note duration and automatic target-note playback do not make sessions incomparable.
 _Avoid_: Same round, identical UI state
 
 **Practice queue**:
@@ -74,6 +82,10 @@ _Avoid_: Deck scheduler, spaced-repetition scheduler
 The learner-selected policy used to build the practice queue. Current strategies are a regular adaptive queue, a focused weak-note queue, a melody queue, and a single-note drill queue.
 _Avoid_: Training mode, scheduler
 
+**Effective queue algorithm**:
+The stable, versioned scheduling behavior applied after the effective target-note set is established. The regular adaptive strategy and single-note drill strategy use the same adaptive algorithm after candidate filtering, while focused and melody strategies use distinct algorithms; ordinary weight tuning keeps the same version, while a change in training semantics creates a new version and direct comparison group.
+_Avoid_: Selected strategy label, queue configuration
+
 **Melody queue**:
 A practice queue strategy that orders enabled target notes into a melody-like pitch sequence within the selected practice range. A melody queue still produces ordinary target-note reviews; it does not add rhythm, ear-training answers, or a separate scoring model.
 _Avoid_: Song mode, generated sheet music
@@ -83,11 +95,11 @@ A practice queue strategy that restricts prompts to one or more selected answer 
 _Avoid_: Separate deck, filtered group
 
 **Staff notation mode**:
-The app-wide choice of which staff spellings are available for enabled pitches: treble only, bass only, or grand staff. A state with neither staff selected is not a notation mode and cannot define a practice session. A single-clef mode has one target note per pitch in the selected clef, while grand-staff mode uses the ordinary spellings plus any enabled inter-staff ledger spellings.
-_Avoid_: Clef visibility, visual style
+The app-wide choice of treble staff, bass staff, or grand staff. Activities snapshot exactly one valid mode; a single-clef mode has one target note per pitch in the selected clef, while grand-staff mode uses the ordinary spellings plus any enabled inter-staff ledger spellings.
+_Avoid_: Clef visibility, staff selection
 
 **Grand-staff prompt**:
-A card prompt in grand-staff notation mode that shows both treble and bass staves while asking for a single note. Outside the inter-staff ledger range, notes C4 and above appear on the treble staff and notes B3 and below appear on the bass staff. In the inter-staff ledger range E3 through A4, each pitch has a treble-staff card and a bass-staff card.
+A card prompt in grand-staff notation mode that shows both treble and bass staves while asking for a single note. Outside the inter-staff ledger range, notes C4 and above appear on the treble staff and notes B3 and below appear on the bass staff. When `谱表间加线` is enabled, pitches E3 through A4 additionally include the alternate staff spelling.
 _Avoid_: Staff image, sheet image
 
 **Staff-page prompt**:
@@ -115,7 +127,7 @@ One complete attempt at a card, from the moment the prompt appears until the lea
 _Avoid_: Click attempt, answer event
 
 **Recognition time**:
-The active elapsed time from when a grand-staff prompt appears until the learner submits the first correct answer. Recognition time includes active time spent hearing audio cues and making wrong answers, but excludes time while the practice window is unfocused.
+The active elapsed time from when a target-note prompt appears until the learner submits the first correct answer. Recognition time includes active time spent hearing audio cues and making wrong answers, but excludes time while the practice window is unfocused.
 _Avoid_: Response time, click time
 
 **Interrupted review**:

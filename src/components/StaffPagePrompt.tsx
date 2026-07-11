@@ -1,23 +1,21 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Formatter, GhostNote, StaveNote, Voice } from "vexflow";
 import { noteToVexKey } from "../domain/notes";
-import type { PromptNoteDuration, TargetNote } from "../domain/types";
+import type { PromptNoteDuration, StaffNotationMode, TargetNote } from "../domain/types";
 import { PRACTICE_PAGE_STAFF_LAYOUT } from "./staffLayoutProfiles";
 import {
   createStaffRenderSurface,
-  drawGrandStaff,
+  drawStaffSystem,
   getFixedStaffFrame,
-  getGrandStaffAnchors,
-  getGrandStaffNoteArea,
   getLedgerStemDirection,
   logicalPx,
-  type DrawnGrandStaff,
 } from "./staffGeometry";
 
 interface StaffPagePromptProps {
   notes: TargetNote[];
   completedCount: number;
   noteDuration: PromptNoteDuration;
+  staffNotationMode: StaffNotationMode;
   useLedgerGap: boolean;
   wrongIndex?: number;
 }
@@ -83,6 +81,7 @@ export function StaffPagePrompt({
   notes,
   completedCount,
   noteDuration,
+  staffNotationMode,
   useLedgerGap,
   wrongIndex,
 }: StaffPagePromptProps): JSX.Element {
@@ -121,22 +120,6 @@ export function StaffPagePrompt({
         surface,
         PRACTICE_PAGE_STAFF_LAYOUT.horizontal.staffSidePaddingPx,
       );
-      const anchors = getGrandStaffAnchors(
-        surface.scale,
-        PRACTICE_PAGE_STAFF_LAYOUT.vertical.centerYPx,
-        useLedgerGap
-          ? PRACTICE_PAGE_STAFF_LAYOUT.vertical.ledgerGapPx
-          : PRACTICE_PAGE_STAFF_LAYOUT.vertical.gapPx,
-      );
-
-      const getSystemNoteArea = (staves: DrawnGrandStaff) =>
-        getGrandStaffNoteArea(
-          staves,
-          PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow,
-          surface.scale,
-          PRACTICE_PAGE_STAFF_LAYOUT.horizontal,
-        );
-
       rows.forEach((rowNotes, rowIndex) => {
         const rowStep = logicalPx(
           PRACTICE_PAGE_STAFF_LAYOUT.vertical.viewHeightPx +
@@ -145,55 +128,85 @@ export function StaffPagePrompt({
         );
         const baseY = rowIndex * rowStep;
         const rowGroup = context.openGroup("staff-page-system");
-        const grandStaff = drawGrandStaff(context, frameMetrics, anchors, {
-          brace: true,
-          yOffset: baseY,
-        });
-        const { bass, treble } = grandStaff;
-        const noteArea = getSystemNoteArea(grandStaff);
-
         const rowStartIndex = rowIndex * PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow;
         const rowSlots = Array.from(
           { length: PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow },
           (_, slotIndex) => rowNotes[slotIndex],
         );
         const vexDuration = noteDurationToVexDuration(noteDuration);
-        const trebleTickables = rowSlots.map((note, slotIndex) =>
-          note?.staff === "treble"
-            ? makeStaveNote(note, colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex), noteDuration)
-            : new GhostNote(vexDuration),
-        );
-        const bassTickables = rowSlots.map((note, slotIndex) =>
-          note?.staff === "bass"
-            ? makeStaveNote(note, colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex), noteDuration)
-            : new GhostNote(vexDuration),
-        );
         const voiceOptions = {
           beatValue: 4,
           numBeats: PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow * noteDurationToBeats(noteDuration),
         };
-        const trebleVoice = new Voice(voiceOptions).addTickables(trebleTickables);
-        const bassVoice = new Voice(voiceOptions).addTickables(bassTickables);
-        treble.setNoteStartX(noteArea.left);
-        bass.setNoteStartX(noteArea.left);
-        treble.setWidth(Math.max(1, noteArea.right - frameMetrics.x));
-        bass.setWidth(Math.max(1, noteArea.right - frameMetrics.x));
-        new Formatter().joinVoices([trebleVoice, bassVoice]).formatToStave([trebleVoice, bassVoice], treble, {
+        let layoutTickables;
+        let barlineTopY: number;
+        let barlineBottomY: number;
+        const system = drawStaffSystem({
+          brace: true,
+          columnCount: PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow,
           context,
-          stave: treble,
+          frame: frameMetrics,
+          horizontal: PRACTICE_PAGE_STAFF_LAYOUT.horizontal,
+          mode: staffNotationMode,
+          scale: surface.scale,
+          useLedgerGap,
+          vertical: PRACTICE_PAGE_STAFF_LAYOUT.vertical,
+          yOffset: baseY,
         });
-        trebleVoice.draw(context, treble);
-        bassVoice.draw(context, bass);
+        const { noteArea } = system;
+        if (system.mode === "grand") {
+          const { bass, treble } = system;
+          const trebleTickables = rowSlots.map((note, slotIndex) =>
+            note?.staff === "treble"
+              ? makeStaveNote(note, colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex), noteDuration)
+              : new GhostNote(vexDuration),
+          );
+          const bassTickables = rowSlots.map((note, slotIndex) =>
+            note?.staff === "bass"
+              ? makeStaveNote(note, colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex), noteDuration)
+              : new GhostNote(vexDuration),
+          );
+          const trebleVoice = new Voice(voiceOptions).addTickables(trebleTickables);
+          const bassVoice = new Voice(voiceOptions).addTickables(bassTickables);
+          treble.setNoteStartX(noteArea.left);
+          bass.setNoteStartX(noteArea.left);
+          treble.setWidth(Math.max(1, noteArea.right - frameMetrics.x));
+          bass.setWidth(Math.max(1, noteArea.right - frameMetrics.x));
+          new Formatter().joinVoices([trebleVoice, bassVoice]).formatToStave([trebleVoice, bassVoice], treble, {
+            context,
+            stave: treble,
+          });
+          trebleVoice.draw(context, treble);
+          bassVoice.draw(context, bass);
+          layoutTickables = trebleTickables;
+          barlineTopY = treble.getYForLine(0);
+          barlineBottomY = bass.getYForLine(4);
+        } else {
+          const { staff, stave } = system;
+          const tickables = rowSlots.map((note, slotIndex) =>
+            note
+              ? makeStaveNote(note, colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex), noteDuration)
+              : new GhostNote(vexDuration),
+          );
+          const voice = new Voice(voiceOptions).addTickables(tickables);
+          stave.setNoteStartX(noteArea.left);
+          stave.setWidth(Math.max(1, noteArea.right - frameMetrics.x));
+          new Formatter().joinVoices([voice]).formatToStave([voice], stave, { context, stave });
+          voice.draw(context, stave);
+          layoutTickables = tickables;
+          barlineTopY = stave.getYForLine(0);
+          barlineBottomY = stave.getYForLine(4);
+        }
 
         for (
           let boundaryIndex = PRACTICE_PAGE_STAFF_LAYOUT.multirow.barlineInterval;
           boundaryIndex <= rowNotes.length && boundaryIndex < PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow;
           boundaryIndex += PRACTICE_PAGE_STAFF_LAYOUT.multirow.barlineInterval
         ) {
-          const previousTickable = trebleTickables[boundaryIndex - 1];
-          const nextTickable = trebleTickables[boundaryIndex];
+          const previousTickable = layoutTickables[boundaryIndex - 1];
+          const nextTickable = layoutTickables[boundaryIndex];
           const barlineX = (previousTickable.getAbsoluteX() + nextTickable.getAbsoluteX()) / 2;
-          addBarline(rowGroup, barlineX, treble.getYForLine(0), bass.getYForLine(4));
+          addBarline(rowGroup, barlineX, barlineTopY, barlineBottomY);
         }
         context.closeGroup();
       });
@@ -203,7 +216,7 @@ export function StaffPagePrompt({
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [completedCount, noteDuration, rows, useLedgerGap, wrongIndex]);
+  }, [completedCount, noteDuration, rows, staffNotationMode, useLedgerGap, wrongIndex]);
 
   return (
     <div ref={frameRef} className="staff-page" aria-label="谱页">

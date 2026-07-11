@@ -11,9 +11,11 @@ import {
   positiveTertileThresholds,
 } from "./stats";
 import { makeReview } from "./testFactories";
-import type { PracticeSessionRecord } from "./types";
+import type { PracticeSessionRecordV1 } from "./types";
 
-function makeSession(overrides: Partial<PracticeSessionRecord> & { id: string; startedAt: string }): PracticeSessionRecord {
+function makeSession(
+  overrides: Partial<PracticeSessionRecordV1> & { id: string; startedAt: string },
+): PracticeSessionRecordV1 {
   return {
     id: overrides.id,
     schemaVersion: 1,

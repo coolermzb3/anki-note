@@ -1,22 +1,22 @@
 import { useEffect, useRef } from "react";
 import { Formatter, StaveNote, Voice } from "vexflow";
 import { formatTargetNoteLabel, noteToVexKey } from "../domain/notes";
-import type { PromptNoteDuration, TargetNote } from "../domain/types";
+import type { PromptNoteDuration, StaffNotationMode, TargetNote, TargetNoteId } from "../domain/types";
 import { PRACTICE_SINGLE_STAFF_LAYOUT } from "./staffLayoutProfiles";
 import {
   alignStaveNotesToCenters,
   createStaffRenderSurface,
-  drawGrandStaff,
+  drawStaffSystem,
   getEvenlySpacedCenters,
   getFixedStaffFrame,
-  getGrandStaffAnchors,
-  getGrandStaffNoteArea,
   getLedgerStemDirection,
 } from "./staffGeometry";
 
 interface StaffPromptProps {
+  effectiveTargetNoteIds: ReadonlySet<TargetNoteId>;
   note: TargetNote;
   noteDuration: PromptNoteDuration;
+  staffNotationMode: StaffNotationMode;
   useLedgerGap: boolean;
   wrong?: boolean;
 }
@@ -45,8 +45,10 @@ function makePromptNote(note: TargetNote, noteDuration: PromptNoteDuration, colo
 }
 
 export function StaffPrompt({
+  effectiveTargetNoteIds,
   note,
   noteDuration,
+  staffNotationMode,
   useLedgerGap,
   wrong = false,
 }: StaffPromptProps): JSX.Element {
@@ -81,25 +83,23 @@ export function StaffPrompt({
         surface,
         PRACTICE_SINGLE_STAFF_LAYOUT.horizontal.staffSidePaddingPx,
       );
-      const anchors = getGrandStaffAnchors(
-        surface.scale,
-        PRACTICE_SINGLE_STAFF_LAYOUT.vertical.centerYPx,
-        useLedgerGap
-          ? PRACTICE_SINGLE_STAFF_LAYOUT.vertical.ledgerGapPx
-          : PRACTICE_SINGLE_STAFF_LAYOUT.vertical.gapPx,
-      );
-      const grandStaff = drawGrandStaff(context, frameMetrics, anchors, { brace: true });
-      const { bass, treble } = grandStaff;
-
-      const noteArea = getGrandStaffNoteArea(
-        grandStaff,
-        1,
-        surface.scale,
-        PRACTICE_SINGLE_STAFF_LAYOUT.horizontal,
-      );
+      const system = drawStaffSystem({
+        brace: true,
+        columnCount: 1,
+        context,
+        frame: frameMetrics,
+        horizontal: PRACTICE_SINGLE_STAFF_LAYOUT.horizontal,
+        mode: staffNotationMode,
+        scale: surface.scale,
+        useLedgerGap,
+        vertical: PRACTICE_SINGLE_STAFF_LAYOUT.vertical,
+      });
+      const targetStave = system.mode === "grand"
+        ? note.staff === "treble" ? system.treble : system.bass
+        : system.stave;
+      const { noteArea } = system;
       const noteCenter = getEvenlySpacedCenters(1, noteArea.left, noteArea.right);
       const drawNote = (targetNote: TargetNote, color: string): void => {
-        const targetStave = targetNote.staff === "treble" ? treble : bass;
         const staveNote = makePromptNote(targetNote, noteDuration, color).setStave(targetStave);
         const voice = new Voice({ numBeats: noteDurationToBeats(noteDuration), beatValue: 4 }).addTickables([staveNote]);
         new Formatter().joinVoices([voice]).format([voice], Math.max(1, noteArea.right - noteArea.left), { context });
@@ -113,10 +113,14 @@ export function StaffPrompt({
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [note, noteDuration, useLedgerGap, wrong]);
+  }, [note, noteDuration, staffNotationMode, useLedgerGap, wrong]);
 
   return (
-    <div ref={frameRef} className="staff" aria-label={`谱面 ${formatTargetNoteLabel(note)}`}>
+    <div
+      ref={frameRef}
+      className="staff"
+      aria-label={`谱面 ${formatTargetNoteLabel(note, effectiveTargetNoteIds)}`}
+    >
       <div ref={rendererTargetRef} className="staff-renderer" />
     </div>
   );

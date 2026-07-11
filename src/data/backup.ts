@@ -1,7 +1,7 @@
 import { buildBackupSnapshot, getBackupDataModifiedAt, getBackupManifestVersion } from "../domain/backupSnapshot";
 import { deriveBackupDataStatus, type BackupDataStatus } from "../domain/backupSync";
 import { backupText } from "../domain/backupText";
-import { normalizePracticeGroupIds } from "../domain/notes";
+import { normalizeCurrentPracticeGroupIds } from "../domain/notes";
 import { normalizePianoVolume } from "../domain/settings";
 import type {
   AppSettings,
@@ -18,6 +18,7 @@ import {
   getBackupState,
   loadAllData,
   makeDefaultSettings,
+  normalizeAppSettings,
   replaceAllData,
   resolveDrillNoteNames,
   resolveQueueStrategy,
@@ -519,20 +520,21 @@ export async function readBackupSnapshot(directory: FileSystemDirectoryHandle): 
   const reviews = dayFiles.flatMap((day) => day.reviews);
   const staffRecallRuns = dayFiles.flatMap((day) => day.staffRecallRuns ?? []);
   const existingSettings = await db.settings.get("default");
-  const baseSettings = manifest.settings ?? existingSettings ?? makeDefaultSettings();
+  const baseSettings = normalizeAppSettings(manifest.settings ?? existingSettings ?? makeDefaultSettings());
   const settings: AppSettings = {
     ...baseSettings,
+    schemaVersion: 2,
     dataSetId: manifest.dataSetId,
     createdAt: manifest.createdAt,
     firstReviewAt: manifest.firstReviewAt,
-    enabledGroupIds: normalizePracticeGroupIds(baseSettings.enabledGroupIds ?? []),
-    includeLedgerVariants: baseSettings.includeLedgerVariants ?? true,
+    enabledGroupIds: normalizeCurrentPracticeGroupIds(baseSettings.enabledGroupIds),
+    includeInterStaffLedgerSpellings: baseSettings.includeInterStaffLedgerSpellings,
     queueStrategy: resolveQueueStrategy(baseSettings),
     drillNoteNames: resolveDrillNoteNames(baseSettings),
     focusedTraining: baseSettings.focusedTraining ?? resolveQueueStrategy(baseSettings) === "focused",
     pianoVolume: normalizePianoVolume(baseSettings.pianoVolume),
-    promptDisplayMode: baseSettings.promptDisplayMode ?? "staff-page",
-    promptNoteDuration: baseSettings.promptNoteDuration ?? "quarter",
+    promptDisplayMode: baseSettings.promptDisplayMode,
+    promptNoteDuration: baseSettings.promptNoteDuration,
   };
   return { manifest, settings, sessions, reviews, staffRecallRuns };
 }

@@ -1,6 +1,7 @@
 export type NoteName = "C" | "D" | "E" | "F" | "G" | "A" | "B";
 export type Octave = 1 | 2 | 3 | 4 | 5 | 6;
 export type Staff = "treble" | "bass";
+export type StaffNotationMode = "treble-only" | "bass-only" | "grand";
 export type PitchId = `${NoteName}${Octave}`;
 export type TargetNoteId = PitchId | `${PitchId}-${Staff}`;
 
@@ -8,6 +9,7 @@ export type PracticeMode = "open-ended" | "fixed-count" | "fixed-duration";
 export type PracticeQueueStrategy = "adaptive" | "focused" | "melody" | "note-drill";
 export type PromptDisplayMode = "single-note" | "staff-page";
 export type PromptNoteDuration = "whole" | "quarter";
+export type EffectiveQueueAlgorithm = "adaptive-v1" | "focused-v1" | "melody-v1";
 export type SessionEndReason = "manual-stop" | "completed-count" | "completed-duration" | "abandoned";
 export type InterruptReason =
   | "focus-lost"
@@ -23,7 +25,7 @@ export interface TargetNote {
   octave: Octave;
   groupId: PracticeGroupId;
   staff: Staff;
-  isLedgerVariant: boolean;
+  isInterStaffLedgerSpelling: boolean;
 }
 
 export type PracticeGroupId = "F1-F2" | "G2-F3" | "G3-F4" | "G4-F5" | "G5-G6";
@@ -65,9 +67,8 @@ export interface ReviewRecord {
   ignored?: boolean;
 }
 
-export interface PracticeSessionRecord {
+interface PracticeSessionRecordBase {
   id: string;
-  schemaVersion: 1;
   mode: PracticeMode;
   enabledGroupIds: PracticeGroupId[];
   fixedCount?: number;
@@ -76,7 +77,6 @@ export interface PracticeSessionRecord {
   drillNoteNames?: NoteName[];
   focusedTraining?: boolean;
   promptDisplayMode?: PromptDisplayMode;
-  includeLedgerVariants?: boolean;
   startedAt: string;
   endedAt?: string;
   endReason?: SessionEndReason;
@@ -84,10 +84,26 @@ export interface PracticeSessionRecord {
   interruptedCount: number;
 }
 
-export interface StaffRecallRunRecord {
-  id: string;
+export interface PracticeSessionRecordV1 extends PracticeSessionRecordBase {
   schemaVersion: 1;
-  answerSetKey: string;
+  includeLedgerVariants?: boolean;
+}
+
+export interface PracticeSessionRecordV2 extends PracticeSessionRecordBase {
+  schemaVersion: 2;
+  queueStrategy: PracticeQueueStrategy;
+  drillNoteNames: NoteName[];
+  promptDisplayMode: PromptDisplayMode;
+  staffNotationMode: StaffNotationMode;
+  targetNoteSetKey: string;
+  effectiveQueueAlgorithm: EffectiveQueueAlgorithm;
+  includeInterStaffLedgerSpellings?: boolean;
+}
+
+export type PracticeSessionRecord = PracticeSessionRecordV1 | PracticeSessionRecordV2;
+
+interface StaffRecallRunRecordBase {
+  id: string;
   targetNoteIds: TargetNoteId[];
   columnOrder: NoteName[];
   columnActiveMs: Record<NoteName, number>;
@@ -95,9 +111,23 @@ export interface StaffRecallRunRecord {
   endedAt: string;
 }
 
-export interface AppSettings {
-  id: "default";
+export interface StaffRecallRunRecordV1 extends StaffRecallRunRecordBase {
   schemaVersion: 1;
+  answerSetKey: string;
+}
+
+export interface StaffRecallRunRecordV2 extends StaffRecallRunRecordBase {
+  schemaVersion: 2;
+  targetNoteSetKey: string;
+  enabledGroupIds: PracticeGroupId[];
+  includeInterStaffLedgerSpellings?: boolean;
+  staffNotationMode: StaffNotationMode;
+}
+
+export type StaffRecallRunRecord = StaffRecallRunRecordV1 | StaffRecallRunRecordV2;
+
+interface AppSettingsBase {
+  id: "default";
   dataSetId: string;
   createdAt: string;
   firstReviewAt?: string;
@@ -108,7 +138,7 @@ export interface AppSettings {
   fixedCount: number;
   fixedDurationSeconds: number;
   autoPlayTarget: boolean;
-  includeLedgerVariants: boolean;
+  includeInterStaffLedgerSpellings: boolean;
   pianoVolume: number;
   queueStrategy: PracticeQueueStrategy;
   drillNoteNames: NoteName[];
@@ -116,6 +146,23 @@ export interface AppSettings {
   inactivityThresholdSeconds: number;
   correctDelayMs: number;
 }
+
+export interface AppSettingsV1 extends Partial<
+  Omit<AppSettingsBase, "id" | "dataSetId" | "createdAt" | "includeInterStaffLedgerSpellings">
+> {
+  id: "default";
+  schemaVersion: 1;
+  dataSetId: string;
+  createdAt: string;
+  includeLedgerVariants?: boolean;
+}
+
+export interface AppSettings extends AppSettingsBase {
+  schemaVersion: 2;
+  staffNotationMode: StaffNotationMode;
+}
+
+export type StoredAppSettings = AppSettingsV1 | AppSettings;
 
 export interface BackupState {
   id: "default";
@@ -153,7 +200,7 @@ export interface BackupManifest {
   dataSetId: string;
   createdAt: string;
   firstReviewAt?: string;
-  settings?: AppSettings;
+  settings?: StoredAppSettings;
   dataModifiedAt?: string;
   lastBackupAt: string;
   lastReviewId?: string;

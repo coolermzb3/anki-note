@@ -1,6 +1,11 @@
 import { Renderer, Stave, StaveConnector, Stem, type StaveNote } from "vexflow";
-import type { NoteName, TargetNote } from "../domain/types";
-import type { ResponsiveStaffHorizontalProfile, StaffHorizontalProfile } from "./staffLayoutProfiles";
+import { staffForSingleClefMode } from "../domain/staffNotation";
+import type { NoteName, Staff, StaffNotationMode, TargetNote } from "../domain/types";
+import type {
+  ResponsiveStaffHorizontalProfile,
+  StaffHorizontalProfile,
+  StaffVerticalProfile,
+} from "./staffLayoutProfiles";
 
 const NOTE_NAME_ORDER: Record<NoteName, number> = {
   C: 0,
@@ -41,6 +46,26 @@ export interface DrawnGrandStaff {
   bass: Stave;
   treble: Stave;
 }
+
+export interface DrawnSingleStaff {
+  staff: Stave;
+}
+
+export interface GrandStaffSystem {
+  bass: Stave;
+  mode: "grand";
+  noteArea: NoteAreaBounds;
+  treble: Stave;
+}
+
+export interface SingleStaffSystem {
+  mode: Exclude<StaffNotationMode, "grand">;
+  noteArea: NoteAreaBounds;
+  staff: Staff;
+  stave: Stave;
+}
+
+export type StaffSystem = GrandStaffSystem | SingleStaffSystem;
 
 export interface StaffRenderSurface {
   context: ReturnType<Renderer["getContext"]>;
@@ -167,6 +192,74 @@ export function drawGrandStaff(
   return { bass, treble };
 }
 
+export function drawSingleStaff(
+  context: ReturnType<Renderer["getContext"]>,
+  frame: StaffFrame,
+  staff: "treble" | "bass",
+  y: number,
+  options: { yOffset?: number } = {},
+): DrawnSingleStaff {
+  const stave = new Stave(frame.x, (options.yOffset ?? 0) + y, frame.staveWidth).addClef(staff);
+  stave.setContext(context).draw();
+  return { staff: stave };
+}
+
+export function drawStaffSystem({
+  brace = false,
+  columnCount,
+  context,
+  frame,
+  horizontal,
+  mode,
+  scale,
+  useLedgerGap,
+  vertical,
+  yOffset = 0,
+}: {
+  brace?: boolean;
+  columnCount: number;
+  context: ReturnType<Renderer["getContext"]>;
+  frame: StaffFrame;
+  horizontal: Pick<StaffHorizontalProfile, "minNoteAreaSidePaddingPx" | "noteAreaSidePaddingPx"> &
+    Partial<Pick<ResponsiveStaffHorizontalProfile, "preferredColumnGapPx">>;
+  mode: StaffNotationMode;
+  scale: number;
+  useLedgerGap: boolean;
+  vertical: StaffVerticalProfile;
+  yOffset?: number;
+}): StaffSystem {
+  if (mode === "grand") {
+    const staves = drawGrandStaff(
+      context,
+      frame,
+      getGrandStaffAnchors(
+        scale,
+        vertical.centerYPx,
+        useLedgerGap ? vertical.ledgerGapPx : vertical.gapPx,
+      ),
+      { brace, yOffset },
+    );
+    const commonNoteStartX = Math.max(staves.treble.getNoteStartX(), staves.bass.getNoteStartX());
+    staves.treble.setNoteStartX(commonNoteStartX);
+    staves.bass.setNoteStartX(commonNoteStartX);
+    return {
+      ...staves,
+      mode,
+      noteArea: getGrandStaffNoteArea(staves, columnCount, scale, horizontal),
+    };
+  }
+
+  const staff = staffForSingleClefMode(mode);
+  const yPx = staff === "treble" ? vertical.trebleOnlyYPx : vertical.bassOnlyYPx;
+  const stave = drawSingleStaff(context, frame, staff, logicalPx(yPx, scale), { yOffset }).staff;
+  return {
+    mode,
+    noteArea: getSingleStaffNoteArea(stave, columnCount, scale, horizontal),
+    staff,
+    stave,
+  };
+}
+
 export function getNoteAreaBounds(
   noteStartX: number,
   noteEndX: number,
@@ -214,6 +307,16 @@ export function getGrandStaffNoteArea(
     scale,
     profile,
   );
+}
+
+export function getSingleStaffNoteArea(
+  stave: Stave,
+  columnCount: number,
+  scale: number,
+  profile: Pick<StaffHorizontalProfile, "minNoteAreaSidePaddingPx" | "noteAreaSidePaddingPx"> &
+    Partial<Pick<ResponsiveStaffHorizontalProfile, "preferredColumnGapPx">>,
+): NoteAreaBounds {
+  return getNoteAreaBounds(stave.getNoteStartX(), stave.getNoteEndX(), columnCount, scale, profile);
 }
 
 export function getEvenlySpacedCenters(count: number, left: number, right: number): number[] {

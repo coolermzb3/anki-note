@@ -1,4 +1,5 @@
 import { NOTE_NAMES } from "./notes";
+import { buildTargetNoteSetKey } from "./targetNoteSet";
 import type { NoteName, StaffRecallRunRecord, TargetNote, TargetNoteId } from "./types";
 
 export interface NoteNameColumnDefinition {
@@ -73,7 +74,11 @@ export function columnDefinitionsForNoteNames(noteNames: readonly NoteName[]): N
 }
 
 export function buildStaffRecallAnswerSetKey(targetNoteIds: readonly TargetNoteId[]): string {
-  return [...targetNoteIds].sort().join("|");
+  return buildTargetNoteSetKey(targetNoteIds);
+}
+
+export function getStaffRecallTargetNoteSetKey(run: StaffRecallRunRecord): string {
+  return run.schemaVersion === 2 ? run.targetNoteSetKey : run.answerSetKey;
 }
 
 export function buildStaffRecallTargetNoteIds(notes: readonly TargetNote[]): TargetNoteId[] {
@@ -120,9 +125,9 @@ export function formatStaffRecallPerNoteDeltaMs(
 
 export function comparableStaffRecallRuns(
   runs: readonly StaffRecallRunRecord[],
-  answerSetKey: string,
+  targetNoteSetKey: string,
 ): StaffRecallRunRecord[] {
   return runs
-    .filter((run) => run.answerSetKey === answerSetKey)
+    .filter((run) => getStaffRecallTargetNoteSetKey(run) === targetNoteSetKey)
     .sort((left, right) => left.endedAt.localeCompare(right.endedAt) || left.id.localeCompare(right.id));
 }

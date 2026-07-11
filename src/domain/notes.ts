@@ -1,4 +1,15 @@
-import type { NoteName, Octave, PitchId, PracticeGroup, PracticeGroupId, Staff, TargetNote, TargetNoteId } from "./types";
+import { staffForSingleClefMode } from "./staffNotation";
+import type {
+  NoteName,
+  Octave,
+  PitchId,
+  PracticeGroup,
+  PracticeGroupId,
+  Staff,
+  StaffNotationMode,
+  TargetNote,
+  TargetNoteId,
+} from "./types";
 
 export const NOTE_NAMES: NoteName[] = ["C", "D", "E", "F", "G", "A", "B"];
 const NOTE_NAME_INDEX = new Map(NOTE_NAMES.map((noteName, index) => [noteName, index]));
@@ -121,7 +132,7 @@ export function makeNoteId(noteName: NoteName, octave: Octave, staff = getDefaul
 
 function makeTargetNote(noteName: NoteName, octave: Octave, groupId: PracticeGroupId, staff = getDefaultStaff(octave)): TargetNote {
   const pitchId = makePitchId(noteName, octave);
-  const isLedgerVariant = staff !== getDefaultStaff(octave);
+  const isInterStaffLedgerSpelling = isLedgerOverlap(noteName, octave) && staff !== getDefaultStaff(octave);
   return {
     id: makeNoteId(noteName, octave, staff),
     pitchId,
@@ -129,17 +140,16 @@ function makeTargetNote(noteName: NoteName, octave: Octave, groupId: PracticeGro
     octave,
     groupId,
     staff,
-    isLedgerVariant,
+    isInterStaffLedgerSpelling,
   };
 }
 
 function makeTargetNotes(noteName: NoteName, octave: Octave, groupId: PracticeGroupId): TargetNote[] {
   const defaultStaff = getDefaultStaff(octave);
-  const notes = [makeTargetNote(noteName, octave, groupId, defaultStaff)];
-  if (isLedgerOverlap(noteName, octave)) {
-    notes.push(makeTargetNote(noteName, octave, groupId, getAlternateStaff(defaultStaff)));
-  }
-  return notes;
+  return [
+    makeTargetNote(noteName, octave, groupId, defaultStaff),
+    makeTargetNote(noteName, octave, groupId, getAlternateStaff(defaultStaff)),
+  ];
 }
 
 export const PRACTICE_GROUPS: PracticeGroup[] = PRACTICE_GROUP_DEFINITIONS.map((group) => ({
@@ -180,19 +190,38 @@ export function getNoteById(id: TargetNoteId): TargetNote {
   return note;
 }
 
-export function getNotesForGroups(groupIds: PracticeGroupId[], includeLedgerVariants = true): TargetNote[] {
+export function getNotesForGroups(
+  groupIds: PracticeGroupId[],
+  includeInterStaffLedgerSpellings = true,
+  staffNotationMode: StaffNotationMode = "grand",
+): TargetNote[] {
   const enabled = new Set(groupIds);
-  return ALL_NOTES.filter((note) => enabled.has(note.groupId) && (includeLedgerVariants || !note.isLedgerVariant));
+  if (staffNotationMode !== "grand") {
+    const staff = staffForSingleClefMode(staffNotationMode);
+    return ALL_NOTES.filter((note) => enabled.has(note.groupId) && note.staff === staff);
+  }
+  return ALL_NOTES.filter(
+    (note) =>
+      enabled.has(note.groupId) &&
+      (note.staff === getDefaultStaff(note.octave) ||
+        (includeInterStaffLedgerSpellings && note.isInterStaffLedgerSpelling)),
+  );
 }
 
 export function getCurrentTargetNoteIdsForGroups(
   groupIds: PracticeGroupId[],
-  includeLedgerVariants = true,
+  includeInterStaffLedgerSpellings = true,
+  staffNotationMode: StaffNotationMode = "grand",
 ): Set<TargetNoteId> {
-  return new Set(getNotesForGroups(groupIds, includeLedgerVariants).map((note) => note.id));
+  return new Set(getNotesForGroups(groupIds, includeInterStaffLedgerSpellings, staffNotationMode).map((note) => note.id));
 }
 
 export function normalizePracticeGroupIds(groupIds: readonly string[] | undefined): PracticeGroupId[] {
+  const normalized = normalizeCurrentPracticeGroupIds(groupIds);
+  return normalized.length > 0 ? normalized : DEFAULT_ENABLED_GROUPS;
+}
+
+export function normalizeCurrentPracticeGroupIds(groupIds: readonly string[] | undefined): PracticeGroupId[] {
   const selected = new Set<PracticeGroupId>();
 
   for (const groupId of groupIds ?? []) {
@@ -210,17 +239,24 @@ export function normalizePracticeGroupIds(groupIds: readonly string[] | undefine
     }
   }
 
-  const normalized = CURRENT_GROUP_IDS.filter((groupId) => selected.has(groupId));
-  return normalized.length > 0 ? normalized : DEFAULT_ENABLED_GROUPS;
+  return CURRENT_GROUP_IDS.filter((groupId) => selected.has(groupId));
 }
 
 export function formatStaffLabel(staff: Staff): string {
   return staff === "treble" ? "高音谱号" : "低音谱号";
 }
 
-export function formatTargetNoteLabel(note: TargetNote): string {
-  if (!isLedgerOverlap(note.noteName, note.octave)) {
-    return note.pitchId;
+export function formatTargetNoteLabel(
+  note: TargetNote,
+  effectiveTargetNoteIds?: ReadonlySet<TargetNoteId>,
+): string {
+  if (effectiveTargetNoteIds) {
+    const samePitchCount = [...effectiveTargetNoteIds]
+      .map((id) => ALL_NOTES_BY_ID.get(id))
+      .filter((candidate) => candidate?.pitchId === note.pitchId).length;
+    if (samePitchCount <= 1 && effectiveTargetNoteIds.has(note.id)) {
+      return note.pitchId;
+    }
   }
   return `${note.pitchId} · ${formatStaffLabel(note.staff)}`;
 }

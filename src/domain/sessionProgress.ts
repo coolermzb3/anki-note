@@ -1,7 +1,8 @@
-import { findNoteById } from "./notes";
+import { getPracticeSessionComparisonSnapshot } from "./legacyPracticeSessionCompatibility";
+import { buildPracticeComparisonSnapshot, type PracticeComparisonSnapshot } from "./practiceComparison";
 import { isStatisticalReview } from "./reviews";
 import { hasEnoughStatReviews } from "./stats";
-import type { AppSettings, PracticeGroupId, PracticeSessionRecord, ReviewRecord } from "./types";
+import type { AppSettings, PracticeSessionRecord, ReviewRecord } from "./types";
 
 export type SessionProgressMode = "actual-order" | "duration-cumsum";
 
@@ -28,7 +29,7 @@ export interface BuildSessionProgressSeriesOptions {
 }
 
 export interface BuildLatestSessionProgressSeriesOptions {
-  settings: Pick<AppSettings, "enabledGroupIds" | "includeLedgerVariants">;
+  settings: AppSettings;
   sessions: PracticeSessionRecord[];
   reviews: ReviewRecord[];
   historyLimit: number;
@@ -54,19 +55,6 @@ export interface SessionProgressBenchmark {
   metric: "completed-count" | "elapsed-ms";
 }
 
-type PracticeRangeScope = {
-  enabledGroupIds: PracticeGroupId[];
-  includeLedgerVariants?: boolean;
-};
-
-function sameStringSet(left: string[] = [], right: string[] = []): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-  const selected = new Set(left);
-  return right.every((value) => selected.has(value));
-}
-
 function areFinitePracticeSessions(reference: PracticeSessionRecord, candidate: PracticeSessionRecord): boolean {
   return reference.mode !== "open-ended" && candidate.mode !== "open-ended";
 }
@@ -75,61 +63,30 @@ export function isProgressChartEligible(session: PracticeSessionRecord, sessionR
   return session.mode !== "open-ended" && hasEnoughStatReviews(sessionReviews);
 }
 
-function hasLedgerVariantReview(reviews: ReviewRecord[]): boolean {
-  return reviews.some((review) => findNoteById(review.targetNoteId)?.isLedgerVariant);
-}
-
-function samePromptDisplayMode(reference: PracticeSessionRecord, candidate: PracticeSessionRecord): boolean {
-  return (
-    reference.promptDisplayMode === undefined ||
-    candidate.promptDisplayMode === undefined ||
-    reference.promptDisplayMode === candidate.promptDisplayMode
-  );
-}
-
-function sameLedgerVariantScope(
-  reference: PracticeRangeScope,
-  candidate: PracticeRangeScope,
-  candidateReviews: ReviewRecord[],
+function sameComparisonSnapshot(
+  reference: PracticeComparisonSnapshot | undefined,
+  candidate: PracticeComparisonSnapshot | undefined,
 ): boolean {
-  if (reference.includeLedgerVariants !== undefined && candidate.includeLedgerVariants !== undefined) {
-    return reference.includeLedgerVariants === candidate.includeLedgerVariants;
-  }
-  return reference.includeLedgerVariants !== false || !hasLedgerVariantReview(candidateReviews);
-}
-
-export function isSamePracticeRange(
-  reference: PracticeRangeScope,
-  candidate: PracticeRangeScope,
-  candidateReviews: ReviewRecord[] = [],
-): boolean {
-  return (
-    sameStringSet(reference.enabledGroupIds, candidate.enabledGroupIds) &&
-    sameLedgerVariantScope(reference, candidate, candidateReviews)
+  return Boolean(
+    reference &&
+      candidate &&
+      reference.targetNoteSetKey === candidate.targetNoteSetKey &&
+      reference.promptDisplayMode === candidate.promptDisplayMode &&
+      reference.effectiveQueueAlgorithm === candidate.effectiveQueueAlgorithm,
   );
 }
 
 export function isComparablePracticeSession(
   reference: PracticeSessionRecord,
   candidate: PracticeSessionRecord,
-  candidateReviews: ReviewRecord[] = [],
 ): boolean {
   if (reference.id === candidate.id || !areFinitePracticeSessions(reference, candidate)) {
     return false;
   }
-  if (!isSamePracticeRange(reference, candidate, candidateReviews)) {
-    return false;
-  }
-  if (!samePromptDisplayMode(reference, candidate)) {
-    return false;
-  }
-  if (reference.queueStrategy !== candidate.queueStrategy) {
-    return false;
-  }
-  if (reference.queueStrategy === "note-drill") {
-    return sameStringSet(reference.drillNoteNames, candidate.drillNoteNames);
-  }
-  return true;
+  return sameComparisonSnapshot(
+    getPracticeSessionComparisonSnapshot(reference),
+    getPracticeSessionComparisonSnapshot(candidate),
+  );
 }
 
 function getStatisticalReviewsInAnswerOrder(reviews: ReviewRecord[]): ReviewRecord[] {
@@ -216,16 +173,28 @@ function groupReviewsBySession(reviews: ReviewRecord[]): Map<string, ReviewRecor
   return reviewsBySession;
 }
 
+function currentSettingsComparisonSnapshot(settings: AppSettings): PracticeComparisonSnapshot | undefined {
+  return buildPracticeComparisonSnapshot({
+    drillNoteNames: settings.drillNoteNames,
+    enabledGroupIds: settings.enabledGroupIds,
+    includeInterStaffLedgerSpellings: settings.includeInterStaffLedgerSpellings,
+    promptDisplayMode: settings.promptDisplayMode,
+    queueStrategy: settings.queueStrategy,
+    staffNotationMode: settings.staffNotationMode,
+  });
+}
+
 function findLatestProgressSession(
-  settings: Pick<AppSettings, "enabledGroupIds" | "includeLedgerVariants">,
+  settings: AppSettings,
   sessions: PracticeSessionRecord[],
   reviewsBySession: Map<string, ReviewRecord[]>,
 ): PracticeSessionRecord | undefined {
+  const settingsSnapshot = currentSettingsComparisonSnapshot(settings);
   return [...sessions]
     .filter(
       (session) =>
         isProgressChartEligible(session, reviewsBySession.get(session.id) ?? []) &&
-        isSamePracticeRange(settings, session, reviewsBySession.get(session.id) ?? []),
+        sameComparisonSnapshot(settingsSnapshot, getPracticeSessionComparisonSnapshot(session)),
     )
     .sort(
       (a, b) =>
@@ -251,7 +220,7 @@ export function buildSessionProgressBenchmark({
         const sessionReviews = reviewsBySession.get(session.id) ?? [];
         return (
           new Date(session.startedAt).getTime() < currentStartedAt &&
-          isComparablePracticeSession(currentSession, session, sessionReviews)
+          isComparablePracticeSession(currentSession, session)
         );
       })
       .map((session) => reviewsBySession.get(session.id) ?? []),
@@ -327,7 +296,7 @@ export function buildSessionProgressSeries({
       return (
         new Date(session.startedAt).getTime() < currentStartedAt &&
         isProgressChartEligible(session, sessionReviews) &&
-        isComparablePracticeSession(currentSession, session, sessionReviews)
+        isComparablePracticeSession(currentSession, session)
       );
     })
     .sort(

@@ -5,7 +5,8 @@ import type { AppSettings, PracticeSessionRecord, StaffRecallRunRecord } from ".
 
 const settings: AppSettings = {
   id: "default",
-  schemaVersion: 1,
+  schemaVersion: 2,
+  staffNotationMode: "grand",
   dataSetId: "dataset-1",
   createdAt: "2026-07-04T00:00:00.000+08:00",
   firstReviewAt: "2026-07-04T10:00:00.000+08:00",
@@ -16,7 +17,7 @@ const settings: AppSettings = {
   fixedCount: 20,
   fixedDurationSeconds: 180,
   autoPlayTarget: true,
-  includeLedgerVariants: true,
+  includeInterStaffLedgerSpellings: true,
   pianoVolume: 0.8,
   queueStrategy: "adaptive",
   drillNoteNames: ["C"],

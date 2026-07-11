@@ -7,13 +7,14 @@ import {
   getCurrentTargetNoteIdsForGroups,
   getNoteById,
   getNotesForGroups,
+  normalizeCurrentPracticeGroupIds,
   normalizePracticeGroupIds,
   PRACTICE_GROUPS,
 } from "./notes";
 
 describe("notes", () => {
   it("builds the natural-note cards from F1 through G6 with inter-staff ledger spellings", () => {
-    expect(ALL_NOTES).toHaveLength(48);
+    expect(ALL_NOTES).toHaveLength(74);
     expect(ALL_NOTES[0].id).toBe("F1");
     expect(ALL_NOTES.map((note) => note.id)).toContain("F1");
     expect(ALL_NOTES.map((note) => note.id)).toContain("C2");
@@ -23,8 +24,8 @@ describe("notes", () => {
     expect(ALL_NOTES.map((note) => note.id)).toContain("A4-bass");
     expect(ALL_NOTES.map((note) => note.id)).not.toContain("A6");
     expect(ALL_NOTES.map((note) => note.id)).not.toContain("B6");
-    expect(ALL_NOTES.map((note) => note.id)).not.toContain("D3-treble");
-    expect(ALL_NOTES.map((note) => note.id)).not.toContain("B4-bass");
+    expect(ALL_NOTES.map((note) => note.id)).toContain("D3-treble");
+    expect(ALL_NOTES.map((note) => note.id)).toContain("B4-bass");
   });
 
   it("orders practice groups from low to high while defaulting to the middle group", () => {
@@ -33,11 +34,11 @@ describe("notes", () => {
   });
 
   it("keeps inter-staff ledger spellings in their pitch-range practice groups", () => {
-    expect(PRACTICE_GROUPS.find((group) => group.id === "F1-F2")?.notes).toHaveLength(8);
-    expect(PRACTICE_GROUPS.find((group) => group.id === "G2-F3")?.notes).toHaveLength(9);
+    expect(PRACTICE_GROUPS.find((group) => group.id === "F1-F2")?.notes).toHaveLength(16);
+    expect(PRACTICE_GROUPS.find((group) => group.id === "G2-F3")?.notes).toHaveLength(14);
     expect(PRACTICE_GROUPS.find((group) => group.id === "G3-F4")?.notes).toHaveLength(14);
-    expect(PRACTICE_GROUPS.find((group) => group.id === "G4-F5")?.notes).toHaveLength(9);
-    expect(PRACTICE_GROUPS.find((group) => group.id === "G5-G6")?.notes).toHaveLength(8);
+    expect(PRACTICE_GROUPS.find((group) => group.id === "G4-F5")?.notes).toHaveLength(14);
+    expect(PRACTICE_GROUPS.find((group) => group.id === "G5-G6")?.notes).toHaveLength(16);
   });
 
   it("can exclude the added inter-staff ledger spellings from enabled practice groups", () => {
@@ -56,7 +57,22 @@ describe("notes", () => {
   it("labels inter-staff ledger spellings by pitch and staff", () => {
     expect(formatTargetNoteLabel(getNoteById("E3"))).toBe("E3 · 低音谱号");
     expect(formatTargetNoteLabel(getNoteById("E3-treble"))).toBe("E3 · 高音谱号");
-    expect(formatTargetNoteLabel(getNoteById("C2"))).toBe("C2");
+    expect(formatTargetNoteLabel(getNoteById("C2"))).toBe("C2 · 低音谱号");
+    expect(formatTargetNoteLabel(getNoteById("C2"), new Set(["C2"]))).toBe("C2");
+    expect(formatTargetNoteLabel(getNoteById("C4"), new Set(["C4", "C4-bass"]))).toBe("C4 · 高音谱号");
+  });
+
+  it("selects all 37 written pitches on either single clef", () => {
+    const groups = PRACTICE_GROUPS.map((group) => group.id);
+    const trebleNotes = getNotesForGroups(groups, true, "treble-only");
+    const bassNotes = getNotesForGroups(groups, true, "bass-only");
+
+    expect(trebleNotes).toHaveLength(37);
+    expect(trebleNotes.every((note) => note.staff === "treble")).toBe(true);
+    expect(bassNotes).toHaveLength(37);
+    expect(bassNotes.every((note) => note.staff === "bass")).toBe(true);
+    expect(trebleNotes.map((note) => note.id)).toContain("F1-treble");
+    expect(bassNotes.map((note) => note.id)).toContain("G6-bass");
   });
 
   it("normalizes persisted group ids to the current low-to-high groups", () => {
@@ -64,6 +80,7 @@ describe("notes", () => {
     expect(normalizePracticeGroupIds(["G4-F5", "F1-F2"])).toEqual(["F1-F2", "G4-F5"]);
     expect(normalizePracticeGroupIds([])).toEqual(["G3-F4"]);
     expect(normalizePracticeGroupIds(["unknown"])).toEqual(["G3-F4"]);
+    expect(normalizeCurrentPracticeGroupIds([])).toEqual([]);
   });
 
   it("can collect current target note ids for group filtering", () => {

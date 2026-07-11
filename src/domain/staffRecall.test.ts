@@ -9,9 +9,10 @@ import {
   formatStaffRecallDeltaMs,
   formatStaffRecallPerNoteDeltaMs,
   formatStaffRecallPerNoteMs,
+  getStaffRecallTargetNoteSetKey,
   totalStaffRecallActiveMs,
 } from "./staffRecall";
-import type { NoteName, StaffRecallRunRecord } from "./types";
+import type { NoteName, StaffRecallRunRecordV1 } from "./types";
 
 const noteNames: NoteName[] = ["C", "D", "E", "F", "G", "A", "B"];
 const columnActiveMs: Record<NoteName, number> = {
@@ -24,7 +25,7 @@ const columnActiveMs: Record<NoteName, number> = {
   B: 1600,
 };
 
-function makeRun(overrides: Partial<StaffRecallRunRecord> = {}): StaffRecallRunRecord {
+function makeRun(overrides: Partial<StaffRecallRunRecordV1> = {}): StaffRecallRunRecordV1 {
   const notes = getNotesForGroups(["G3-F4"], true);
   const targetNoteIds = buildStaffRecallTargetNoteIds(notes);
   return {
@@ -60,7 +61,12 @@ describe("staff recall", () => {
     const laterComparable = makeRun({ id: "recall-2", endedAt: "2026-07-11T10:01:00.000+08:00" });
     const otherRange = makeRun({ id: "recall-other", answerSetKey: "other" });
 
-    expect(comparableStaffRecallRuns([laterComparable, otherRange, run], run.answerSetKey).map((item) => item.id)).toEqual([
+    expect(
+      comparableStaffRecallRuns(
+        [laterComparable, otherRange, run],
+        getStaffRecallTargetNoteSetKey(run),
+      ).map((item) => item.id),
+    ).toEqual([
       "recall-1",
       "recall-2",
     ]);

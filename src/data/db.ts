@@ -1,6 +1,10 @@
 import Dexie, { type Table } from "dexie";
 import { createUuid } from "../domain/id";
-import { DEFAULT_ENABLED_GROUPS, normalizePracticeGroupIds } from "../domain/notes";
+import {
+  DEFAULT_ENABLED_GROUPS,
+  normalizeCurrentPracticeGroupIds,
+  normalizePracticeGroupIds,
+} from "../domain/notes";
 import { DEFAULT_PIANO_VOLUME, normalizePianoVolume } from "../domain/settings";
 import type {
   AppSettings,
@@ -10,10 +14,12 @@ import type {
   PracticeSessionRecord,
   ReviewRecord,
   StaffRecallRunRecord,
+  StoredAppSettings,
+  StaffNotationMode,
 } from "../domain/types";
 
 export class AppDatabase extends Dexie {
-  settings!: Table<AppSettings, string>;
+  settings!: Table<StoredAppSettings, string>;
   practiceSessions!: Table<PracticeSessionRecord, string>;
   reviews!: Table<ReviewRecord, string>;
   staffRecallRuns!: Table<StaffRecallRunRecord, string>;
@@ -51,23 +57,67 @@ export function makeDefaultSettings(): AppSettings {
   const now = new Date().toISOString();
   return {
     id: "default",
-    schemaVersion: 1,
+    schemaVersion: 2,
     dataSetId: createUuid(),
     createdAt: now,
     enabledGroupIds: DEFAULT_ENABLED_GROUPS,
+    staffNotationMode: "grand",
     defaultMode: "fixed-duration",
     promptDisplayMode: "staff-page",
     promptNoteDuration: "quarter",
     fixedCount: 20,
     fixedDurationSeconds: 60,
     autoPlayTarget: false,
-    includeLedgerVariants: false,
+    includeInterStaffLedgerSpellings: false,
     pianoVolume: DEFAULT_PIANO_VOLUME,
     queueStrategy: "adaptive",
     drillNoteNames: ["C"],
     focusedTraining: false,
     inactivityThresholdSeconds: 30,
     correctDelayMs: 0,
+  };
+}
+
+function normalizeStoredStaffNotationMode(value: unknown): StaffNotationMode {
+  if (value === "treble-only" || value === "bass-only" || value === "grand") {
+    return value;
+  }
+  return "grand";
+}
+
+export function normalizeAppSettings(existing: StoredAppSettings): AppSettings {
+  const { selectedStaffs: _discardedStaffs, ...stored } = existing as StoredAppSettings & {
+    selectedStaffs?: unknown;
+  };
+  const defaults = makeDefaultSettings();
+  const queueStrategy = resolveQueueStrategy(existing);
+  return {
+    ...defaults,
+    ...stored,
+    schemaVersion: 2,
+    enabledGroupIds:
+      existing.schemaVersion === 2
+        ? normalizeCurrentPracticeGroupIds(existing.enabledGroupIds)
+        : normalizePracticeGroupIds(existing.enabledGroupIds),
+    staffNotationMode: normalizeStoredStaffNotationMode(
+      "staffNotationMode" in stored ? stored.staffNotationMode : undefined,
+    ),
+    defaultMode: existing.defaultMode ?? defaults.defaultMode,
+    promptDisplayMode: existing.promptDisplayMode ?? "staff-page",
+    promptNoteDuration: existing.promptNoteDuration ?? "quarter",
+    fixedCount: existing.fixedCount ?? defaults.fixedCount,
+    fixedDurationSeconds: existing.fixedDurationSeconds ?? defaults.fixedDurationSeconds,
+    autoPlayTarget: existing.autoPlayTarget ?? defaults.autoPlayTarget,
+    includeInterStaffLedgerSpellings:
+      existing.schemaVersion === 2
+        ? existing.includeInterStaffLedgerSpellings ?? defaults.includeInterStaffLedgerSpellings
+        : existing.includeLedgerVariants ?? true,
+    pianoVolume: normalizePianoVolume(existing.pianoVolume),
+    queueStrategy,
+    drillNoteNames: resolveDrillNoteNames(existing),
+    focusedTraining: existing.focusedTraining ?? queueStrategy === "focused",
+    inactivityThresholdSeconds: existing.inactivityThresholdSeconds ?? defaults.inactivityThresholdSeconds,
+    correctDelayMs: existing.correctDelayMs ?? defaults.correctDelayMs,
   };
 }
 
@@ -78,35 +128,15 @@ function sameGroupIds(a: readonly string[], b: readonly string[]): boolean {
 export async function ensureSettings(): Promise<AppSettings> {
   const existing = await db.settings.get("default");
   if (existing) {
-    const persistedGroupIds = existing.enabledGroupIds ?? [];
-    const enabledGroupIds = normalizePracticeGroupIds(persistedGroupIds);
-    const pianoVolume = normalizePianoVolume(existing.pianoVolume);
+    const migrated = normalizeAppSettings(existing);
     if (
-      existing.queueStrategy === undefined ||
-      existing.drillNoteNames === undefined ||
-      existing.focusedTraining === undefined ||
-      existing.includeLedgerVariants === undefined ||
-      existing.pianoVolume === undefined ||
-      existing.pianoVolume !== pianoVolume ||
-      existing.promptDisplayMode === undefined ||
-      existing.promptNoteDuration === undefined ||
-      !sameGroupIds(persistedGroupIds, enabledGroupIds)
+      existing.schemaVersion !== 2 ||
+      !sameGroupIds(existing.enabledGroupIds ?? [], migrated.enabledGroupIds) ||
+      JSON.stringify(existing) !== JSON.stringify(migrated)
     ) {
-      const migrated = {
-        ...existing,
-        enabledGroupIds,
-        queueStrategy: resolveQueueStrategy(existing),
-        drillNoteNames: resolveDrillNoteNames(existing),
-        focusedTraining: existing.focusedTraining ?? resolveQueueStrategy(existing) === "focused",
-        includeLedgerVariants: existing.includeLedgerVariants ?? true,
-        pianoVolume,
-        promptDisplayMode: existing.promptDisplayMode ?? "staff-page",
-        promptNoteDuration: existing.promptNoteDuration ?? "quarter",
-      };
       await db.settings.put(migrated);
-      return migrated;
     }
-    return existing;
+    return migrated;
   }
   const settings = makeDefaultSettings();
   await db.settings.put(settings);
