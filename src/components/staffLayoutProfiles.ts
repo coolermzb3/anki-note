@@ -217,7 +217,7 @@ export const PRACTICE_PAGE_STAFF_LAYOUT = {
   },
   // 谱页的最大行数、每行题量和行间空白。
   multirow: {
-    rows: 1,
+    rows: 2,
     notesPerRow: 24,
     // 相邻两个固定行 viewport 之间的额外空白。
     rowGapPx: 10,
