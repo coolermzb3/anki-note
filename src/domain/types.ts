@@ -15,6 +15,7 @@ export type SessionEndReason = "manual-stop" | "completed-count" | "completed-du
 export type InterruptReason =
   | "focus-lost"
   | "inactive-timeout"
+  | "manual-pause"
   | "manual-stop"
   | "duration-ended"
   | "session-abandoned";

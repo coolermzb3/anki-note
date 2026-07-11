@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { Beam, Formatter, GhostNote, StaveNote, Voice } from "vexflow";
 import { noteToVexKey } from "../domain/notes";
 import type { PromptNoteDuration, Staff, StaffNotationMode, TargetNote } from "../domain/types";
@@ -21,9 +21,12 @@ import {
 interface StaffPagePromptProps {
   notes: TargetNote[];
   completedCount: number;
+  isScrolling?: boolean;
   noteDuration: PromptNoteDuration;
+  scrollDurationMs?: number;
   staffNotationMode: StaffNotationMode;
   useLedgerGap: boolean;
+  visibleRowCount?: number;
   wrongIndex?: number;
 }
 
@@ -39,7 +42,7 @@ function chunkNotes(notes: TargetNote[]): TargetNote[][] {
   for (let index = 0; index < notes.length; index += notesPerRow) {
     rows.push(notes.slice(index, index + notesPerRow));
   }
-  return rows.slice(0, PRACTICE_PAGE_STAFF_LAYOUT.multirow.rows);
+  return rows.slice(0, PRACTICE_PAGE_STAFF_LAYOUT.multirow.rows + 1);
 }
 
 function makeStaveNote(note: TargetNote, color: string, noteDuration: PromptNoteDuration): StaveNote {
@@ -113,16 +116,19 @@ function getBarlineX(
 export function StaffPagePrompt({
   notes,
   completedCount,
+  isScrolling = false,
   noteDuration,
+  scrollDurationMs = 0,
   staffNotationMode,
   useLedgerGap,
+  visibleRowCount = PRACTICE_PAGE_STAFF_LAYOUT.multirow.rows,
   wrongIndex,
 }: StaffPagePromptProps): JSX.Element {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const rendererTargetRef = useRef<HTMLDivElement | null>(null);
   const rows = useMemo(() => chunkNotes(notes), [notes]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const frame = frameRef.current;
     const rendererTarget = rendererTargetRef.current;
     if (!frame || !rendererTarget) {
@@ -148,6 +154,17 @@ export function StaffPagePrompt({
           Math.max(0, rowCount - 1) * PRACTICE_PAGE_STAFF_LAYOUT.multirow.rowGapPx,
         PRACTICE_PAGE_STAFF_LAYOUT.notationScale,
       );
+      const renderedScale = containerWidth / displayWidth;
+      const rowStepPx =
+        (PRACTICE_PAGE_STAFF_LAYOUT.vertical.viewHeightPx +
+          PRACTICE_PAGE_STAFF_LAYOUT.multirow.rowGapPx) * renderedScale;
+      const clampedVisibleRowCount = Math.max(1, Math.min(visibleRowCount, rowCount));
+      const visibleHeight =
+        (clampedVisibleRowCount * PRACTICE_PAGE_STAFF_LAYOUT.vertical.viewHeightPx +
+          Math.max(0, clampedVisibleRowCount - 1) * PRACTICE_PAGE_STAFF_LAYOUT.multirow.rowGapPx) * renderedScale;
+      frame.style.height = `${visibleHeight}px`;
+      rendererTarget.style.setProperty("--staff-page-scroll-distance", `${rowStepPx}px`);
+      rendererTarget.style.setProperty("--staff-page-scroll-duration", `${scrollDurationMs}ms`);
       const { context } = surface;
       const frameMetrics = getFixedStaffFrame(
         surface,
@@ -271,11 +288,14 @@ export function StaffPagePrompt({
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [completedCount, noteDuration, rows, staffNotationMode, useLedgerGap, wrongIndex]);
+  }, [completedCount, noteDuration, rows, scrollDurationMs, staffNotationMode, useLedgerGap, visibleRowCount, wrongIndex]);
 
   return (
     <div ref={frameRef} className="staff-page" aria-label="谱页">
-      <div ref={rendererTargetRef} className="staff-page-renderer" />
+      <div
+        ref={rendererTargetRef}
+        className={`staff-page-renderer${isScrolling ? " staff-page-renderer-scrolling" : ""}`}
+      />
     </div>
   );
 }

@@ -979,6 +979,10 @@ main.has-backup-reminder .setup-grid::after {
   position: relative;
 }
 
+.practice-start-paused-choice {
+  min-height: 42px;
+}
+
 .practice-start-action:focus-visible {
   border-radius: 8px;
   outline: 2px solid rgba(37, 111, 103, 0.34);
@@ -1075,13 +1079,21 @@ main.has-backup-reminder .setup-grid::after {
   width: min(980px, 100%);
   min-height: 184px;
   display: grid;
-  place-items: center;
+  align-items: start;
+  overflow: hidden;
 }
 
 .staff-page-renderer {
   width: 100%;
   display: grid;
   place-items: center;
+  transform: translateY(0);
+  transition: none;
+}
+
+.staff-page-renderer-scrolling {
+  transform: translateY(calc(-1 * var(--staff-page-scroll-distance, 0px)));
+  transition: transform var(--staff-page-scroll-duration, 0ms) ease-in-out;
 }
 
 .staff-page svg {
@@ -1297,30 +1309,24 @@ main.has-backup-reminder .setup-grid::after {
   z-index: 20;
   width: 100%;
   min-height: 100vh;
-  border: 0;
-  border-radius: 0;
   background: rgba(255, 255, 255, 0.62);
   color: rgba(43, 37, 32, 0.9);
   box-shadow: none;
   display: grid;
   place-items: center;
-  align-content: center;
-  gap: 12px;
   padding: 0;
   backdrop-filter: blur(1px) saturate(1.04);
+  cursor: pointer;
 }
 
-.pause-overlay:hover:not(:disabled) {
-  border-color: transparent;
-  background: rgba(255, 255, 255, 0.68);
-  box-shadow: none;
+.pause-overlay-content {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  cursor: default;
 }
 
-.pause-overlay:active:not(:disabled) {
-  transform: none;
-}
-
-.pause-overlay span {
+.pause-overlay-content > span {
   font-size: 42px;
   font-weight: 900;
   line-height: 1;
@@ -1334,6 +1340,36 @@ main.has-backup-reminder .setup-grid::after {
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: 0;
+}
+
+.pause-playback-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.pause-playback-controls label {
+  height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.pause-playback-controls input,
+.setting-number-input {
+  width: 88px;
+  min-height: 34px;
+  padding: 5px 8px;
+  font-variant-numeric: tabular-nums;
 }
 
 .metric-grid {
@@ -2139,6 +2175,17 @@ main.has-backup-reminder .setup-grid::after {
 
 .toggle input:checked + span::after {
   transform: translateX(20px);
+}
+
+.toggle input:focus-visible + span {
+  outline: 3px solid rgba(47, 125, 88, 0.22);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .staff-page-renderer-scrolling {
+    transition-duration: 0ms;
+  }
 }
 
 .backup-status {

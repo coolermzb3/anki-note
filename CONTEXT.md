@@ -68,6 +68,10 @@ _Avoid_: Wall-clock time, time since entering recall
 A contiguous period of practice using one effective target-note-set snapshot. A session may be an open-ended flow that continues until the learner stops, a fixed-count session that ends after a chosen number of completed reviews, or a fixed-duration session that ends after a chosen active practice duration.
 _Avoid_: Game, round
 
+**Start-paused reading**:
+An optional reading interval at the beginning of a staff-page practice session: the first rolling staff-page window is visible, but active practice time, recognition time, answer input, and automatic target-note playback do not begin immediately. Resuming starts the timers and, when enabled, plays the current target note once just like every other resume of an active prompt; the reading interval does not change practice-session comparability.
+_Avoid_: Countdown, timed preview, queue strategy
+
 **Comparable practice session**:
 A fixed-count or fixed-duration practice session that can be compared with another session because it used the same
 effective target-note set, prompt display mode, and effective queue algorithm.
@@ -103,11 +107,24 @@ A card prompt in grand-staff notation mode that shows both treble and bass stave
 _Avoid_: Staff image, sheet image
 
 **Staff-page prompt**:
-A practice presentation that shows a batch of target notes together on one page using the current staff notation mode while the learner answers them one at a time in a fixed order. Each answered target note on the page produces its own review; visual grouping never adds or removes target notes, and unstarted target notes on an interrupted page do not produce reviews.
+A practice presentation that shows target notes in a two-row rolling window using the current staff notation mode while the learner answers them one at a time in a fixed order. Each answered target note produces its own review; visual windowing never adds or removes reviews, and unanswered target notes in an interrupted session do not produce reviews.
 _Avoid_: Aggregate card, multi-note card
 
+**Rolling staff-page window**:
+The two visible rows of a staff-page prompt during continuous practice. When eight unanswered notes remain in the lower row, both rows move upward together and a row planned by the session's existing queue algorithm appears below; the visual refill does not answer notes, create reviews, or define a new queue algorithm.
+_Avoid_: Hard page, sudden page turn, infinite score
+
+**Paused remaining-note playback**:
+A paused-practice preview that plays the current target note followed by the other unanswered target notes visible in the rolling staff-page window at the moment playback starts. Each onset advances the preview: pausing releases that note and resumes from the next, the final note normally occupies its full interval, and resuming practice cancels the preview immediately.
+_Avoid_: Automatic target-note playback, queue playback, answer playback
+
+**Paused playback tempo**:
+The shared tempo used wherever paused remaining-note playback is controlled, where whole-note and quarter-note prompts each occupy one beat, eighth notes occupy half a beat, and sixteenth notes occupy a quarter beat; the shortened whole-note timing is deliberate.
+Changes made during playback apply from the next note without restarting the visible playback snapshot.
+_Avoid_: Target-note playback speed, practice difficulty, queue setting
+
 **Prompt note duration**:
-The visual note value used to draw each target note; it does not change audio playback, recognition timing, scoring, or queue behavior. Staff-page prompts prioritize aligned pairs of eighth notes and aligned groups of four sixteenth notes, then beam same-staff subsequences within each group; isolated notes retain individual flags.
+The note value used to draw each target note and set its onset interval and nominal sustain during paused remaining-note playback. It does not change ordinary target-note audio cues, recognition timing, scoring, or queue behavior; staff-page prompts prioritize aligned pairs of eighth notes and aligned groups of four sixteenth notes, then beam same-staff subsequences within each group.
 _Avoid_: Prompt display mode, playback duration, rhythm mode
 
 **Answer keyboard**:
@@ -131,7 +148,7 @@ The natural note name submitted by the learner, independent of octave. A respons
 _Avoid_: Pitch answer, octave answer
 
 **Audio cue**:
-The piano sound played for a target note or answer input. A new prompt plays the target note immediately, and an answer input plays the corresponding natural note in the target note's octave.
+The piano sound played for a target note or answer input. When automatic target-note playback is enabled, a new prompt and every resume of a paused active prompt play the target note once; an answer input plays the corresponding natural note in the target note's octave.
 _Avoid_: Ear-training prompt, sound effect
 
 **Review**:
@@ -143,7 +160,7 @@ The active elapsed time from when a target-note prompt appears until the learner
 _Avoid_: Response time, click time
 
 **Interrupted review**:
-A review where the learner leaves the current prompt before answering correctly. The first version treats a review as interrupted after 30 seconds of continuous inactivity or window unfocus, when a fixed-duration session ends, or when the learner stops an open-ended session with an unfinished prompt; interrupted reviews are excluded from default speed and error-rate statistics.
+A review where the learner leaves or manually pauses the current prompt before answering correctly. The first version also treats a review as interrupted after 30 seconds of continuous inactivity or window unfocus, when a fixed-duration session ends, or when the learner stops an open-ended session with an unfinished prompt; interrupted reviews are excluded from default speed and error-rate statistics.
 _Avoid_: Abandoned card, timeout
 
 **Wrong answer**:

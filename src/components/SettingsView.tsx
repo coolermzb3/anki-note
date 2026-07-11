@@ -12,7 +12,14 @@ import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries 
 import { normalizeAnswerKeyboardScale, normalizePianoVolume } from "../domain/settings";
 import type { AppSettings, BackupState } from "../domain/types";
 import { BackupConflictActionContent } from "./BackupConflictActionContent";
+import { PausedPlaybackBpmInput } from "./PausedPlaybackBpmInput";
 import { PlayableKeyboardPreview } from "./PlayableKeyboardPreview";
+import {
+  DEFAULT_STAFF_PAGE_UI_PREFERENCES,
+  parseStaffPageUiPreferences,
+  STAFF_PAGE_UI_PREFERENCES_KEY,
+} from "./staffPageUiPreferences";
+import { useLocalStorageState } from "./useLocalStorageState";
 
 type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
 const PIANO_VOLUME_STEP = 0.05;
@@ -48,6 +55,11 @@ export function SettingsView({
   const [pianoVolumeDraft, setPianoVolumeDraft] = useState(() => normalizePianoVolume(settings.pianoVolume));
   const [answerKeyboardScaleDraft, setAnswerKeyboardScaleDraft] = useState(() =>
     normalizeAnswerKeyboardScale(settings.answerKeyboardScale),
+  );
+  const [staffPageUiPreferences, setStaffPageUiPreferences] = useLocalStorageState(
+    STAFF_PAGE_UI_PREFERENCES_KEY,
+    DEFAULT_STAFF_PAGE_UI_PREFERENCES,
+    { parse: parseStaffPageUiPreferences },
   );
   const pianoVolumeRef = useRef(pianoVolumeDraft);
   const answerKeyboardScaleRef = useRef(answerKeyboardScaleDraft);
@@ -191,6 +203,44 @@ export function SettingsView({
               onChange={(event) => savePianoVolume(Number(event.target.value) / 100)}
             />
             <span>{pianoVolumePercent}%</span>
+          </label>
+        </div>
+
+        <div className="setting-row">
+          <div>
+            <strong>播放剩余 BPM</strong>
+            <span>暂停时按谱面时值播放的速度</span>
+          </div>
+          <PausedPlaybackBpmInput
+            className="setting-number-input"
+            value={staffPageUiPreferences.pausedPlaybackBpm}
+            onChange={(pausedPlaybackBpm) =>
+              setStaffPageUiPreferences((current) => ({
+                ...current,
+                pausedPlaybackBpm,
+              }))
+            }
+          />
+        </div>
+
+        <div className="setting-row">
+          <div>
+            <strong>谱页平滑滚动</strong>
+            <span>换行时平滑上移，过渡时间不计入练习与识别用时</span>
+          </div>
+          <label className="toggle">
+            <input
+              aria-label="谱页平滑滚动"
+              checked={staffPageUiPreferences.smoothStaffPageScroll}
+              type="checkbox"
+              onChange={(event) =>
+                setStaffPageUiPreferences((current) => ({
+                  ...current,
+                  smoothStaffPageScroll: event.target.checked,
+                }))
+              }
+            />
+            <span aria-hidden="true" />
           </label>
         </div>
       </div>

@@ -10,6 +10,15 @@ describe("review predicates", () => {
         makeReview({
           targetNoteId: "C4",
           interrupted: true,
+          interruptReason: "manual-pause",
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isCompletedReview(
+        makeReview({
+          targetNoteId: "C4",
+          interrupted: true,
           interruptReason: "focus-lost",
         }),
       ),

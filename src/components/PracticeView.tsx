@@ -57,11 +57,20 @@ import {
 } from "./sessionProgressPreferences";
 import { PauseOverlay } from "./PauseOverlay";
 import { isNaturalPianoKey, NATURAL_PIANO_KEYS, PianoKeyboard } from "./PianoKeyboard";
+import { getPausedKeyboardAction } from "./practiceKeyboard";
 import { StaffPagePrompt } from "./StaffPagePrompt";
 import { StaffPrompt } from "./StaffPrompt";
 import { PRACTICE_PAGE_STAFF_LAYOUT } from "./staffLayoutProfiles";
+import { getStaffPageRefillCount } from "./staffPageFlow";
 import { PROMPT_NOTE_DURATIONS } from "./staffPageNotation";
+import {
+  DEFAULT_STAFF_PAGE_UI_PREFERENCES,
+  normalizePausedPlaybackBpm,
+  parseStaffPageUiPreferences,
+  STAFF_PAGE_UI_PREFERENCES_KEY,
+} from "./staffPageUiPreferences";
 import { useLocalStorageState } from "./useLocalStorageState";
+import { useRemainingNotePlayback } from "./useRemainingNotePlayback";
 
 interface PracticeViewProps {
   settings: AppSettings;
@@ -154,6 +163,7 @@ function inputMinutesToDurationSeconds(value: string): number {
 const ALL_GROUP_IDS: PracticeGroupId[] = PRACTICE_GROUPS.map((group) => group.id);
 const STAFF_PAGE_SIZE =
   PRACTICE_PAGE_STAFF_LAYOUT.multirow.rows * PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow;
+const STAFF_PAGE_SCROLL_DURATION_MS = 200;
 const MELODY_BUFFER_SIZE = 16;
 const PRACTICE_SETUP_UI_PREFERENCES_KEY = "anki-note.practiceSetupUiPreferences";
 const PRACTICE_MODES: readonly PracticeMode[] = ["open-ended", "fixed-count", "fixed-duration"];
@@ -290,6 +300,11 @@ export function PracticeView({
     DEFAULT_SESSION_PROGRESS_UI_PREFERENCES,
     { parse: parseSessionProgressUiPreferences },
   );
+  const [staffPageUiPreferences, setStaffPageUiPreferences] = useLocalStorageState(
+    STAFF_PAGE_UI_PREFERENCES_KEY,
+    DEFAULT_STAFF_PAGE_UI_PREFERENCES,
+    { parse: parseStaffPageUiPreferences },
+  );
   const [phase, setPhase] = useState<Phase>("setup");
   const [session, setSession] = useState<PracticeSessionRecord | null>(null);
   const [currentNote, setCurrentNote] = useState<TargetNote | null>(null);
@@ -302,7 +317,11 @@ export function PracticeView({
   const [staffPageNotes, setStaffPageNotes] = useState<TargetNote[]>([]);
   const [staffPageIndex, setStaffPageIndex] = useState(0);
   const [staffPageCompletedCount, setStaffPageCompletedCount] = useState(0);
+  const [isStaffPageScrolling, setIsStaffPageScrolling] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false,
+  );
   const mode = practiceSetupPreferences.mode;
   const promptDisplayMode = practiceSetupPreferences.promptDisplayMode;
   const promptNoteDuration = practiceSetupPreferences.promptNoteDuration;
@@ -311,6 +330,10 @@ export function PracticeView({
   const autoPlayTarget = practiceSetupPreferences.autoPlayTarget;
   const queueStrategy = practiceSetupPreferences.queueStrategy;
   const drillNoteNames = practiceSetupPreferences.drillNoteNames;
+  const pausedPlaybackBpm = staffPageUiPreferences.pausedPlaybackBpm;
+  const startPausedReading = staffPageUiPreferences.startPausedReading;
+  const staffPageScrollDurationMs =
+    staffPageUiPreferences.smoothStaffPageScroll && !prefersReducedMotion ? STAFF_PAGE_SCROLL_DURATION_MS : 0;
   const summaryProgressMode = sessionProgressPreferences.mode;
   const summaryHistoryLimit = sessionProgressPreferences.historyLimit;
   const setMode = (nextMode: PracticeMode): void => {
@@ -337,6 +360,12 @@ export function PracticeView({
   const setQueueStrategy = (nextQueueStrategy: PracticeQueueStrategy): void => {
     setPracticeSetupPreferences((current) => ({ ...current, queueStrategy: nextQueueStrategy }));
   };
+  const setPausedPlaybackBpm = (nextBpm: number): void => {
+    setStaffPageUiPreferences((current) => ({
+      ...current,
+      pausedPlaybackBpm: normalizePausedPlaybackBpm(nextBpm, current.pausedPlaybackBpm),
+    }));
+  };
   const setSummaryProgressMode = (nextMode: SessionProgressMode): void => {
     setSessionProgressPreferences((current) => ({ ...current, mode: nextMode }));
   };
@@ -351,6 +380,8 @@ export function PracticeView({
   const melodyQueueRef = useRef<TargetNote[]>([]);
   const melodyGenerationStateRef = useRef(createMelodyGenerationState());
   const staffPageRef = useRef<StaffPageRuntime | null>(null);
+  const staffPageScrollFrameRef = useRef<number | null>(null);
+  const staffPageScrollTimeoutRef = useRef<number | null>(null);
   const endingRef = useRef(false);
   const sessionActiveBaseMsRef = useRef(0);
   const sessionActiveStartedAtRef = useRef<number | null>(null);
@@ -360,6 +391,28 @@ export function PracticeView({
   const lastBackupCompletedRef = useRef(0);
   const lastBackupAtRef = useRef<number>(performance.now());
   const handledNavigationExitRequestIdRef = useRef<number | null>(null);
+
+  const getRemainingPlaybackNotes = useCallback((): TargetNote[] => {
+    const page = staffPageRef.current;
+    const startIndex = page ? Math.max(page.index, page.completedCount) : 0;
+    return page ? page.notes.slice(startIndex) : [];
+  }, []);
+  const {
+    cancel: cancelRemainingPlayback,
+    state: remainingPlaybackState,
+    toggle: toggleRemainingPlayback,
+  } = useRemainingNotePlayback({
+    bpm: pausedPlaybackBpm,
+    getNotes: getRemainingPlaybackNotes,
+    noteDuration: promptNoteDuration,
+  });
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = (): void => setPrefersReducedMotion(mediaQuery.matches);
+    mediaQuery.addEventListener("change", onChange);
+    return () => mediaQuery.removeEventListener("change", onChange);
+  }, []);
 
   useEffect(() => {
     onRunningChange(phase === "running");
@@ -482,6 +535,19 @@ export function PracticeView({
     }
   }, []);
 
+  const clearStaffPageScrollSchedule = useCallback((): void => {
+    if (staffPageScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(staffPageScrollFrameRef.current);
+      staffPageScrollFrameRef.current = null;
+    }
+    if (staffPageScrollTimeoutRef.current !== null) {
+      window.clearTimeout(staffPageScrollTimeoutRef.current);
+      staffPageScrollTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => clearStaffPageScrollSchedule(), [clearStaffPageScrollSchedule]);
+
   const resumeActiveTimers = useCallback((): void => {
     const now = performance.now();
     const prompt = promptRef.current;
@@ -498,18 +564,22 @@ export function PracticeView({
     }
   }, []);
 
-  const pausePractice = useCallback((): void => {
+  const pausePractice = useCallback((interruptReason?: InterruptReason): void => {
+    if (interruptReason) {
+      markInterrupted(interruptReason);
+    }
     pauseActiveTimers();
     if (!isPausedRef.current) {
       isPausedRef.current = true;
       setIsPaused(true);
     }
-  }, [pauseActiveTimers]);
+  }, [markInterrupted, pauseActiveTimers]);
 
   const resumePractice = useCallback((): void => {
     if (!isPausedRef.current) {
       return;
     }
+    cancelRemainingPlayback();
     isPausedRef.current = false;
     setIsPaused(false);
     const pendingAfterPause = pendingAfterPauseRef.current;
@@ -520,28 +590,33 @@ export function PracticeView({
     }
     if (promptRef.current) {
       resumeActiveTimers();
+      if (autoPlayTarget) {
+        void playTargetNote(promptRef.current.note).catch(() => undefined);
+      }
     }
-  }, [resumeActiveTimers]);
+  }, [autoPlayTarget, cancelRemainingPlayback, resumeActiveTimers]);
 
   const togglePause = useCallback((): void => {
     if (isPausedRef.current) {
       resumePractice();
       return;
     }
-    pausePractice();
+    pausePractice("manual-pause");
   }, [pausePractice, resumePractice]);
 
   const pauseForFocusLoss = useCallback((): void => {
+    if (isPausedRef.current) {
+      return;
+    }
     const prompt = promptRef.current;
     if (prompt) {
-      markInterrupted("focus-lost");
       const lastLoss = prompt.focusLosses[prompt.focusLosses.length - 1];
       if (!lastLoss || lastLoss.regainedFocusAt) {
         prompt.focusLosses.push({ lostFocusAt: new Date().toISOString() });
       }
     }
-    pausePractice();
-  }, [markInterrupted, pausePractice]);
+    pausePractice("focus-lost");
+  }, [pausePractice]);
 
   const persistConfig = useCallback(async (): Promise<AppSettings> => {
     const nextSettings: AppSettings = {
@@ -609,11 +684,12 @@ export function PracticeView({
   const startPrompt = useCallback(
     (note: TargetNote): void => {
       const now = performance.now();
+      const startsPaused = isPausedRef.current;
       promptRef.current = {
         note,
         startedAt: new Date().toISOString(),
         activeBaseMs: 0,
-        activeStartedAt: now,
+        activeStartedAt: startsPaused ? null : now,
         lastInputAt: now,
         wrongAnswers: [],
         replayCount: 0,
@@ -623,7 +699,7 @@ export function PracticeView({
       setCurrentNote(note);
       setFeedback(null);
       answerInputLockedRef.current = false;
-      if (autoPlayTarget) {
+      if (autoPlayTarget && !startsPaused) {
         void playTargetNote(note).catch(() => undefined);
       }
     },
@@ -694,6 +770,91 @@ export function PracticeView({
       startPrompt(notes[0]);
     },
     [getNextStaffPageCount, startPrompt, syncStaffPage],
+  );
+
+  const startStaffPageScroll = useCallback(
+    (nextCompletedCount: number, nextIndex: number): boolean => {
+      const page = staffPageRef.current;
+      if (!page) {
+        return false;
+      }
+
+      const remainingVisibleNotes = page.notes.slice(nextIndex);
+      const nextRowCount = getStaffPageRefillCount({
+        completedSessionCount: nextCompletedCount,
+        fixedSessionCount: mode === "fixed-count" ? fixedCount : undefined,
+        nextIndex,
+        plannedNoteCount: page.notes.length,
+      });
+      if (nextRowCount === 0) {
+        return false;
+      }
+
+      const nextRow = selectNotePage({
+        notes: enabledNotes,
+        reviews: [...schedulerReviews, ...sessionReviewsRef.current],
+        queueStrategy,
+        drillNoteNames,
+        lastTargetNoteId: page.notes[page.notes.length - 1]?.id,
+        plannedTargetNoteIds: remainingVisibleNotes.map((note) => note.id),
+        melodyState: melodyGenerationStateRef.current,
+        count: nextRowCount,
+      });
+      const sessionId = sessionRef.current?.id;
+      syncStaffPage({
+        ...page,
+        index: nextIndex,
+        notes: [...page.notes, ...nextRow],
+      });
+      const finishScroll = (): void => {
+        staffPageScrollTimeoutRef.current = null;
+        if (!sessionId || sessionRef.current?.id !== sessionId || sessionRef.current.endedAt) {
+          return;
+        }
+        const scrolledPage = staffPageRef.current;
+        if (!scrolledPage || scrolledPage.notes.length <= STAFF_PAGE_SIZE) {
+          setIsStaffPageScrolling(false);
+          return;
+        }
+        const rebasedPage = {
+          notes: scrolledPage.notes.slice(PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow),
+          index: scrolledPage.index - PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow,
+          completedCount:
+            scrolledPage.completedCount - PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow,
+        };
+        syncStaffPage(rebasedPage);
+        setIsStaffPageScrolling(false);
+        const startNextPrompt = (): void => {
+          resumeActiveTimers();
+          startPrompt(rebasedPage.notes[rebasedPage.index]);
+        };
+        if (isPausedRef.current) {
+          pendingAfterPauseRef.current = startNextPrompt;
+          return;
+        }
+        startNextPrompt();
+      };
+      clearStaffPageScrollSchedule();
+      staffPageScrollFrameRef.current = window.requestAnimationFrame(() => {
+        staffPageScrollFrameRef.current = null;
+        setIsStaffPageScrolling(true);
+        staffPageScrollTimeoutRef.current = window.setTimeout(finishScroll, staffPageScrollDurationMs);
+      });
+      return true;
+    },
+    [
+      clearStaffPageScrollSchedule,
+      drillNoteNames,
+      enabledNotes,
+      fixedCount,
+      mode,
+      queueStrategy,
+      resumeActiveTimers,
+      schedulerReviews,
+      staffPageScrollDurationMs,
+      startPrompt,
+      syncStaffPage,
+    ],
   );
 
   const drawMelodyNote = useCallback((sourceNotes: TargetNote[], remainingCount?: number): TargetNote => {
@@ -793,6 +954,8 @@ export function PracticeView({
       const showSummary = options.showSummary ?? true;
       const updateUi = options.updateUi ?? true;
       endingRef.current = true;
+      cancelRemainingPlayback();
+      clearStaffPageScrollSchedule();
       const unfinishedReview = promptRef.current ? await finishCurrentReview(false, unfinishedReason) : null;
       pauseActiveTimers();
       const endedAt = new Date().toISOString();
@@ -825,6 +988,7 @@ export function PracticeView({
       if (updateUi) {
         setCurrentNote(null);
         syncStaffPage(null);
+        setIsStaffPageScrolling(false);
       } else {
         staffPageRef.current = null;
       }
@@ -843,7 +1007,15 @@ export function PracticeView({
       }
       endingRef.current = false;
     },
-    [finishCurrentReview, onDataChanged, onPracticeFinished, pauseActiveTimers, syncStaffPage],
+    [
+      cancelRemainingPlayback,
+      clearStaffPageScrollSchedule,
+      finishCurrentReview,
+      onDataChanged,
+      onPracticeFinished,
+      pauseActiveTimers,
+      syncStaffPage,
+    ],
   );
 
   useEffect(() => {
@@ -891,6 +1063,7 @@ export function PracticeView({
       return;
     }
     const nextEnabledNotes = activitySnapshot.notes;
+    const shouldStartPaused = nextSettings.promptDisplayMode === "staff-page" && startPausedReading;
     const startedAt = new Date().toISOString();
     const nextSession: PracticeSessionRecord = {
       id: newSessionId(),
@@ -921,18 +1094,19 @@ export function PracticeView({
     melodyQueueRef.current = [];
     melodyGenerationStateRef.current = createMelodyGenerationState();
     syncStaffPage(null);
+    setIsStaffPageScrolling(false);
     endingRef.current = false;
     lastBackupAtRef.current = performance.now();
     lastBackupCompletedRef.current = 0;
     sessionActiveBaseMsRef.current = 0;
-    sessionActiveStartedAtRef.current = performance.now();
-    isPausedRef.current = false;
+    sessionActiveStartedAtRef.current = shouldStartPaused ? null : performance.now();
+    isPausedRef.current = shouldStartPaused;
     pendingAfterPauseRef.current = null;
     setSession(nextSession);
     setCompletedCount(0);
     setWrongAnswerCount(0);
     setSummary(null);
-    setIsPaused(false);
+    setIsPaused(shouldStartPaused);
     setPhase("running");
     if (nextSettings.promptDisplayMode === "staff-page") {
       startStaffPage({
@@ -961,6 +1135,7 @@ export function PracticeView({
     persistConfig,
     queueNotes.length,
     schedulerReviews,
+    startPausedReading,
     staffNotationMode,
     startPrompt,
     startStaffPage,
@@ -1011,14 +1186,18 @@ export function PracticeView({
         if (sessionRef.current?.id !== reviewSessionId || sessionRef.current.endedAt) {
           return;
         }
-        resumeActiveTimers();
         if (mode === "fixed-count" && nextCompletedCount >= fixedCount) {
           void completeSession("completed-count");
           return;
         }
         if (promptDisplayMode === "staff-page") {
           const page = staffPageRef.current;
-          if (page && startStaffPageIndex(page.index + 1)) {
+          const nextIndex = page ? page.index + 1 : 0;
+          if (page && startStaffPageScroll(nextCompletedCount, nextIndex)) {
+            return;
+          }
+          resumeActiveTimers();
+          if (page && startStaffPageIndex(nextIndex)) {
             return;
           }
           startStaffPage({
@@ -1030,6 +1209,7 @@ export function PracticeView({
           });
           return;
         }
+        resumeActiveTimers();
         selectAndStartNext(nextCompletedCount);
       };
 
@@ -1059,6 +1239,7 @@ export function PracticeView({
       selectAndStartNext,
       settings.correctDelayMs,
       startStaffPage,
+      startStaffPageScroll,
       startStaffPageIndex,
     ],
   );
@@ -1083,6 +1264,21 @@ export function PracticeView({
         return;
       }
       if (isPausedRef.current) {
+        const pausedAction = getPausedKeyboardAction({
+          code: event.code,
+          isEditableTarget:
+            event.target instanceof Element &&
+            Boolean(event.target.closest("input, select, textarea, [contenteditable='true']")),
+          promptDisplayMode,
+        });
+        if (pausedAction === "toggle-playback") {
+          event.preventDefault();
+          toggleRemainingPlayback();
+          return;
+        }
+        if (pausedAction === "allow-edit") {
+          return;
+        }
         event.preventDefault();
         return;
       }
@@ -1127,7 +1323,7 @@ export function PracticeView({
       window.removeEventListener("blur", releaseHeldHardwareKeys);
       releaseHeldHardwareKeys();
     };
-  }, [completeSession, phase, replayTarget, submitAnswer, togglePause]);
+  }, [completeSession, phase, promptDisplayMode, replayTarget, submitAnswer, togglePause, toggleRemainingPlayback]);
 
   useEffect(() => {
     if (phase !== "running") {
@@ -1406,6 +1602,21 @@ export function PracticeView({
                 <BarChart3 size={18} />
                 统计
               </button>
+              {promptDisplayMode === "staff-page" ? (
+                <label className={startPausedReading ? "choice choice-active practice-start-paused-choice" : "choice practice-start-paused-choice"}>
+                  <input
+                    checked={startPausedReading}
+                    type="checkbox"
+                    onChange={(event) =>
+                      setStaffPageUiPreferences((current) => ({
+                        ...current,
+                        startPausedReading: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>开始后暂停（读谱）</span>
+                </label>
+              ) : null}
             </div>
           </div>
         </div>
@@ -1541,9 +1752,12 @@ export function PracticeView({
           <StaffPagePrompt
             notes={staffPageNotes}
             completedCount={staffPageCompletedCount}
+            isScrolling={isStaffPageScrolling}
             noteDuration={promptNoteDuration}
+            scrollDurationMs={staffPageScrollDurationMs}
             staffNotationMode={staffNotationMode}
             useLedgerGap={useLedgerGap}
+            visibleRowCount={staffPageRowCount}
             wrongIndex={feedback?.type === "wrong" ? staffPageIndex : undefined}
           />
         ) : currentNote ? (
@@ -1575,7 +1789,16 @@ export function PracticeView({
       <span className="sr-only" aria-live="polite">
         {tick} {wrongAnswerCount}
       </span>
-      {isPaused ? <PauseOverlay onResume={resumePractice} /> : null}
+      {isPaused ? (
+        <PauseOverlay
+          bpm={pausedPlaybackBpm}
+          onBpmChange={setPausedPlaybackBpm}
+          onResume={resumePractice}
+          onToggleRemainingPlayback={toggleRemainingPlayback}
+          playbackState={remainingPlaybackState}
+          showRemainingPlayback={promptDisplayMode === "staff-page"}
+        />
+      ) : null}
     </section>
   );
 }
