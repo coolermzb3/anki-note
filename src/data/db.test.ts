@@ -12,6 +12,7 @@ describe("makeDefaultSettings", () => {
       enabledGroupIds: ["G3-F4"],
       includeInterStaffLedgerSpellings: false,
       correctDelayMs: 0,
+      answerKeyboardScale: 1,
       pianoVolume: 0.8,
     });
   });
@@ -45,5 +46,16 @@ describe("makeDefaultSettings", () => {
 
     expect(normalized.staffNotationMode).toBe("grand");
     expect("selectedStaffs" in normalized).toBe(false);
+  });
+
+  it("defaults and clamps the answer keyboard scale without a schema migration", () => {
+    const current = makeDefaultSettings();
+
+    expect(normalizeAppSettings({ ...current, answerKeyboardScale: 2 }).answerKeyboardScale).toBe(1.5);
+    expect(normalizeAppSettings({ ...current, answerKeyboardScale: 0.1 }).answerKeyboardScale).toBe(0.7);
+    expect(normalizeAppSettings({
+      ...current,
+      answerKeyboardScale: undefined,
+    } as unknown as Parameters<typeof normalizeAppSettings>[0]).answerKeyboardScale).toBe(1);
   });
 });

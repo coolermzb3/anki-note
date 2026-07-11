@@ -9,9 +9,10 @@ import {
 } from "../data/backup";
 import { getBackupState } from "../data/db";
 import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "../domain/backupText";
-import { normalizePianoVolume } from "../domain/settings";
+import { normalizeAnswerKeyboardScale, normalizePianoVolume } from "../domain/settings";
 import type { AppSettings, BackupState } from "../domain/types";
 import { BackupConflictActionContent } from "./BackupConflictActionContent";
+import { PlayableKeyboardPreview } from "./PlayableKeyboardPreview";
 
 type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
 const PIANO_VOLUME_STEP = 0.05;
@@ -45,7 +46,11 @@ export function SettingsView({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [pianoVolumeDraft, setPianoVolumeDraft] = useState(() => normalizePianoVolume(settings.pianoVolume));
+  const [answerKeyboardScaleDraft, setAnswerKeyboardScaleDraft] = useState(() =>
+    normalizeAnswerKeyboardScale(settings.answerKeyboardScale),
+  );
   const pianoVolumeRef = useRef(pianoVolumeDraft);
+  const answerKeyboardScaleRef = useRef(answerKeyboardScaleDraft);
   const storedBackupState = backupState as StoredBackupState;
   const backupBlockedUntilSync = Boolean(
     backupState.dataConflictBeforeBackup ?? backupState.syncRequiredBeforeBackup ?? storedBackupState.restoreRequiredBeforeBackup,
@@ -53,12 +58,19 @@ export function SettingsView({
   const hasBackupSnapshot = Boolean(backupBlockedUntilSync || backupState.lastSeenBackupVersion);
   const backupConflictSummaries = backupBlockedUntilSync ? getBackupConflictDataSummaries(backupState) : null;
   const pianoVolumePercent = Math.round(pianoVolumeDraft * 100);
+  const answerKeyboardScalePercent = Math.round(answerKeyboardScaleDraft * 100);
 
   useEffect(() => {
     const nextPianoVolume = normalizePianoVolume(settings.pianoVolume);
     pianoVolumeRef.current = nextPianoVolume;
     setPianoVolumeDraft(nextPianoVolume);
   }, [settings.pianoVolume]);
+
+  useEffect(() => {
+    const nextScale = normalizeAnswerKeyboardScale(settings.answerKeyboardScale);
+    answerKeyboardScaleRef.current = nextScale;
+    setAnswerKeyboardScaleDraft(nextScale);
+  }, [settings.answerKeyboardScale]);
 
   async function saveSettings(next: AppSettings): Promise<void> {
     await onSettingsSaved(next);
@@ -77,6 +89,16 @@ export function SettingsView({
   function handlePianoVolumeWheel(event: WheelEvent<HTMLLabelElement>): void {
     event.preventDefault();
     savePianoVolume(pianoVolumeRef.current + (event.deltaY < 0 ? PIANO_VOLUME_STEP : -PIANO_VOLUME_STEP));
+  }
+
+  function saveAnswerKeyboardScale(nextScale: number): void {
+    const normalizedScale = normalizeAnswerKeyboardScale(nextScale);
+    if (normalizedScale === answerKeyboardScaleRef.current) {
+      return;
+    }
+    answerKeyboardScaleRef.current = normalizedScale;
+    setAnswerKeyboardScaleDraft(normalizedScale);
+    void saveSettings({ ...settings, answerKeyboardScale: normalizedScale });
   }
 
   function describeDirectorySelection(result: BackupDirectorySelectionResult, selectedBackupState: BackupState): string {
@@ -156,7 +178,7 @@ export function SettingsView({
         <div className="setting-row">
           <div>
             <strong>音量</strong>
-            <span>目标音和学习页音位图播放音量</span>
+            <span>目标音、学习页和琴键预览播放音量</span>
           </div>
           <label className="volume-control" onWheel={handlePianoVolumeWheel}>
             <input
@@ -171,6 +193,31 @@ export function SettingsView({
             <span>{pianoVolumePercent}%</span>
           </label>
         </div>
+      </div>
+
+      <div className="panel settings-panel keyboard-settings-panel">
+        <div className="setting-row keyboard-size-row">
+          <div>
+            <strong>琴键大小</strong>
+            <span>练习页以此尺寸为基准</span>
+          </div>
+          <label className="volume-control">
+            <input
+              aria-label="琴键大小"
+              max={150}
+              min={70}
+              step={5}
+              type="range"
+              value={answerKeyboardScalePercent}
+              onChange={(event) => saveAnswerKeyboardScale(Number(event.target.value) / 100)}
+            />
+            <span>{answerKeyboardScalePercent}%</span>
+          </label>
+        </div>
+        <p className="keyboard-settings-description">
+          预览音区 C4–B4，可按住多键试听和弦；练习页仅白键可作答，空间不足时会先缩空白，再缩小琴键。
+        </p>
+        <PlayableKeyboardPreview scale={answerKeyboardScaleDraft} />
       </div>
 
       <div className="panel settings-panel">

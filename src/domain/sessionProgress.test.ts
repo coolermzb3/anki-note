@@ -47,6 +47,7 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     fixedDurationSeconds: 60,
     autoPlayTarget: true,
     includeInterStaffLedgerSpellings: true,
+    answerKeyboardScale: 1,
     pianoVolume: 0.8,
     queueStrategy: "adaptive",
     drillNoteNames: [],

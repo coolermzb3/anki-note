@@ -38,6 +38,7 @@ import type {
   PracticeSessionRecord,
   PromptDisplayMode,
   PromptNoteDuration,
+  PianoKeyName,
   ReviewRecord,
   TargetNote,
   WrongAnswer,
@@ -54,6 +55,7 @@ import {
   SESSION_PROGRESS_UI_PREFERENCES_KEY,
 } from "./sessionProgressPreferences";
 import { PauseOverlay } from "./PauseOverlay";
+import { isNaturalPianoKey, NATURAL_PIANO_KEYS, PianoKeyboard } from "./PianoKeyboard";
 import { StaffPagePrompt } from "./StaffPagePrompt";
 import { StaffPrompt } from "./StaffPrompt";
 import { PRACTICE_PAGE_STAFF_LAYOUT } from "./staffLayoutProfiles";
@@ -293,6 +295,7 @@ export function PracticeView({
   const [completedCount, setCompletedCount] = useState(0);
   const [wrongAnswerCount, setWrongAnswerCount] = useState(0);
   const [feedback, setFeedback] = useState<{ type: "wrong" | "correct"; noteName?: NoteName } | null>(null);
+  const [heldHardwareAnswerKeys, setHeldHardwareAnswerKeys] = useState<ReadonlySet<PianoKeyName>>(() => new Set());
   const [tick, setTick] = useState(0);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
   const [staffPageNotes, setStaffPageNotes] = useState<TargetNote[]>([]);
@@ -351,6 +354,7 @@ export function PracticeView({
   const sessionActiveStartedAtRef = useRef<number | null>(null);
   const isPausedRef = useRef(false);
   const pendingAfterPauseRef = useRef<(() => void) | null>(null);
+  const answerInputLockedRef = useRef(false);
   const lastBackupCompletedRef = useRef(0);
   const lastBackupAtRef = useRef<number>(performance.now());
   const handledNavigationExitRequestIdRef = useRef<number | null>(null);
@@ -616,6 +620,7 @@ export function PracticeView({
       };
       setCurrentNote(note);
       setFeedback(null);
+      answerInputLockedRef.current = false;
       if (autoPlayTarget) {
         void playTargetNote(note).catch(() => undefined);
       }
@@ -970,7 +975,7 @@ export function PracticeView({
   const submitAnswer = useCallback(
     async (noteName: NoteName): Promise<void> => {
       const prompt = promptRef.current;
-      if (!prompt || isPausedRef.current || feedback?.type === "correct") {
+      if (!prompt || isPausedRef.current || answerInputLockedRef.current) {
         return;
       }
       prompt.lastInputAt = performance.now();
@@ -983,6 +988,7 @@ export function PracticeView({
         return;
       }
 
+      answerInputLockedRef.current = true;
       setFeedback({ type: "correct", noteName });
       const review = await finishCurrentReview(true);
       if (!review) {
@@ -1035,7 +1041,6 @@ export function PracticeView({
       completedCount,
       drillNoteNames,
       enabledNotes,
-      feedback?.type,
       finishCurrentReview,
       fixedCount,
       getPromptActiveMs,
@@ -1077,6 +1082,9 @@ export function PracticeView({
         return;
       }
       if (event.code === "Space") {
+        if (event.target instanceof Element && event.target.closest(".piano-key")) {
+          return;
+        }
         event.preventDefault();
         void replayTarget();
         return;
@@ -1084,12 +1092,36 @@ export function PracticeView({
       const answer = ANSWER_BUTTONS.find((button) => event.key === button.key);
       if (answer) {
         event.preventDefault();
+        setHeldHardwareAnswerKeys((current) => new Set(current).add(answer.noteName));
         void submitAnswer(answer.noteName);
       }
     }
 
+    function onKeyUp(event: KeyboardEvent): void {
+      const answer = ANSWER_BUTTONS.find((button) => event.key === button.key);
+      if (!answer) {
+        return;
+      }
+      setHeldHardwareAnswerKeys((current) => {
+        const next = new Set(current);
+        next.delete(answer.noteName);
+        return next;
+      });
+    }
+
+    function releaseHeldHardwareKeys(): void {
+      setHeldHardwareAnswerKeys(new Set());
+    }
+
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", releaseHeldHardwareKeys);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", releaseHeldHardwareKeys);
+      releaseHeldHardwareKeys();
+    };
   }, [completeSession, phase, replayTarget, submitAnswer, togglePause]);
 
   useEffect(() => {
@@ -1147,6 +1179,13 @@ export function PracticeView({
         : undefined;
   const setupDisabled = setupDisabledReason !== undefined;
   const remainingMs = mode === "fixed-duration" ? fixedDurationSeconds * 1000 - getSessionActiveMs() : 0;
+  const staffPageRowCount = Math.max(
+    1,
+    Math.min(
+      PRACTICE_PAGE_STAFF_LAYOUT.multirow.rows,
+      Math.ceil(staffPageNotes.length / PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow),
+    ),
+  );
   const sessionQualifiedTimes = (summary?.reviews ?? [])
     .filter(isCompletedReview)
     .map((review) => review.activeMs);
@@ -1452,7 +1491,16 @@ export function PracticeView({
   }
 
   return (
-    <section className="practice-shell">
+    <section
+      className={[
+        "practice-shell",
+        "practice-running-shell",
+        `practice-${promptDisplayMode}`,
+        promptDisplayMode === "staff-page" ? `practice-staff-page-rows-${staffPageRowCount}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <div className="practice-topline">
         <div className="progress-readout">
           {mode === "open-ended" ? (
@@ -1505,24 +1553,20 @@ export function PracticeView({
         ) : null}
       </div>
 
-      <div className="answer-grid" aria-label="答案">
-        {ANSWER_BUTTONS.map((button) => (
-          <button
-            className={[
-              "answer-button",
-              feedback?.type === "wrong" && feedback.noteName === button.noteName ? "wrong" : "",
-              feedback?.type === "correct" && feedback.noteName === button.noteName ? "correct" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            key={button.key}
-            title={`${button.label} = ${button.noteName}`}
-            onClick={() => void submitAnswer(button.noteName)}
-          >
-            {button.label}
-          </button>
-        ))}
-      </div>
+      <PianoKeyboard
+        ariaLabel="答案琴键"
+        className="practice-piano-keyboard"
+        enabledKeys={NATURAL_PIANO_KEYS}
+        feedback={feedback?.noteName ? { keyName: feedback.noteName, type: feedback.type } : undefined}
+        keyOctave={currentNote?.octave}
+        onKeyPress={(keyName) => {
+          if (isNaturalPianoKey(keyName)) {
+            void submitAnswer(keyName);
+          }
+        }}
+        pressedKeys={heldHardwareAnswerKeys}
+        scale={settings.answerKeyboardScale}
+      />
       <span className="sr-only" aria-live="polite">
         {tick} {wrongAnswerCount}
       </span>

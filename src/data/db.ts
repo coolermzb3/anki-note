@@ -5,7 +5,12 @@ import {
   normalizeCurrentPracticeGroupIds,
   normalizePracticeGroupIds,
 } from "../domain/notes";
-import { DEFAULT_PIANO_VOLUME, normalizePianoVolume } from "../domain/settings";
+import {
+  DEFAULT_ANSWER_KEYBOARD_SCALE,
+  DEFAULT_PIANO_VOLUME,
+  normalizeAnswerKeyboardScale,
+  normalizePianoVolume,
+} from "../domain/settings";
 import type {
   AppSettings,
   BackupState,
@@ -69,6 +74,7 @@ export function makeDefaultSettings(): AppSettings {
     fixedDurationSeconds: 60,
     autoPlayTarget: false,
     includeInterStaffLedgerSpellings: false,
+    answerKeyboardScale: DEFAULT_ANSWER_KEYBOARD_SCALE,
     pianoVolume: DEFAULT_PIANO_VOLUME,
     queueStrategy: "adaptive",
     drillNoteNames: ["C"],
@@ -112,6 +118,7 @@ export function normalizeAppSettings(existing: StoredAppSettings): AppSettings {
       existing.schemaVersion === 2
         ? existing.includeInterStaffLedgerSpellings ?? defaults.includeInterStaffLedgerSpellings
         : existing.includeLedgerVariants ?? true,
+    answerKeyboardScale: normalizeAnswerKeyboardScale(existing.answerKeyboardScale),
     pianoVolume: normalizePianoVolume(existing.pianoVolume),
     queueStrategy,
     drillNoteNames: resolveDrillNoteNames(existing),

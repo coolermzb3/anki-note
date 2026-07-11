@@ -1,4 +1,5 @@
 export type NoteName = "C" | "D" | "E" | "F" | "G" | "A" | "B";
+export type PianoKeyName = NoteName | "C#" | "D#" | "F#" | "G#" | "A#";
 export type Octave = 1 | 2 | 3 | 4 | 5 | 6;
 export type Staff = "treble" | "bass";
 export type StaffNotationMode = "treble-only" | "bass-only" | "grand";
@@ -139,6 +140,7 @@ interface AppSettingsBase {
   fixedDurationSeconds: number;
   autoPlayTarget: boolean;
   includeInterStaffLedgerSpellings: boolean;
+  answerKeyboardScale: number;
   pianoVolume: number;
   queueStrategy: PracticeQueueStrategy;
   drillNoteNames: NoteName[];

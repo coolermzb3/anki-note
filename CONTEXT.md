@@ -110,12 +110,20 @@ _Avoid_: Aggregate card, multi-note card
 The visual note value used to draw each target note; it does not change audio playback, recognition timing, scoring, or queue behavior. Staff-page prompts prioritize aligned pairs of eighth notes and aligned groups of four sixteenth notes, then beam same-staff subsequences within each group; isolated notes retain individual flags.
 _Avoid_: Prompt display mode, playback duration, rhythm mode
 
-**Answer button**:
-One of the seven note-choice controls used to answer a card. In the first practice set, answer buttons are primarily labeled 1 through 7 and correspond to the absolute natural note names C, D, E, F, G, A, and B, not movable scale degrees.
-_Avoid_: Number button, key button, scale-degree button
+**Answer keyboard**:
+The piano-shaped answer control used to answer a card. Its seven white answer keys correspond to the absolute natural note names C, D, E, F, G, A, and B, while the five accidental keys remain unavailable until accidental-note answers are supported.
+_Avoid_: Button row, virtual piano
+
+**Answer key**:
+One of the seven available white keys on the answer keyboard, labeled 1 through 7 for the corresponding fixed-do number. An answer key submits a natural note name without an octave.
+_Avoid_: Number button, scale-degree button, accidental key
+
+**Playable keyboard preview**:
+The twelve-key piano control in settings used to calibrate answer-keyboard size and test sustained touch input in the fixed C4-B4 range. All white and accidental keys are playable there, but playing them does not create answer inputs, reviews, or practice history.
+_Avoid_: Answer keyboard, practice keyboard, size-only preview
 
 **Answer input**:
-The learner action that submits an answer note name, either by clicking an answer button or pressing the corresponding number key. Both input methods have the same meaning.
+The learner action that submits an answer note name, either by pressing an answer key on the answer keyboard or pressing the corresponding number key on a hardware keyboard. Both input methods have the same meaning.
 _Avoid_: Keyboard shortcut, button click
 
 **Answer note name**:

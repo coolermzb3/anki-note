@@ -1,7 +1,7 @@
 import * as Tone from "tone";
 import { noteToToneName } from "../domain/notes";
 import { DEFAULT_PIANO_VOLUME, normalizePianoVolume } from "../domain/settings";
-import type { NoteName, Octave, TargetNote } from "../domain/types";
+import type { Octave, PianoKeyName, TargetNote } from "../domain/types";
 
 const PIANO_SAMPLE_BASE_URL = "https://tonejs.github.io/audio/salamander/";
 const PIANO_SAMPLE_URLS = {
@@ -136,7 +136,7 @@ export async function unlockAudio(): Promise<void> {
   getSampler({ retryFailed: true });
 }
 
-export async function playPianoNote(noteName: NoteName, octave: Octave): Promise<void> {
+export async function playPianoNote(noteName: PianoKeyName, octave: Octave): Promise<void> {
   await unlockAudio();
   const note = noteToToneName(noteName, octave);
   const sampledPiano = getLoadedSampler();
@@ -147,7 +147,7 @@ export async function playPianoNote(noteName: NoteName, octave: Octave): Promise
   getFallbackSynth().triggerAttackRelease(note, "8n", undefined, pianoVolume);
 }
 
-export async function startPianoNote(noteName: NoteName, octave: Octave): Promise<SustainedPianoNote> {
+export async function startPianoNote(noteName: PianoKeyName, octave: Octave): Promise<SustainedPianoNote> {
   await unlockAudio();
   const note = noteToToneName(noteName, octave);
   const sampledPiano = getLoadedSampler();

@@ -2,6 +2,7 @@ import { staffForSingleClefMode } from "./staffNotation";
 import type {
   NoteName,
   Octave,
+  PianoKeyName,
   PitchId,
   PracticeGroup,
   PracticeGroupId,
@@ -265,6 +266,6 @@ export function noteToVexKey(note: TargetNote): string {
   return `${note.noteName.toLowerCase()}/${note.octave}`;
 }
 
-export function noteToToneName(noteName: NoteName, octave: Octave): string {
+export function noteToToneName(noteName: PianoKeyName, octave: Octave): string {
   return `${noteName}${octave}`;
 }
