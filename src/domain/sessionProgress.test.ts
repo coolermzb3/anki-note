@@ -3,8 +3,10 @@ import {
   buildLatestSessionProgressBenchmark,
   buildLatestSessionProgressSeries,
   buildSessionProgressBenchmark,
+  buildSessionProgressGroupSeries,
   buildSessionProgressGroups,
   buildSessionProgressSeries,
+  getSessionProgressGroupKey,
   isComparablePracticeSession,
   isProgressChartEligible,
 } from "./sessionProgress";
@@ -349,7 +351,13 @@ describe("session progress", () => {
         sessions: [oldDuration],
         reviews: makeSessionReviews("old-duration", [1000, 1000, 1000, 1000, 1000, 1000, 1000]),
       }),
-    ).toEqual({ metric: "completed-count", currentValue: 5, bestValue: 6, isNewBest: false });
+    ).toEqual({
+      bestSessionId: "old-duration",
+      metric: "completed-count",
+      currentValue: 5,
+      bestValue: 6,
+      isNewBest: false,
+    });
 
     const currentCount = makeSession({
       ...currentDuration,
@@ -372,7 +380,13 @@ describe("session progress", () => {
         sessions: [oldCount],
         reviews: makeSessionReviews("old-count", [1100, 1100, 1100, 1100, 1100]),
       }),
-    ).toEqual({ metric: "elapsed-ms", currentValue: 5000, bestValue: 5000, isNewBest: true });
+    ).toEqual({
+      bestSessionId: "current-count",
+      metric: "elapsed-ms",
+      currentValue: 5000,
+      bestValue: 5000,
+      isNewBest: true,
+    });
   });
 
   it("merges finite modes for records when the source data covers the current metric", () => {
@@ -397,7 +411,13 @@ describe("session progress", () => {
         sessions: [oldDuration],
         reviews: makeSessionReviews(oldDuration.id, [500, 500, 500, 500, 500]),
       }),
-    ).toEqual({ metric: "elapsed-ms", currentValue: 5000, bestValue: 2500, isNewBest: false });
+    ).toEqual({
+      bestSessionId: "old-duration",
+      metric: "elapsed-ms",
+      currentValue: 5000,
+      bestValue: 2500,
+      isNewBest: false,
+    });
   });
 
   it("excludes a finite session that ends before the current duration metric", () => {
@@ -423,7 +443,13 @@ describe("session progress", () => {
         sessions: [oldCount],
         reviews: makeSessionReviews(oldCount.id, [500, 500, 500, 500, 500, 500, 500, 500, 500, 500]),
       }),
-    ).toEqual({ metric: "completed-count", currentValue: 6, bestValue: 6, isNewBest: false });
+    ).toEqual({
+      bestSessionId: "current-duration",
+      metric: "completed-count",
+      currentValue: 6,
+      bestValue: 6,
+      isNewBest: false,
+    });
   });
 
   it("does not infer full duration coverage for a legacy session stopped early", () => {
@@ -450,7 +476,13 @@ describe("session progress", () => {
         sessions: [stoppedEarly],
         reviews: makeSessionReviews(stoppedEarly.id, [800, 800, 800, 800, 800, 800]),
       }),
-    ).toEqual({ metric: "completed-count", currentValue: 5, bestValue: 5, isNewBest: false });
+    ).toEqual({
+      bestSessionId: "current-duration",
+      metric: "completed-count",
+      currentValue: 5,
+      bestValue: 5,
+      isNewBest: false,
+    });
   });
 
   it("excludes short historical sessions from progress benchmarks", () => {
@@ -476,7 +508,13 @@ describe("session progress", () => {
         sessions: [short],
         reviews: makeSessionReviews("short", [1000, 1000, 1000, 1000]),
       }),
-    ).toEqual({ metric: "completed-count", currentValue: 5, bestValue: 5, isNewBest: false });
+    ).toEqual({
+      bestSessionId: "current",
+      metric: "completed-count",
+      currentValue: 5,
+      bestValue: 5,
+      isNewBest: false,
+    });
   });
 
   it("uses the current fixed-count actual duration as the progress comparison window", () => {
@@ -544,6 +582,47 @@ describe("session progress", () => {
     ]);
   });
 
+  it("keeps the newest tied all-history best curve beyond the recent limit in summary and group charts", () => {
+    const current = makeSession({
+      fixedCount: 5,
+      id: "current",
+      mode: "fixed-count",
+      startedAt: "2026-07-04T12:00:00.000+08:00",
+    });
+    const recent = makeSession({ ...current, id: "recent", startedAt: "2026-07-04T11:00:00.000+08:00" });
+    const best = makeSession({ ...current, id: "best", startedAt: "2026-07-04T10:00:00.000+08:00" });
+    const olderBest = makeSession({ ...current, id: "older-best", startedAt: "2026-07-04T09:00:00.000+08:00" });
+    const reviews = [
+      ...makeSessionReviews(current.id, [1000, 1000, 1000, 1000, 1000]),
+      ...makeSessionReviews(recent.id, [1200, 1200, 1200, 1200, 1200]),
+      ...makeSessionReviews(best.id, [500, 500, 500, 500, 500]),
+      ...makeSessionReviews(olderBest.id, [500, 500, 500, 500, 500]),
+    ];
+
+    const summarySeries = buildSessionProgressSeries({
+      currentSession: current,
+      currentReviews: reviews.filter((review) => review.sessionId === current.id),
+      sessions: [recent, olderBest, best],
+      reviews,
+      historyLimit: 1,
+      mode: "actual-order",
+    });
+    expect(summarySeries.map((line) => line.sessionId)).toEqual([best.id, recent.id, current.id]);
+    expect(summarySeries.filter((line) => line.isBest).map((line) => line.sessionId)).toEqual([best.id]);
+
+    const groupSeries = buildSessionProgressGroupSeries({
+      bestSessionId: best.id,
+      chartWindowMs: 5000,
+      groupKey: getSessionProgressGroupKey(current)!,
+      historyLimit: 1,
+      mode: "actual-order",
+      reviews,
+      sessions: [current, recent, olderBest, best],
+    });
+    expect(groupSeries.map((line) => line.sessionId)).toEqual([best.id, current.id]);
+    expect(groupSeries.filter((line) => line.isBest).map((line) => line.sessionId)).toEqual([best.id]);
+  });
+
   it("uses the latest eligible session as the progress baseline", () => {
     const older = makeSession({
       endReason: "completed-duration",
@@ -595,6 +674,7 @@ describe("session progress", () => {
     });
 
     expect(series.map((line) => line.sessionId)).toEqual(["older", "latest"]);
+    expect(series.find((line) => line.sessionId === "latest")?.isBest).toBe(true);
     expect(
       buildLatestSessionProgressBenchmark({
         sessions: [older, olderDifferentRange, latestOpenEnded, latestShort, latest],
@@ -606,6 +686,12 @@ describe("session progress", () => {
           ...makeSessionReviews("latest", [900, 1000, 1100, 1200, 1300]),
         ],
       }),
-    ).toEqual({ metric: "completed-count", currentValue: 5, bestValue: 5, isNewBest: false });
+    ).toEqual({
+      bestSessionId: "latest",
+      metric: "completed-count",
+      currentValue: 5,
+      bestValue: 5,
+      isNewBest: false,
+    });
   });
 });

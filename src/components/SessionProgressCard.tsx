@@ -138,7 +138,7 @@ export function SessionProgressCard({
           <SessionProgressControls
             benchmark={model.benchmark}
             currentLabel="最近"
-            historyLeadingLabel="每组"
+            historyLeadingLabel="每组最近"
             historyLimit={historyLimit}
             historyTrailingLabel="条"
             mode={mode}

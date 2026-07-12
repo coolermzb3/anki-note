@@ -182,6 +182,13 @@ export function useSessionProgressComparison({
     () => [...new Set(targetGroups.map((group) => group.key.effectiveQueueAlgorithm))],
     [targetGroups],
   );
+  const benchmarks = useMemo(
+    () => new Map(selectedGroups.map((group) => [
+      group.keyString,
+      buildSessionProgressGroupBenchmark({ groupKey: group.key, reviews, sessions }),
+    ])),
+    [reviews, selectedGroups, sessions],
+  );
   const chartGroups = useMemo<SessionProgressChartGroup[]>(() => {
     if (!selection || chartWindowMs <= 0) {
       return [];
@@ -199,6 +206,7 @@ export function useSessionProgressComparison({
         id: group.keyString,
         label: metadata && value !== undefined ? metadata.valueLabel(value, availableAlgorithms) : "当前条件",
         series: buildSessionProgressGroupSeries({
+          bestSessionId: benchmarks.get(group.keyString)?.bestSessionId,
           chartWindowMs,
           groupKey: group.key,
           historyLimit,
@@ -210,6 +218,7 @@ export function useSessionProgressComparison({
     });
   }, [
     availableAlgorithms,
+    benchmarks,
     chartWindowMs,
     comparisonDimension,
     historyLimit,
@@ -219,13 +228,6 @@ export function useSessionProgressComparison({
     selection,
     sessions,
   ]);
-  const benchmarks = useMemo(
-    () => new Map(selectedGroups.map((group) => [
-      group.keyString,
-      buildSessionProgressGroupBenchmark({ groupKey: group.key, reviews, sessions }),
-    ])),
-    [reviews, selectedGroups, sessions],
-  );
   const benchmark = selectedGroups.length === 1 ? benchmarks.get(selectedGroups[0].keyString) : undefined;
 
   const conditionOptions = (dimension: SessionProgressConditionDimension): SessionProgressConditionOption[] => {

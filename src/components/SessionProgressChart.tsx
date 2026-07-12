@@ -155,13 +155,15 @@ export function SessionProgressChart({
           emphasis: { lineStyle: { opacity: 1, width: 3 } },
           lineStyle: {
             color: group.color,
-            opacity: line.isCurrent ? 1 : 0.2,
-            width: line.isCurrent ? 2.6 : 1.6,
+            opacity: line.isCurrent ? 1 : line.isBest ? 0.6 : 0.2,
+            type: line.isBest ? "dashed" : "solid",
+            width: line.isCurrent ? 2.6 : line.isBest ? 2.2 : 1.6,
           },
           name: `${group.label} · ${new Date(line.startedAt).toLocaleString()}`,
           showSymbol: false,
           silent: false,
           type: "line",
+          z: line.isCurrent ? 3 : line.isBest ? 2 : 1,
         })),
       ),
       tooltip: {

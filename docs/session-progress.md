@@ -12,9 +12,9 @@ Effective algorithm versions retain distinct record scopes. When only one melody
 
 ## Curves and time benchmark
 
-Each selected group contributes its latest N eligible curves. N limits drawing only; record calculations use all qualifying history. Single-group charts use the app green, while a multi-group chart uses a stable four-color palette bound to values within the active comparison dimension. Older curves use the same group hue with lower opacity.
+Each selected group contributes its latest N eligible curves plus the newest session tied for that group's all-history best, deduplicated by session. N limits ordinary recent curves only; record calculations use all qualifying history. Single-group charts use the app green, while a multi-group chart uses a stable four-color palette bound to values within the active comparison dimension. The best session uses a higher-opacity dashed line, the newest session remains emphasized, and ordinary older curves use the same group hue with lower opacity. When the newest session is also best, its single curve is both thick and dashed.
 
-One selected group supplies the chart window. Its newest fixed-duration session uses the configured duration; its newest fixed-count session uses the accumulated statistical-review time. Every visible curve is truncated to that window regardless of source mode. Switching the time-benchmark group redraws the window without changing any group's record summary.
+One selected group supplies the chart window. Its newest fixed-duration session uses the configured duration; its newest fixed-count session uses the accumulated statistical-review time. Every visible curve is truncated to that window regardless of source mode. A session with no completed-review segment inside the window remains omitted instead of being interpolated. Switching the time-benchmark group redraws the window without changing any group's record summary.
 
 The chart uses the existing ECharts dependency with a custom accessible React legend rather than the built-in legend. The compact, translucent legend floats over the chart's upper-left area without shrinking the plot; each whole row is an accessible radio control for the time benchmark. Multi-group display uses overlaid curves; faceted charts remain deferred.
 
@@ -24,6 +24,6 @@ Every exact group owns its recent, best, and new-record claim. The genuinely new
 
 The custom multi-group legend shows each group's metric, recent value, and best value without adding `新纪录` labels. Single-group progress and the practice-completion summary may show `新纪录` only when the newest session strictly improves all earlier metric-covering sessions; an equal best is not a new record. The time-benchmark control is available only in multi-group display.
 
-The practice-completion summary remains single-group and centered on the session that just ended. It shares the ECharts renderer but does not expose statistics-page condition selection or multi-group comparison.
+The practice-completion summary remains single-group and centered on the session that just ended. It shares the ECharts renderer and also keeps the all-history best session visible beyond its ordinary history-N limit, but does not expose statistics-page condition selection or multi-group comparison.
 
 The statistics-page `音域分布` card normally reuses the selected exact groups. It calculates note speed and errors from the eligible finite sessions represented by those groups and then applies the page's current date range. If the global target-note set has no corresponding eligible progress group, this single-note view falls back to all long-term reviews whose target note belongs to the global set and states that fallback in the card. `识别时长` and `练习量` retain their existing app-range semantics.
