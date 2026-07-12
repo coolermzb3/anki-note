@@ -1,4 +1,6 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import * as echarts from "echarts";
+import type { EChartsOption } from "echarts";
+import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 
 import type {
   SessionProgressBenchmark,
@@ -13,26 +15,43 @@ import {
 
 export const DEFAULT_SESSION_PROGRESS_HISTORY_LIMIT = DEFAULT_HISTORY_LIMIT;
 
-const SESSION_PROGRESS_WIDTH = 720;
 const DEFAULT_SESSION_PROGRESS_HEIGHT = 260;
-const SESSION_PROGRESS_PADDING = { bottom: 38, left: 50, right: 18, top: 18 };
 
 interface SessionProgressControlsProps {
   benchmark?: SessionProgressBenchmark;
+  currentLabel?: string;
+  historyLeadingLabel?: string;
   historyLimit: number;
+  historyTrailingLabel?: string;
   mode: SessionProgressMode;
   onHistoryLimitChange: (historyLimit: number) => void;
   onModeChange: (mode: SessionProgressMode) => void;
 }
 
 interface SessionProgressChartProps {
+  chartWindowMs?: number;
+  groups?: SessionProgressChartGroup[];
   height?: number;
+  overlay?: ReactNode;
   series: SessionProgressSeries[];
 }
 
-type SessionProgressChartStyle = CSSProperties & {
-  "--session-progress-chart-height": string;
-};
+export interface SessionProgressChartGroup {
+  color: string;
+  id: string;
+  label: string;
+  series: SessionProgressSeries[];
+}
+
+export interface SessionProgressGroupLegendItem {
+  bestLabel: string;
+  color: string;
+  id: string;
+  isChartBenchmark: boolean;
+  label: string;
+  recentLabel: string;
+  recordMetricLabel: string;
+}
 
 export function normalizeSessionProgressHistoryLimit(value: string): number {
   return normalizeHistoryLimit(value);
@@ -57,7 +76,10 @@ function formatBenchmarkValue(benchmark: SessionProgressBenchmark, value: number
 
 export function SessionProgressControls({
   benchmark,
+  currentLabel = "本次",
+  historyLeadingLabel,
   historyLimit,
+  historyTrailingLabel,
   mode,
   onHistoryLimitChange,
   onModeChange,
@@ -67,7 +89,7 @@ export function SessionProgressControls({
       {benchmark ? (
         <div className="session-progress-benchmark">
           <span>
-            本次 <strong>{formatBenchmarkValue(benchmark, benchmark.currentValue)}</strong>
+            {currentLabel} <strong>{formatBenchmarkValue(benchmark, benchmark.currentValue)}</strong>
           </span>
           <span>
             最佳{" "}
@@ -87,174 +109,163 @@ export function SessionProgressControls({
         </button>
       </div>
       <HistoryLimitControl
-        ariaLabel="历史练习次数"
+        ariaLabel="答对进度曲线数量"
         historyLimit={historyLimit}
+        leadingLabel={historyLeadingLabel}
         onHistoryLimitChange={onHistoryLimitChange}
+        trailingLabel={historyTrailingLabel}
       />
     </div>
   );
 }
 
 export function SessionProgressChart({
+  chartWindowMs,
+  groups,
   height = DEFAULT_SESSION_PROGRESS_HEIGHT,
+  overlay,
   series,
 }: SessionProgressChartProps): JSX.Element {
-  const chartWrapRef = useRef<HTMLDivElement | null>(null);
-  const [chartWidth, setChartWidth] = useState(SESSION_PROGRESS_WIDTH);
-  const allPoints = series.flatMap((line) => line.points);
+  const chartElementRef = useRef<HTMLDivElement | null>(null);
+  const chartInstanceRef = useRef<echarts.ECharts | null>(null);
+  const chartGroups = useMemo<SessionProgressChartGroup[]>(
+    () => groups ?? [{ color: "#256f67", id: "single", label: "答对进度", series }],
+    [groups, series],
+  );
+  const allSeries = chartGroups.flatMap((group) => group.series);
+  const allPoints = allSeries.flatMap((line) => line.points);
   const dataMaxElapsedMs = Math.max(...allPoints.map((point) => point.elapsedMs), 0);
-  const currentDurationMs = series.find((line) => line.isCurrent)?.durationMs;
-  const xMax = Math.max(currentDurationMs ?? dataMaxElapsedMs, 1000);
-  const maxCompleted = Math.max(...allPoints.map((point) => point.completedReviews), 1);
-  const yStep = Math.max(1, Math.ceil(maxCompleted / 4));
-  const yMax = Math.max(yStep, Math.ceil(maxCompleted / yStep) * yStep);
-  const plotRight = Math.max(SESSION_PROGRESS_PADDING.left + 1, chartWidth - SESSION_PROGRESS_PADDING.right);
-  const plotWidth = plotRight - SESSION_PROGRESS_PADDING.left;
-  const plotHeight = height - SESSION_PROGRESS_PADDING.top - SESSION_PROGRESS_PADDING.bottom;
-  const xTicks = Array.from({ length: 5 }, (_, index) => (xMax * index) / 4);
-  const yTicks = Array.from({ length: Math.floor(yMax / yStep) + 1 }, (_, index) => index * yStep);
-  const toX = (elapsedMs: number): number =>
-    SESSION_PROGRESS_PADDING.left + (Math.min(elapsedMs, xMax) / xMax) * plotWidth;
-  const toY = (completedReviews: number): number =>
-    SESSION_PROGRESS_PADDING.top + plotHeight - (completedReviews / yMax) * plotHeight;
-  const makePath = (points: SessionProgressSeries["points"]): string =>
-    points
-      .map(
-        (point, index) =>
-          `${index === 0 ? "M" : "L"} ${toX(point.elapsedMs).toFixed(1)} ${toY(point.completedReviews).toFixed(1)}`,
-      )
-      .join(" ");
+  const currentDurationMs = allSeries.find((line) => line.isCurrent)?.durationMs;
+  const xMax = Math.max(chartWindowMs ?? currentDurationMs ?? dataMaxElapsedMs, 1000);
+  const prefersReducedMotion =
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const option = useMemo<EChartsOption>(
+    () => ({
+      animation: !prefersReducedMotion,
+      animationDuration: 240,
+      animationDurationUpdate: 180,
+      animationEasing: "cubicOut",
+      animationEasingUpdate: "cubicOut",
+      aria: { enabled: true, label: { description: "答对题数随局内时间变化的曲线图" } },
+      grid: { bottom: 42, left: 54, right: 18, top: 18 },
+      legend: { show: false },
+      series: chartGroups.flatMap((group) =>
+        group.series.map((line) => ({
+          data: line.points.map((point) => [point.elapsedMs, point.completedReviews]),
+          emphasis: { lineStyle: { opacity: 1, width: 3 } },
+          lineStyle: {
+            color: group.color,
+            opacity: line.isCurrent ? 1 : 0.2,
+            width: line.isCurrent ? 2.6 : 1.6,
+          },
+          name: `${group.label} · ${new Date(line.startedAt).toLocaleString()}`,
+          showSymbol: false,
+          silent: false,
+          type: "line",
+        })),
+      ),
+      tooltip: {
+        trigger: "item",
+        valueFormatter: (value) => (typeof value === "number" ? String(value) : String(value ?? "")),
+      },
+      xAxis: {
+        axisLabel: { color: "#766b5f", formatter: (value: number) => formatElapsedMs(value) },
+        axisLine: { lineStyle: { color: "#bcae9a" } },
+        max: xMax,
+        min: 0,
+        name: "局内时间",
+        nameLocation: "middle",
+        nameTextStyle: { color: "#766b5f", padding: 28 },
+        splitLine: { lineStyle: { color: "#e5dccf" }, show: true },
+        type: "value",
+      },
+      yAxis: {
+        axisLabel: { color: "#766b5f" },
+        axisLine: { lineStyle: { color: "#bcae9a" }, show: true },
+        min: 0,
+        minInterval: 1,
+        name: "答对题数",
+        nameLocation: "middle",
+        nameTextStyle: { color: "#766b5f", padding: 36 },
+        splitLine: { lineStyle: { color: "#e5dccf" } },
+        type: "value",
+      },
+    }),
+    [chartGroups, prefersReducedMotion, xMax],
+  );
 
   useLayoutEffect(() => {
-    const element = chartWrapRef.current;
+    const element = chartElementRef.current;
     if (!element) {
       return undefined;
     }
-
-    const updateWidth = (): void => {
-      const nextWidth = Math.round(element.clientWidth);
-      if (nextWidth <= 0) {
-        return;
-      }
-      setChartWidth((currentWidth) => (currentWidth === nextWidth ? currentWidth : nextWidth));
-    };
-
-    updateWidth();
-    const resizeObserver = new ResizeObserver(updateWidth);
+    const chart = echarts.init(element, undefined, { renderer: "canvas" });
+    chartInstanceRef.current = chart;
+    const resizeObserver = new ResizeObserver(() => chart.resize());
     resizeObserver.observe(element);
-    return () => resizeObserver.disconnect();
+    return () => {
+      resizeObserver.disconnect();
+      chart.dispose();
+      chartInstanceRef.current = null;
+    };
   }, []);
 
-  const chartStyle = {
-    "--session-progress-chart-height": `${height}px`,
-  } as SessionProgressChartStyle;
+  useEffect(() => {
+    chartInstanceRef.current?.setOption(option, true);
+  }, [option]);
 
   return (
-    <div
-      className="session-progress-chart-wrap"
-      ref={chartWrapRef}
-      style={chartStyle}
-    >
-      <svg
-        aria-label="答对进度图"
-        className="session-progress-chart"
-        role="img"
-        viewBox={`0 0 ${chartWidth} ${height}`}
-      >
-        {yTicks.map((tick) => (
-          <g key={`y-${tick}`}>
-            <line
-              className="session-progress-grid-line"
-              x1={SESSION_PROGRESS_PADDING.left}
-              x2={plotRight}
-              y1={toY(tick)}
-              y2={toY(tick)}
-            />
-            <text
-              className="session-progress-tick"
-              textAnchor="end"
-              x={SESSION_PROGRESS_PADDING.left - 8}
-              y={toY(tick) + 4}
-            >
-              {tick}
-            </text>
-          </g>
-        ))}
-        {xTicks.map((tick) => (
-          <g key={`x-${tick}`}>
-            <line
-              className="session-progress-grid-line"
-              x1={toX(tick)}
-              x2={toX(tick)}
-              y1={SESSION_PROGRESS_PADDING.top}
-              y2={height - SESSION_PROGRESS_PADDING.bottom}
-            />
-            <text
-              className="session-progress-tick"
-              textAnchor="middle"
-              x={toX(tick)}
-              y={height - SESSION_PROGRESS_PADDING.bottom + 20}
-            >
-              {formatElapsedMs(tick)}
-            </text>
-          </g>
-        ))}
-        <line
-          className="session-progress-axis"
-          x1={SESSION_PROGRESS_PADDING.left}
-          x2={plotRight}
-          y1={height - SESSION_PROGRESS_PADDING.bottom}
-          y2={height - SESSION_PROGRESS_PADDING.bottom}
-        />
-        <line
-          className="session-progress-axis"
-          x1={SESSION_PROGRESS_PADDING.left}
-          x2={SESSION_PROGRESS_PADDING.left}
-          y1={SESSION_PROGRESS_PADDING.top}
-          y2={height - SESSION_PROGRESS_PADDING.bottom}
-        />
-        {series.map((line) => {
-          const lastPoint = line.points[line.points.length - 1];
-          return (
-            <g key={line.sessionId}>
-              <path
-                className={line.isCurrent ? "session-progress-line-current" : "session-progress-line-history"}
-                d={makePath(line.points)}
-              />
-              {line.isCurrent && lastPoint ? (
-                <circle
-                  className="session-progress-current-point"
-                  cx={toX(lastPoint.elapsedMs)}
-                  cy={toY(lastPoint.completedReviews)}
-                  r={4}
-                />
-              ) : null}
-            </g>
-          );
-        })}
-        <text
-          className="session-progress-axis-label"
-          textAnchor="middle"
-          x={chartWidth / 2}
-          y={height - 4}
-        >
-          局内时间
-        </text>
-        <text
-          className="session-progress-axis-label"
-          textAnchor="middle"
-          transform={`rotate(-90 14 ${height / 2})`}
-          x={14}
-          y={height / 2}
-        >
-          答对题数
-        </text>
-      </svg>
+    <div className="session-progress-chart-wrap">
+      {overlay ? <div className="session-progress-chart-overlay">{overlay}</div> : null}
+      <div aria-label="答对进度图" className="session-progress-chart" ref={chartElementRef} role="img" style={{ height }} />
     </div>
   );
 }
 
-export function SessionProgressLegend({ series }: { series: SessionProgressSeries[] }): JSX.Element {
+export function SessionProgressGroupLegend({
+  groups,
+  onChartBenchmarkChange,
+}: {
+  groups: SessionProgressGroupLegendItem[];
+  onChartBenchmarkChange: (groupId: string) => void;
+}): JSX.Element {
+  return (
+    <div aria-label="时长基准" className="session-progress-group-legend" role="radiogroup">
+      {groups.map((group) => (
+        <button
+          aria-checked={group.isChartBenchmark}
+          aria-label={`将${group.label}设为时长基准`}
+          className="session-progress-group-row"
+          key={group.id}
+          onClick={() => onChartBenchmarkChange(group.id)}
+          role="radio"
+          type="button"
+        >
+          <span aria-hidden="true" className="session-progress-group-radio" />
+          <i aria-hidden="true" style={{ background: group.color }} />
+          <span className="session-progress-group-name">{group.label}</span>
+          <em
+            aria-hidden={group.isChartBenchmark ? undefined : true}
+            className={group.isChartBenchmark ? undefined : "session-progress-group-benchmark-placeholder"}
+          >
+            时长基准
+          </em>
+          <small>{group.recordMetricLabel}</small>
+          <span>最近 {group.recentLabel}</span>
+          <span>最佳 {group.bestLabel}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function SessionProgressLegend({
+  currentLabel = "本次",
+  series,
+}: {
+  currentLabel?: string;
+  series: SessionProgressSeries[];
+}): JSX.Element {
   return (
     <div className="session-progress-legend">
       {series.some((line) => !line.isCurrent) ? (
@@ -265,7 +276,7 @@ export function SessionProgressLegend({ series }: { series: SessionProgressSerie
       ) : null}
       <span>
         <i className="session-progress-legend-current" />
-        本次
+        {currentLabel}
       </span>
     </div>
   );

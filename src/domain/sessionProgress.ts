@@ -2,7 +2,13 @@ import { getPracticeSessionComparisonSnapshot } from "./legacyPracticeSessionCom
 import type { PracticeComparisonSnapshot } from "./practiceComparison";
 import { isStatisticalReview } from "./reviews";
 import { hasEnoughStatReviews } from "./stats";
-import type { PracticeSessionRecord, ReviewRecord } from "./types";
+import type {
+  EffectiveQueueAlgorithm,
+  PracticeSessionRecord,
+  PromptDisplayMode,
+  PromptNoteDuration,
+  ReviewRecord,
+} from "./types";
 
 export type SessionProgressMode = "actual-order" | "duration-cumsum";
 
@@ -17,6 +23,21 @@ export interface SessionProgressSeries {
   startedAt: string;
   isCurrent: boolean;
   points: SessionProgressPoint[];
+}
+
+export interface SessionProgressGroupKey {
+  effectiveQueueAlgorithm: EffectiveQueueAlgorithm;
+  promptDisplayMode: PromptDisplayMode;
+  promptNoteDuration: PromptNoteDuration;
+  targetNoteSetKey: string;
+}
+
+export interface SessionProgressGroup {
+  key: SessionProgressGroupKey;
+  keyString: string;
+  latestSession: PracticeSessionRecord;
+  sessionCount: number;
+  sessionIds: string[];
 }
 
 export interface BuildSessionProgressSeriesOptions {
@@ -71,8 +92,31 @@ function sameComparisonSnapshot(
       candidate &&
       reference.targetNoteSetKey === candidate.targetNoteSetKey &&
       reference.promptDisplayMode === candidate.promptDisplayMode &&
+      reference.promptNoteDuration === candidate.promptNoteDuration &&
       reference.effectiveQueueAlgorithm === candidate.effectiveQueueAlgorithm,
   );
+}
+
+export function serializeSessionProgressGroupKey(key: SessionProgressGroupKey): string {
+  return [
+    key.targetNoteSetKey,
+    key.promptDisplayMode,
+    key.effectiveQueueAlgorithm,
+    key.promptNoteDuration,
+  ].join("\u001f");
+}
+
+export function getSessionProgressGroupKey(
+  session: PracticeSessionRecord,
+): SessionProgressGroupKey | undefined {
+  return getPracticeSessionComparisonSnapshot(session);
+}
+
+export function sameSessionProgressGroupKey(
+  left: SessionProgressGroupKey,
+  right: SessionProgressGroupKey,
+): boolean {
+  return serializeSessionProgressGroupKey(left) === serializeSessionProgressGroupKey(right);
 }
 
 export function isComparablePracticeSession(
@@ -143,6 +187,18 @@ function buildSessionProgressPoints(reviews: ReviewRecord[], mode: SessionProgre
   return mode === "actual-order" ? buildActualOrderPoints(reviews) : buildDurationCumsumPoints(reviews);
 }
 
+export function getSessionProgressChartWindowMs(
+  session: PracticeSessionRecord,
+  sessionReviews: ReviewRecord[],
+  mode: SessionProgressMode,
+): number {
+  const points = buildSessionProgressPoints(sessionReviews, mode);
+  if (session.mode === "fixed-duration" && session.fixedDurationSeconds !== undefined) {
+    return Math.max(0, session.fixedDurationSeconds * 1000);
+  }
+  return points[points.length - 1]?.elapsedMs ?? 0;
+}
+
 function getComparisonDurationMs(session: PracticeSessionRecord, points: SessionProgressPoint[]): number {
   if (session.mode === "fixed-duration" && session.fixedDurationSeconds !== undefined) {
     return Math.max(0, session.fixedDurationSeconds * 1000);
@@ -172,6 +228,44 @@ function groupReviewsBySession(reviews: ReviewRecord[]): Map<string, ReviewRecor
   return reviewsBySession;
 }
 
+function compareSessionsNewestFirst(left: PracticeSessionRecord, right: PracticeSessionRecord): number {
+  return new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime() || right.id.localeCompare(left.id);
+}
+
+export function buildSessionProgressGroups(
+  sessions: PracticeSessionRecord[],
+  reviews: ReviewRecord[],
+): SessionProgressGroup[] {
+  const reviewsBySession = groupReviewsBySession(reviews);
+  const grouped = new Map<string, { key: SessionProgressGroupKey; sessions: PracticeSessionRecord[] }>();
+  for (const session of sessions) {
+    const sessionReviews = reviewsBySession.get(session.id) ?? [];
+    const key = getSessionProgressGroupKey(session);
+    if (!key || !isProgressChartEligible(session, sessionReviews)) {
+      continue;
+    }
+    const keyString = serializeSessionProgressGroupKey(key);
+    const current = grouped.get(keyString);
+    if (current) {
+      current.sessions.push(session);
+    } else {
+      grouped.set(keyString, { key, sessions: [session] });
+    }
+  }
+  return [...grouped.entries()]
+    .map(([keyString, group]) => {
+      const sortedSessions = group.sessions.sort(compareSessionsNewestFirst);
+      return {
+        key: group.key,
+        keyString,
+        latestSession: sortedSessions[0],
+        sessionCount: sortedSessions.length,
+        sessionIds: sortedSessions.map((session) => session.id),
+      };
+    })
+    .sort((left, right) => compareSessionsNewestFirst(left.latestSession, right.latestSession));
+}
+
 function findLatestProgressSession(
   sessions: PracticeSessionRecord[],
   reviewsBySession: Map<string, ReviewRecord[]>,
@@ -196,8 +290,8 @@ export function buildSessionProgressBenchmark({
   }
   const currentStartedAt = new Date(currentSession.startedAt).getTime();
   const reviewsBySession = groupReviewsBySession(reviews);
-  const comparableReviewSets = [
-    currentReviews,
+  const comparableSessions = [
+    { reviews: currentReviews, session: currentSession },
     ...sessions
       .filter((session) => {
         const sessionReviews = reviewsBySession.get(session.id) ?? [];
@@ -207,7 +301,7 @@ export function buildSessionProgressBenchmark({
           isComparablePracticeSession(currentSession, session)
         );
       })
-      .map((session) => reviewsBySession.get(session.id) ?? []),
+      .map((session) => ({ reviews: reviewsBySession.get(session.id) ?? [], session })),
   ];
 
   if (currentSession.mode === "fixed-duration") {
@@ -215,15 +309,27 @@ export function buildSessionProgressBenchmark({
     if (durationMs <= 0) {
       return undefined;
     }
-    const values = comparableReviewSets.map(
-      (sessionReviews) => truncateReviewsByActualElapsedMs(sessionReviews, durationMs).length,
-    );
-    const historicalValues = values.slice(1);
+    const values = comparableSessions.map(({ reviews: sessionReviews, session }) => {
+      const statisticalActiveMs = getStatisticalReviewsInAnswerOrder(sessionReviews).reduce(
+        (total, review) => total + Math.max(0, review.activeMs),
+        0,
+      );
+      const coveredMs = session.activePracticeMs ??
+        (session.mode === "fixed-duration" && session.endReason === "completed-duration"
+          ? (session.fixedDurationSeconds ?? 0) * 1000
+          : statisticalActiveMs);
+      return coveredMs >= durationMs
+        ? truncateReviewsByActualElapsedMs(sessionReviews, durationMs).length
+        : undefined;
+    });
+    const completedValues = values.filter((value): value is number => value !== undefined);
+    const historicalValues = values.slice(1).filter((value): value is number => value !== undefined);
     return {
       metric: "completed-count",
       currentValue: values[0],
-      bestValue: Math.max(...values),
-      isNewBest: historicalValues.length > 0 && values[0] > Math.max(...historicalValues),
+      bestValue: completedValues.length > 0 ? Math.max(...completedValues) : undefined,
+      isNewBest:
+        values[0] !== undefined && historicalValues.length > 0 && values[0] > Math.max(...historicalValues),
     };
   }
 
@@ -231,7 +337,7 @@ export function buildSessionProgressBenchmark({
   if (targetCount <= 0) {
     return undefined;
   }
-  const values = comparableReviewSets.map((sessionReviews) => {
+  const values = comparableSessions.map(({ reviews: sessionReviews }) => {
     const orderedReviews = getStatisticalReviewsInAnswerOrder(sessionReviews);
     if (orderedReviews.length < targetCount) {
       return undefined;
@@ -348,6 +454,85 @@ export function buildLatestSessionProgressBenchmark({
     currentSession,
     currentReviews: reviewsBySession.get(currentSession.id) ?? [],
     sessions,
+    reviews,
+  });
+}
+
+export interface BuildSessionProgressGroupSeriesOptions {
+  chartWindowMs: number;
+  groupKey: SessionProgressGroupKey;
+  historyLimit: number;
+  mode: SessionProgressMode;
+  reviews: ReviewRecord[];
+  sessions: PracticeSessionRecord[];
+}
+
+function sessionsForProgressGroup(
+  groupKey: SessionProgressGroupKey,
+  sessions: PracticeSessionRecord[],
+  reviewsBySession: Map<string, ReviewRecord[]>,
+): PracticeSessionRecord[] {
+  return sessions
+    .filter((session) => {
+      const candidateKey = getSessionProgressGroupKey(session);
+      return Boolean(
+        candidateKey &&
+          sameSessionProgressGroupKey(groupKey, candidateKey) &&
+          isProgressChartEligible(session, reviewsBySession.get(session.id) ?? []),
+      );
+    })
+    .sort(compareSessionsNewestFirst);
+}
+
+export function buildSessionProgressGroupSeries({
+  chartWindowMs,
+  groupKey,
+  historyLimit,
+  mode,
+  reviews,
+  sessions,
+}: BuildSessionProgressGroupSeriesOptions): SessionProgressSeries[] {
+  const reviewsBySession = groupReviewsBySession(reviews);
+  const selectedSessions = sessionsForProgressGroup(groupKey, sessions, reviewsBySession).slice(
+    0,
+    Math.max(1, Math.floor(historyLimit)),
+  );
+  return selectedSessions
+    .map((session, index) => {
+      const sessionReviews = reviewsBySession.get(session.id) ?? [];
+      const points = buildSessionProgressPoints(
+        truncateReviewsByActualElapsedMs(sessionReviews, chartWindowMs),
+        mode,
+      );
+      return {
+        durationMs: index === 0 ? chartWindowMs : undefined,
+        sessionId: session.id,
+        startedAt: session.startedAt,
+        isCurrent: index === 0,
+        points,
+      };
+    })
+    .filter((series) => series.points.length > 1)
+    .reverse();
+}
+
+export function buildSessionProgressGroupBenchmark({
+  groupKey,
+  reviews,
+  sessions,
+}: Pick<BuildSessionProgressGroupSeriesOptions, "groupKey" | "reviews" | "sessions">):
+  | SessionProgressBenchmark
+  | undefined {
+  const reviewsBySession = groupReviewsBySession(reviews);
+  const groupSessions = sessionsForProgressGroup(groupKey, sessions, reviewsBySession);
+  const currentSession = groupSessions[0];
+  if (!currentSession) {
+    return undefined;
+  }
+  return buildSessionProgressBenchmark({
+    currentSession,
+    currentReviews: reviewsBySession.get(currentSession.id) ?? [],
+    sessions: groupSessions.slice(1),
     reviews,
   });
 }

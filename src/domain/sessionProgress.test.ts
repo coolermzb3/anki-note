@@ -3,6 +3,7 @@ import {
   buildLatestSessionProgressBenchmark,
   buildLatestSessionProgressSeries,
   buildSessionProgressBenchmark,
+  buildSessionProgressGroups,
   buildSessionProgressSeries,
   isComparablePracticeSession,
   isProgressChartEligible,
@@ -51,6 +52,37 @@ function makeSessionReviews(
 }
 
 describe("session progress", () => {
+  it("keeps the eligible session ids owned by each exact comparison group", () => {
+    const older = makeSession({
+      fixedCount: 5,
+      id: "older",
+      mode: "fixed-count",
+      startedAt: "2026-07-04T11:00:00.000+08:00",
+    });
+    const latest = makeSession({
+      ...older,
+      id: "latest",
+      startedAt: "2026-07-04T12:00:00.000+08:00",
+    });
+    const short = makeSession({
+      ...older,
+      id: "short",
+      startedAt: "2026-07-04T13:00:00.000+08:00",
+    });
+
+    const groups = buildSessionProgressGroups(
+      [older, latest, short],
+      [
+        ...makeSessionReviews(older.id, [1000, 1000, 1000, 1000, 1000]),
+        ...makeSessionReviews(latest.id, [900, 900, 900, 900, 900]),
+        ...makeSessionReviews(short.id, [800, 800, 800, 800]),
+      ],
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].sessionIds).toEqual([latest.id, older.id]);
+  });
+
   it("matches comparable practice sessions by the configured practice scope", () => {
     const reference = makeSession({
       id: "current",
@@ -298,6 +330,7 @@ describe("session progress", () => {
 
   it("builds fixed-duration count and fixed-count time benchmarks", () => {
     const currentDuration = makeSession({
+      endReason: "completed-duration",
       id: "current-duration",
       startedAt: "2026-07-04T12:00:00.000+08:00",
       mode: "fixed-duration",
@@ -320,6 +353,7 @@ describe("session progress", () => {
 
     const currentCount = makeSession({
       ...currentDuration,
+      endReason: "completed-count",
       id: "current-count",
       startedAt: "2026-07-04T14:00:00.000+08:00",
       mode: "fixed-count",
@@ -341,8 +375,87 @@ describe("session progress", () => {
     ).toEqual({ metric: "elapsed-ms", currentValue: 5000, bestValue: 5000, isNewBest: true });
   });
 
+  it("merges finite modes for records when the source data covers the current metric", () => {
+    const current = makeSession({
+      fixedCount: 5,
+      id: "current-count",
+      mode: "fixed-count",
+      startedAt: "2026-07-04T14:00:00.000+08:00",
+    });
+    const oldDuration = makeSession({
+      activePracticeMs: 6000,
+      fixedDurationSeconds: 6,
+      id: "old-duration",
+      mode: "fixed-duration",
+      startedAt: "2026-07-04T13:00:00.000+08:00",
+    });
+
+    expect(
+      buildSessionProgressBenchmark({
+        currentSession: current,
+        currentReviews: makeSessionReviews(current.id, [1000, 1000, 1000, 1000, 1000]),
+        sessions: [oldDuration],
+        reviews: makeSessionReviews(oldDuration.id, [500, 500, 500, 500, 500]),
+      }),
+    ).toEqual({ metric: "elapsed-ms", currentValue: 5000, bestValue: 2500, isNewBest: false });
+  });
+
+  it("excludes a finite session that ends before the current duration metric", () => {
+    const current = makeSession({
+      activePracticeMs: 6000,
+      fixedDurationSeconds: 6,
+      id: "current-duration",
+      mode: "fixed-duration",
+      startedAt: "2026-07-04T14:00:00.000+08:00",
+    });
+    const oldCount = makeSession({
+      activePracticeMs: 5000,
+      fixedCount: 10,
+      id: "old-count",
+      mode: "fixed-count",
+      startedAt: "2026-07-04T13:00:00.000+08:00",
+    });
+
+    expect(
+      buildSessionProgressBenchmark({
+        currentSession: current,
+        currentReviews: makeSessionReviews(current.id, [1000, 1000, 1000, 1000, 1000, 1000]),
+        sessions: [oldCount],
+        reviews: makeSessionReviews(oldCount.id, [500, 500, 500, 500, 500, 500, 500, 500, 500, 500]),
+      }),
+    ).toEqual({ metric: "completed-count", currentValue: 6, bestValue: 6, isNewBest: false });
+  });
+
+  it("does not infer full duration coverage for a legacy session stopped early", () => {
+    const current = makeSession({
+      activePracticeMs: 6000,
+      endReason: "completed-duration",
+      fixedDurationSeconds: 6,
+      id: "current-duration",
+      mode: "fixed-duration",
+      startedAt: "2026-07-04T14:00:00.000+08:00",
+    });
+    const stoppedEarly = makeSession({
+      endReason: "manual-stop",
+      fixedDurationSeconds: 10,
+      id: "stopped-early",
+      mode: "fixed-duration",
+      startedAt: "2026-07-04T13:00:00.000+08:00",
+    });
+
+    expect(
+      buildSessionProgressBenchmark({
+        currentSession: current,
+        currentReviews: makeSessionReviews(current.id, [1000, 1000, 1000, 1000, 1000]),
+        sessions: [stoppedEarly],
+        reviews: makeSessionReviews(stoppedEarly.id, [800, 800, 800, 800, 800, 800]),
+      }),
+    ).toEqual({ metric: "completed-count", currentValue: 5, bestValue: 5, isNewBest: false });
+  });
+
   it("excludes short historical sessions from progress benchmarks", () => {
     const current = makeSession({
+      endReason: "completed-duration",
       id: "current",
       startedAt: "2026-07-04T12:00:00.000+08:00",
       mode: "fixed-duration",
@@ -351,6 +464,7 @@ describe("session progress", () => {
     });
     const short = makeSession({
       ...current,
+      endReason: "manual-stop",
       id: "short",
       startedAt: "2026-07-04T11:00:00.000+08:00",
     });
@@ -432,6 +546,7 @@ describe("session progress", () => {
 
   it("uses the latest eligible session as the progress baseline", () => {
     const older = makeSession({
+      endReason: "completed-duration",
       id: "older",
       startedAt: "2026-07-04T10:00:00.000+08:00",
       mode: "fixed-duration",
@@ -448,12 +563,14 @@ describe("session progress", () => {
     });
     const latestOpenEnded = makeSession({
       ...older,
+      endReason: "manual-stop",
       id: "latest-open-ended",
       startedAt: "2026-07-04T11:30:00.000+08:00",
       mode: "open-ended",
     });
     const latestShort = makeSession({
       ...older,
+      endReason: "manual-stop",
       id: "latest-short",
       startedAt: "2026-07-04T11:45:00.000+08:00",
       queueStrategy: "melody",

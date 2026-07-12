@@ -70,6 +70,7 @@ export interface ReviewRecord {
 }
 
 interface PracticeSessionRecordBase {
+  activePracticeMs?: number;
   id: string;
   mode: PracticeMode;
   enabledGroupIds: PracticeGroupId[];
@@ -102,7 +103,44 @@ export interface PracticeSessionRecordV2 extends PracticeSessionRecordBase {
   includeInterStaffLedgerSpellings?: boolean;
 }
 
-export type PracticeSessionRecord = PracticeSessionRecordV1 | PracticeSessionRecordV2;
+export interface PracticeSessionStartSnapshot {
+  practiceConfig: {
+    drillNoteNames: NoteName[];
+    effectiveQueueAlgorithm: EffectiveQueueAlgorithm;
+    enabledGroupIds: PracticeGroupId[];
+    fixedCount?: number;
+    fixedDurationSeconds?: number;
+    includeInterStaffLedgerSpellings?: boolean;
+    mode: PracticeMode;
+    queueStrategy: PracticeQueueStrategy;
+    staffNotationMode: StaffNotationMode;
+    targetNoteSetKey: string;
+  };
+  presentationConfig: {
+    autoPlayTarget: boolean;
+    promptDisplayMode: PromptDisplayMode;
+    promptNoteDuration: PromptNoteDuration;
+    smoothStaffPageScroll: boolean;
+    startPausedReading: boolean;
+  };
+  interactionConfig: {
+    answerKeyboardScale: number;
+    correctDelayMs: number;
+    inactivityThresholdSeconds: number;
+    pianoVolume: number;
+  };
+  environment: {
+    prefersReducedMotion: boolean;
+  };
+}
+
+export interface PracticeSessionRecordV3 extends Omit<PracticeSessionRecordV2, "schemaVersion"> {
+  schemaVersion: 3;
+  promptNoteDuration: PromptNoteDuration;
+  startSnapshot: PracticeSessionStartSnapshot;
+}
+
+export type PracticeSessionRecord = PracticeSessionRecordV1 | PracticeSessionRecordV2 | PracticeSessionRecordV3;
 
 interface StaffRecallRunRecordBase {
   id: string;

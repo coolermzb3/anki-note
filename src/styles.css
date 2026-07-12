@@ -1452,6 +1452,144 @@ main.has-backup-reminder .setup-grid::after {
   gap: 8px;
 }
 
+.session-progress-condition-bar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.session-progress-condition-selector {
+  position: relative;
+}
+
+.session-progress-condition-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 132px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.session-progress-condition-trigger::after {
+  content: "▾";
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.session-progress-condition-trigger span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-progress-condition-trigger strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.session-progress-condition-trigger .session-progress-condition-multiple {
+  color: var(--accent);
+}
+
+.session-progress-condition-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 8;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgba(43, 37, 32, 0.14);
+}
+
+.session-progress-condition-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 3px;
+  border-radius: 7px;
+}
+
+.session-progress-condition-option:has(.session-progress-condition-single:hover) {
+  background: var(--surface-soft);
+}
+
+.session-progress-condition-option:has(input:disabled) {
+  opacity: 0.48;
+}
+
+.session-progress-condition-option label {
+  width: 36px;
+  min-height: 36px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.session-progress-condition-option input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.session-progress-condition-option label:hover {
+  background: var(--surface-soft);
+}
+
+.session-progress-condition-single {
+  width: 100%;
+  min-height: 32px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 7px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+
+.session-progress-condition-single:hover:not(:disabled),
+.session-progress-condition-single:active:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.session-progress-condition-menu small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-progress-transient-notice {
+  align-self: center;
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 650;
+}
+
 .session-progress-controls .segmented,
 .session-progress-history-limit,
 .session-progress-benchmark {
@@ -1513,55 +1651,30 @@ main.has-backup-reminder .setup-grid::after {
 }
 
 .session-progress-chart-wrap {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-soft);
   overflow: hidden;
 }
 
+.session-progress-chart-overlay {
+  position: absolute;
+  top: 7px;
+  left: 80px;
+  right: 18px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.session-progress-chart-overlay > * {
+  pointer-events: auto;
+}
+
 .session-progress-chart {
   width: 100%;
   height: var(--session-progress-chart-height, 260px);
   display: block;
-}
-
-.session-progress-grid-line {
-  stroke: #e5dccf;
-  stroke-dasharray: 4 5;
-  stroke-width: 1;
-}
-
-.session-progress-axis {
-  stroke: #bcae9a;
-  stroke-width: 1.2;
-}
-
-.session-progress-tick,
-.session-progress-axis-label {
-  fill: var(--muted);
-  font-size: 12px;
-}
-
-.session-progress-line-history,
-.session-progress-line-current {
-  fill: none;
-  vector-effect: non-scaling-stroke;
-}
-
-.session-progress-line-history {
-  stroke: rgba(37, 111, 103, 0.2);
-  stroke-width: 1.6;
-}
-
-.session-progress-line-current {
-  stroke: var(--accent);
-  stroke-width: 2.6;
-}
-
-.session-progress-current-point {
-  fill: var(--surface);
-  stroke: var(--accent);
-  stroke-width: 2.2;
 }
 
 .session-progress-legend {
@@ -1591,6 +1704,86 @@ main.has-backup-reminder .setup-grid::after {
 
 .session-progress-legend-current {
   background: var(--accent);
+}
+
+.session-progress-group-legend {
+  display: grid;
+  gap: 2px;
+  width: max-content;
+  max-width: 100%;
+}
+
+.session-progress-group-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(70px, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 25px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.56);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 400;
+  text-align: left;
+}
+
+.session-progress-group-row:hover,
+.session-progress-group-row[aria-checked="true"] {
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.session-progress-group-radio {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+}
+
+.session-progress-group-row[aria-checked="true"] .session-progress-group-radio::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.session-progress-group-row > i {
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.session-progress-group-row small {
+  color: var(--muted);
+}
+
+.session-progress-group-row em {
+  color: var(--accent-strong);
+  font-style: normal;
+  font-weight: 650;
+}
+
+.session-progress-group-benchmark-placeholder {
+  visibility: hidden;
+}
+
+.session-progress-chart-overlay .session-progress-legend {
+  width: max-content;
+  margin-top: 0;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.56);
+  justify-content: flex-start;
+}
+
+.note-range-filter-note {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .stats-header {
@@ -2377,6 +2570,31 @@ main.has-backup-reminder .setup-grid::after {
   .session-progress-controls .segmented button {
     flex: 1;
     min-width: 0;
+  }
+
+  .session-progress-condition-selector,
+  .session-progress-condition-trigger {
+    width: 100%;
+  }
+
+  .session-progress-condition-menu {
+    width: 100%;
+  }
+
+  .session-progress-group-row {
+    grid-template-columns: auto auto minmax(48px, 1fr) auto auto;
+    gap: 4px;
+    font-size: 11px;
+  }
+
+  .session-progress-chart-overlay {
+    left: 8px;
+    right: 8px;
+  }
+
+  .session-progress-group-row small,
+  .session-progress-group-row em {
+    display: none;
   }
 
   .chart-panel .panel-heading {

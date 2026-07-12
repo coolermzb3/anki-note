@@ -6,6 +6,7 @@ import type {
   NoteName,
   PracticeQueueStrategy,
   PromptDisplayMode,
+  PromptNoteDuration,
   StaffNotationMode,
   TargetNote,
 } from "./types";
@@ -13,6 +14,7 @@ import type {
 export interface PracticeComparisonSnapshot {
   effectiveQueueAlgorithm: EffectiveQueueAlgorithm;
   promptDisplayMode: PromptDisplayMode;
+  promptNoteDuration: PromptNoteDuration;
   targetNoteSetKey: string;
 }
 
@@ -25,6 +27,7 @@ export interface PracticeComparisonInput {
   enabledGroupIds: AppSettings["enabledGroupIds"];
   includeInterStaffLedgerSpellings: boolean;
   promptDisplayMode: PromptDisplayMode;
+  promptNoteDuration: PromptNoteDuration;
   queueStrategy: PracticeQueueStrategy;
   staffNotationMode: StaffNotationMode;
 }
@@ -76,6 +79,7 @@ export function buildPracticeComparisonSnapshot({
   enabledGroupIds,
   includeInterStaffLedgerSpellings,
   promptDisplayMode,
+  promptNoteDuration,
   queueStrategy,
   staffNotationMode,
 }: PracticeComparisonInput): PracticeComparisonSnapshot | undefined {
@@ -84,6 +88,7 @@ export function buildPracticeComparisonSnapshot({
     enabledGroupIds,
     includeInterStaffLedgerSpellings,
     promptDisplayMode,
+    promptNoteDuration,
     queueStrategy,
     staffNotationMode,
   });
@@ -99,6 +104,7 @@ export function buildPracticeActivitySnapshot({
   enabledGroupIds,
   includeInterStaffLedgerSpellings,
   promptDisplayMode,
+  promptNoteDuration,
   queueStrategy,
   staffNotationMode,
 }: PracticeComparisonInput): PracticeActivitySnapshot | undefined {
@@ -116,6 +122,7 @@ export function buildPracticeActivitySnapshot({
     effectiveQueueAlgorithm: getEffectiveQueueAlgorithm(queueStrategy),
     notes,
     promptDisplayMode,
+    promptNoteDuration,
     targetNoteSetKey: buildTargetNoteSetKey(notes.map((note) => note.id)),
   };
 }

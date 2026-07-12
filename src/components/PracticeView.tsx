@@ -1,6 +1,6 @@
 import { BarChart3, Pause, Play, RotateCcw, SlidersHorizontal, Square, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { playPianoNote, playTargetNote, unlockAudio } from "../audio/piano";
+import { playPianoNote, playTargetNote, setPianoVolume, unlockAudio } from "../audio/piano";
 import { db, deletePracticeSessionWithReviews, resolveDrillNoteNames, resolveQueueStrategy, saveReview } from "../data/db";
 import { writeBackupIfSafe, writeBackupNow } from "../data/backup";
 import { createUuid } from "../domain/id";
@@ -13,7 +13,11 @@ import {
   PRACTICE_GROUPS,
 } from "../domain/notes";
 import { shouldIgnoreReviewForSession, shouldKeepPracticeSession } from "../domain/practiceSession";
-import { buildPracticeActivitySnapshot, getEffectivePracticeNotes } from "../domain/practiceComparison";
+import { getEffectivePracticeNotes } from "../domain/practiceComparison";
+import {
+  buildPracticeSessionRecordV3,
+  buildPracticeSessionStartSnapshot,
+} from "../domain/practiceSessionStartSnapshot";
 import { isCompletedReview } from "../domain/reviews";
 import { selectNextNote, selectNotePage } from "../domain/scheduler";
 import {
@@ -27,7 +31,6 @@ import {
   formatMs,
   percentile,
 } from "../domain/stats";
-import { applicableLedgerSetting } from "../domain/staffNotation";
 import type {
   AppSettings,
   FocusLoss,
@@ -37,6 +40,7 @@ import type {
   PracticeMode,
   PracticeQueueStrategy,
   PracticeSessionRecord,
+  PracticeSessionStartSnapshot,
   PromptDisplayMode,
   PromptNoteDuration,
   PianoKeyName,
@@ -322,18 +326,25 @@ export function PracticeView({
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false,
   );
-  const mode = practiceSetupPreferences.mode;
-  const promptDisplayMode = practiceSetupPreferences.promptDisplayMode;
-  const promptNoteDuration = practiceSetupPreferences.promptNoteDuration;
-  const fixedCount = practiceSetupPreferences.fixedCount;
-  const fixedDurationSeconds = practiceSetupPreferences.fixedDurationSeconds;
-  const autoPlayTarget = practiceSetupPreferences.autoPlayTarget;
-  const queueStrategy = practiceSetupPreferences.queueStrategy;
-  const drillNoteNames = practiceSetupPreferences.drillNoteNames;
+  const runningStartSnapshot = phase === "running" && session?.schemaVersion === 3 ? session.startSnapshot : undefined;
+  const mode = runningStartSnapshot?.practiceConfig.mode ?? practiceSetupPreferences.mode;
+  const promptDisplayMode = runningStartSnapshot?.presentationConfig.promptDisplayMode ?? practiceSetupPreferences.promptDisplayMode;
+  const promptNoteDuration = runningStartSnapshot?.presentationConfig.promptNoteDuration ?? practiceSetupPreferences.promptNoteDuration;
+  const fixedCount = runningStartSnapshot?.practiceConfig.fixedCount ?? practiceSetupPreferences.fixedCount;
+  const fixedDurationSeconds =
+    runningStartSnapshot?.practiceConfig.fixedDurationSeconds ?? practiceSetupPreferences.fixedDurationSeconds;
+  const autoPlayTarget = runningStartSnapshot?.presentationConfig.autoPlayTarget ?? practiceSetupPreferences.autoPlayTarget;
+  const queueStrategy = runningStartSnapshot?.practiceConfig.queueStrategy ?? practiceSetupPreferences.queueStrategy;
+  const drillNoteNames = runningStartSnapshot?.practiceConfig.drillNoteNames ?? practiceSetupPreferences.drillNoteNames;
   const pausedPlaybackBpm = staffPageUiPreferences.pausedPlaybackBpm;
   const startPausedReading = staffPageUiPreferences.startPausedReading;
+  const effectivePromptNoteDuration = runningStartSnapshot?.presentationConfig.promptNoteDuration ?? promptNoteDuration;
+  const effectiveAnswerKeyboardScale = runningStartSnapshot?.interactionConfig.answerKeyboardScale ?? settings.answerKeyboardScale;
   const staffPageScrollDurationMs =
-    staffPageUiPreferences.smoothStaffPageScroll && !prefersReducedMotion ? STAFF_PAGE_SCROLL_DURATION_MS : 0;
+    (runningStartSnapshot?.presentationConfig.smoothStaffPageScroll ?? staffPageUiPreferences.smoothStaffPageScroll) &&
+    !(runningStartSnapshot?.environment.prefersReducedMotion ?? prefersReducedMotion)
+      ? STAFF_PAGE_SCROLL_DURATION_MS
+      : 0;
   const summaryProgressMode = sessionProgressPreferences.mode;
   const summaryHistoryLimit = sessionProgressPreferences.historyLimit;
   const setMode = (nextMode: PracticeMode): void => {
@@ -375,6 +386,7 @@ export function PracticeView({
 
   const promptRef = useRef<PromptRuntime | null>(null);
   const sessionRef = useRef<PracticeSessionRecord | null>(null);
+  const sessionStartSnapshotRef = useRef<PracticeSessionStartSnapshot | null>(null);
   const sessionReviewsRef = useRef<ReviewRecord[]>([]);
   const lastTargetNoteIdRef = useRef<TargetNote["id"] | undefined>();
   const melodyQueueRef = useRef<TargetNote[]>([]);
@@ -404,7 +416,7 @@ export function PracticeView({
   } = useRemainingNotePlayback({
     bpm: pausedPlaybackBpm,
     getNotes: getRemainingPlaybackNotes,
-    noteDuration: promptNoteDuration,
+    noteDuration: effectivePromptNoteDuration,
   });
 
   useEffect(() => {
@@ -423,15 +435,18 @@ export function PracticeView({
     setPracticeSetupPreferences(makeDefaultPracticeSetupUiPreferences(nextSettings));
   }, [setPracticeSetupPreferences]);
 
-  const staffNotationMode = settings.staffNotationMode;
+  const staffNotationMode = runningStartSnapshot?.practiceConfig.staffNotationMode ?? settings.staffNotationMode;
+  const effectiveEnabledGroupIds = runningStartSnapshot?.practiceConfig.enabledGroupIds ?? settings.enabledGroupIds;
+  const effectiveInterStaffLedgerSpellings =
+    runningStartSnapshot?.practiceConfig.includeInterStaffLedgerSpellings ?? settings.includeInterStaffLedgerSpellings;
   const enabledNotes = useMemo(
-    () => getNotesForGroups(settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode),
-    [settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode],
+    () => getNotesForGroups(effectiveEnabledGroupIds, effectiveInterStaffLedgerSpellings, staffNotationMode),
+    [effectiveEnabledGroupIds, effectiveInterStaffLedgerSpellings, staffNotationMode],
   );
   const useLedgerGap = enabledNotes.some((note) => note.isInterStaffLedgerSpelling);
   const fullPracticeCount = useMemo(
-    () => getNotesForGroups(ALL_GROUP_IDS, settings.includeInterStaffLedgerSpellings, staffNotationMode).length,
-    [settings.includeInterStaffLedgerSpellings, staffNotationMode],
+    () => getNotesForGroups(ALL_GROUP_IDS, effectiveInterStaffLedgerSpellings, staffNotationMode).length,
+    [effectiveInterStaffLedgerSpellings, staffNotationMode],
   );
   const fixedCountPresets = useMemo(
     () => Array.from(new Set([10, 20, fullPracticeCount])).filter((count) => count > 0),
@@ -441,16 +456,16 @@ export function PracticeView({
     () =>
       getEffectivePracticeNotes({
         drillNoteNames,
-        enabledGroupIds: settings.enabledGroupIds,
-        includeInterStaffLedgerSpellings: settings.includeInterStaffLedgerSpellings,
+        enabledGroupIds: effectiveEnabledGroupIds,
+        includeInterStaffLedgerSpellings: effectiveInterStaffLedgerSpellings,
         queueStrategy,
         staffNotationMode,
       }),
     [
       drillNoteNames,
       queueStrategy,
-      settings.enabledGroupIds,
-      settings.includeInterStaffLedgerSpellings,
+      effectiveEnabledGroupIds,
+      effectiveInterStaffLedgerSpellings,
       staffNotationMode,
     ],
   );
@@ -590,7 +605,7 @@ export function PracticeView({
     }
     if (promptRef.current) {
       resumeActiveTimers();
-      if (autoPlayTarget) {
+      if (sessionStartSnapshotRef.current?.presentationConfig.autoPlayTarget ?? autoPlayTarget) {
         void playTargetNote(promptRef.current.note).catch(() => undefined);
       }
     }
@@ -699,7 +714,7 @@ export function PracticeView({
       setCurrentNote(note);
       setFeedback(null);
       answerInputLockedRef.current = false;
-      if (autoPlayTarget && !startsPaused) {
+      if ((sessionStartSnapshotRef.current?.presentationConfig.autoPlayTarget ?? autoPlayTarget) && !startsPaused) {
         void playTargetNote(note).catch(() => undefined);
       }
     },
@@ -964,6 +979,7 @@ export function PracticeView({
         : [...sessionReviewsRef.current];
       const finalSession: PracticeSessionRecord = {
         ...sessionRef.current,
+        activePracticeMs: getSessionActiveMs(),
         endedAt,
         endReason,
         completedCount: finalReviews.filter(isCompletedReview).length,
@@ -1011,6 +1027,7 @@ export function PracticeView({
       cancelRemainingPlayback,
       clearStaffPageScrollSchedule,
       finishCurrentReview,
+      getSessionActiveMs,
       onDataChanged,
       onPracticeFinished,
       pauseActiveTimers,
@@ -1050,45 +1067,31 @@ export function PracticeView({
     const nextMode = nextSettings.defaultMode;
     const nextQueueStrategy = resolveQueueStrategy(nextSettings);
     const nextSchedulerReviews = preflightResult.reviews ? filterLongTermReviews(preflightResult.reviews) : schedulerReviews;
-    const nextStaffNotationMode = nextSettings.staffNotationMode;
-    const activitySnapshot = buildPracticeActivitySnapshot({
-      drillNoteNames: nextSettings.drillNoteNames,
-      enabledGroupIds: nextSettings.enabledGroupIds,
-      includeInterStaffLedgerSpellings: nextSettings.includeInterStaffLedgerSpellings,
-      promptDisplayMode: nextSettings.promptDisplayMode,
-      queueStrategy: nextQueueStrategy,
-      staffNotationMode: nextStaffNotationMode,
+    const builtStartSnapshot = buildPracticeSessionStartSnapshot({
+      autoPlayTarget: nextSettings.autoPlayTarget,
+      mode: nextMode,
+      prefersReducedMotion,
+      settings: { ...nextSettings, queueStrategy: nextQueueStrategy },
+      smoothStaffPageScroll: staffPageUiPreferences.smoothStaffPageScroll,
+      startPausedReading,
     });
-    if (!activitySnapshot) {
+    if (!builtStartSnapshot) {
       return;
     }
-    const nextEnabledNotes = activitySnapshot.notes;
-    const shouldStartPaused = nextSettings.promptDisplayMode === "staff-page" && startPausedReading;
+    const { snapshot: startSnapshot } = builtStartSnapshot;
+    const { practiceConfig, presentationConfig } = startSnapshot;
+    const nextEnabledNotes = builtStartSnapshot.notes;
+    const shouldStartPaused = presentationConfig.promptDisplayMode === "staff-page" && presentationConfig.startPausedReading;
+    setPianoVolume(startSnapshot.interactionConfig.pianoVolume);
     const startedAt = new Date().toISOString();
-    const nextSession: PracticeSessionRecord = {
+    const nextSession: PracticeSessionRecord = buildPracticeSessionRecordV3({
       id: newSessionId(),
-      schemaVersion: 2,
-      mode: nextMode,
-      enabledGroupIds: nextSettings.enabledGroupIds,
-      fixedCount: nextMode === "fixed-count" ? nextSettings.fixedCount : undefined,
-      fixedDurationSeconds: nextMode === "fixed-duration" ? nextSettings.fixedDurationSeconds : undefined,
-      queueStrategy: nextQueueStrategy,
-      drillNoteNames: nextSettings.drillNoteNames,
-      focusedTraining: nextQueueStrategy === "focused",
-      promptDisplayMode: nextSettings.promptDisplayMode,
-      staffNotationMode: nextStaffNotationMode,
-      includeInterStaffLedgerSpellings: applicableLedgerSetting(
-        nextStaffNotationMode,
-        nextSettings.includeInterStaffLedgerSpellings,
-      ),
-      targetNoteSetKey: activitySnapshot.targetNoteSetKey,
-      effectiveQueueAlgorithm: activitySnapshot.effectiveQueueAlgorithm,
+      snapshot: startSnapshot,
       startedAt,
-      completedCount: 0,
-      interruptedCount: 0,
-    };
+    });
     await db.practiceSessions.put(nextSession);
     sessionRef.current = nextSession;
+    sessionStartSnapshotRef.current = startSnapshot;
     sessionReviewsRef.current = [];
     lastTargetNoteIdRef.current = undefined;
     melodyQueueRef.current = [];
@@ -1108,23 +1111,23 @@ export function PracticeView({
     setSummary(null);
     setIsPaused(shouldStartPaused);
     setPhase("running");
-    if (nextSettings.promptDisplayMode === "staff-page") {
+    if (presentationConfig.promptDisplayMode === "staff-page") {
       startStaffPage({
         sourceNotes: nextEnabledNotes,
         sourceReviews: nextSchedulerReviews,
-        sourceQueueStrategy: nextQueueStrategy,
-        sourceDrillNoteNames: nextSettings.drillNoteNames,
+        sourceQueueStrategy: practiceConfig.queueStrategy,
+        sourceDrillNoteNames: practiceConfig.drillNoteNames,
         nextCompletedCount: 0,
       });
     } else {
       const firstNote =
-        nextQueueStrategy === "melody"
-          ? drawMelodyNote(nextEnabledNotes, nextMode === "fixed-count" ? nextSettings.fixedCount : undefined)
+        practiceConfig.queueStrategy === "melody"
+          ? drawMelodyNote(nextEnabledNotes, practiceConfig.fixedCount)
           : selectNextNote({
               notes: nextEnabledNotes,
               reviews: nextSchedulerReviews,
-              queueStrategy: nextQueueStrategy,
-              drillNoteNames: nextSettings.drillNoteNames,
+              queueStrategy: practiceConfig.queueStrategy,
+              drillNoteNames: practiceConfig.drillNoteNames,
             });
       startPrompt(firstNote);
     }
@@ -1134,8 +1137,10 @@ export function PracticeView({
     onBeforePracticeStart,
     persistConfig,
     queueNotes.length,
+    prefersReducedMotion,
     schedulerReviews,
     startPausedReading,
+    staffPageUiPreferences.smoothStaffPageScroll,
     staffNotationMode,
     startPrompt,
     startStaffPage,
@@ -1219,7 +1224,7 @@ export function PracticeView({
           return;
         }
         continueAfterCorrectDelay();
-      }, settings.correctDelayMs);
+      }, sessionStartSnapshotRef.current?.interactionConfig.correctDelayMs ?? settings.correctDelayMs);
     },
     [
       completeSession,
@@ -1352,7 +1357,10 @@ export function PracticeView({
       const prompt = promptRef.current;
       if (prompt && prompt.activeStartedAt !== null && !prompt.interrupted) {
         const inactiveMs = performance.now() - prompt.lastInputAt;
-        if (inactiveMs >= settings.inactivityThresholdSeconds * 1000) {
+        const inactivityThresholdSeconds =
+          sessionStartSnapshotRef.current?.interactionConfig.inactivityThresholdSeconds ??
+          settings.inactivityThresholdSeconds;
+        if (inactiveMs >= inactivityThresholdSeconds * 1000) {
           markInterrupted("inactive-timeout");
         }
       }
@@ -1753,7 +1761,7 @@ export function PracticeView({
             notes={staffPageNotes}
             completedCount={staffPageCompletedCount}
             isScrolling={isStaffPageScrolling}
-            noteDuration={promptNoteDuration}
+            noteDuration={effectivePromptNoteDuration}
             scrollDurationMs={staffPageScrollDurationMs}
             staffNotationMode={staffNotationMode}
             useLedgerGap={useLedgerGap}
@@ -1764,7 +1772,7 @@ export function PracticeView({
           <StaffPrompt
             effectiveTargetNoteIds={effectiveTargetNoteIds}
             note={currentNote}
-            noteDuration={promptNoteDuration}
+            noteDuration={effectivePromptNoteDuration}
             staffNotationMode={staffNotationMode}
             useLedgerGap={useLedgerGap}
             wrong={feedback?.type === "wrong"}
@@ -1784,7 +1792,7 @@ export function PracticeView({
           }
         }}
         pressedKeys={heldHardwareAnswerKeys}
-        scale={settings.answerKeyboardScale}
+        scale={effectiveAnswerKeyboardScale}
       />
       <span className="sr-only" aria-live="polite">
         {tick} {wrongAnswerCount}

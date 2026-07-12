@@ -7,6 +7,7 @@ function snapshot(overrides: Partial<Parameters<typeof buildPracticeComparisonSn
     enabledGroupIds: ["G4-F5"],
     includeInterStaffLedgerSpellings: false,
     promptDisplayMode: "staff-page",
+    promptNoteDuration: "quarter",
     queueStrategy: "adaptive",
     staffNotationMode: "grand",
     ...overrides,
@@ -35,5 +36,11 @@ describe("practice comparison snapshot", () => {
 
   it("records the coverage-aware melody generator as melody-v2", () => {
     expect(snapshot({ queueStrategy: "melody" })?.effectiveQueueAlgorithm).toBe("melody-v2");
+  });
+
+  it("keeps prompt note duration in the direct comparison snapshot", () => {
+    expect(snapshot({ promptNoteDuration: "quarter" })).not.toEqual(
+      snapshot({ promptNoteDuration: "sixteenth" }),
+    );
   });
 });

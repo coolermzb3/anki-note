@@ -68,14 +68,18 @@ _Avoid_: Wall-clock time, time since entering recall
 A contiguous period of practice using one effective target-note-set snapshot. A session may be an open-ended flow that continues until the learner stops, a fixed-count session that ends after a chosen number of completed reviews, or a fixed-duration session that ends after a chosen active practice duration.
 _Avoid_: Game, round
 
+**Practice-session start snapshot**:
+The immutable, normalized practice configuration and relevant environment captured when a practice session starts. It preserves broader explanatory metadata than the smaller condition key used for direct comparison.
+_Avoid_: Current settings, comparison key
+
 **Start-paused reading**:
 An optional reading interval at the beginning of a staff-page practice session: the first rolling staff-page window is visible, but active practice time, recognition time, answer input, and automatic target-note playback do not begin immediately. Resuming starts the timers and, when enabled, plays the current target note once just like every other resume of an active prompt; the reading interval does not change practice-session comparability.
 _Avoid_: Countdown, timed preview, queue strategy
 
 **Comparable practice session**:
 A fixed-count or fixed-duration practice session that can be compared with another session because it used the same
-effective target-note set, prompt display mode, and effective queue algorithm.
-Direct comparability governs shared progress benchmarks and record claims; showing sessions together for exploratory comparison does not make them directly comparable. Prompt note duration and automatic target-note playback do not make sessions incomparable.
+effective target-note set, prompt display mode, effective queue algorithm, and prompt note duration.
+Direct comparability governs progress benchmarks and record claims. Fixed-count and fixed-duration sessions may be directly comparable because their review curves share the same underlying meaning, while open-ended sessions and automatic target-note playback do not enter this comparison.
 _Avoid_: Same round, identical UI state
 
 **Practice queue**:

@@ -18,17 +18,13 @@ import {
   filterLongTermReviews,
   positiveTertileThresholds,
 } from "../domain/stats";
-import {
-  buildLatestSessionProgressBenchmark,
-  buildLatestSessionProgressSeries,
-} from "../domain/sessionProgress";
-import type { AppSettings, PracticeSessionRecord, ReviewRecord } from "../domain/types";
+import type {
+  AppSettings,
+  PracticeSessionRecord,
+  ReviewRecord,
+} from "../domain/types";
 import { GlobalRangeControls } from "./GlobalRangeControls";
-import {
-  SessionProgressChart,
-  SessionProgressControls,
-  SessionProgressLegend,
-} from "./SessionProgressChart";
+import { SessionProgressCard } from "./SessionProgressCard";
 import {
   DEFAULT_SESSION_PROGRESS_UI_PREFERENCES,
   parseSessionProgressUiPreferences,
@@ -37,6 +33,7 @@ import {
 import { StatsRangeStaff, type StaffHeatNote } from "./StatsRangeStaff";
 import { STATS_COLORS } from "./statsColors";
 import { useLocalStorageState } from "./useLocalStorageState";
+import { useSessionProgressComparison } from "./useSessionProgressComparison";
 
 interface StatsViewProps {
   settings: AppSettings;
@@ -318,6 +315,7 @@ function isStatsCarouselDragBlockedTarget(target: EventTarget | null): boolean {
         ".chart-panel-actions",
         ".chart-box",
         ".note-heat-stack",
+        ".session-progress-condition-bar",
         "canvas",
         "svg",
       ].join(", "),
@@ -639,29 +637,35 @@ export function StatsView({
       p90: stat.p90Ms === undefined ? undefined : Number((stat.p90Ms / 1000).toFixed(2)),
     }));
   }, [filteredReviews, recognitionTimeGrouping, sessions]);
-  const sessionProgressSeries = useMemo(
-    () =>
-      buildLatestSessionProgressSeries({
-        sessions,
-        reviews,
-        historyLimit: sessionProgressHistoryLimit,
-        mode: sessionProgressMode,
-      }),
-    [reviews, sessions, sessionProgressHistoryLimit, sessionProgressMode],
-  );
-  const sessionProgressBenchmark = useMemo(
-    () => buildLatestSessionProgressBenchmark({ sessions, reviews }),
-    [reviews, sessions],
-  );
+  const sessionProgressComparison = useSessionProgressComparison({
+    activeNotes,
+    historyLimit: sessionProgressHistoryLimit,
+    mode: sessionProgressMode,
+    reviews,
+    sessions,
+  });
+  const {
+    selection: sessionProgressSelection,
+    selectedSessionIds: sessionProgressSessionIds,
+  } = sessionProgressComparison;
+  const noteRangeReviews = useMemo(() => {
+    if (!sessionProgressSelection) {
+      return filteredReviews;
+    }
+    return filterByRange(
+      longTermReviews.filter((review) => sessionProgressSessionIds.has(review.sessionId)),
+      range,
+    );
+  }, [filteredReviews, longTermReviews, range, sessionProgressSelection, sessionProgressSessionIds]);
   const noteStats = useMemo(() => {
     if (activeNotes.length === 0) {
       return [];
     }
     const activeTargetNoteIds = new Set(activeNotes.map((note) => note.id));
-    return buildNoteStats(filteredReviews, settings.enabledGroupIds).filter((stat) =>
+    return buildNoteStats(noteRangeReviews).filter((stat) =>
       activeTargetNoteIds.has(stat.targetNoteId),
     );
-  }, [activeNotes, filteredReviews, settings.enabledGroupIds]);
+  }, [activeNotes, noteRangeReviews]);
   const rangeStaffNotes = useMemo(() => {
     const statsByNoteId = new Map(noteStats.map((stat) => [stat.targetNoteId, stat]));
     return activeNotes.map((note) => ({ note, stat: statsByNoteId.get(note.id) }));
@@ -853,30 +857,13 @@ export function StatsView({
 
     if (cardId === "session-progress") {
       return (
-        <div className="panel chart-panel stats-carousel-card">
-          <div className="panel-heading">
-            <h2>答对进度</h2>
-            <div className="chart-panel-actions">
-              <SessionProgressControls
-                benchmark={sessionProgressBenchmark}
-                historyLimit={sessionProgressHistoryLimit}
-                mode={sessionProgressMode}
-                onHistoryLimitChange={setSessionProgressHistoryLimit}
-                onModeChange={setSessionProgressMode}
-              />
-            </div>
-          </div>
-          <div className="chart-box">
-            {sessionProgressSeries.length === 0 ? (
-              <div className="empty-state">暂无记录</div>
-            ) : (
-              <>
-                <SessionProgressChart height={330} series={sessionProgressSeries} />
-                <SessionProgressLegend series={sessionProgressSeries} />
-              </>
-            )}
-          </div>
-        </div>
+        <SessionProgressCard
+          historyLimit={sessionProgressHistoryLimit}
+          mode={sessionProgressMode}
+          model={sessionProgressComparison}
+          onHistoryLimitChange={setSessionProgressHistoryLimit}
+          onModeChange={setSessionProgressMode}
+        />
       );
     }
 
@@ -884,6 +871,11 @@ export function StatsView({
       <div className="panel note-heat-panel stats-carousel-card">
         <div className="panel-heading">
           <h2>音域分布</h2>
+          <small className="note-range-filter-note">
+            {sessionProgressSelection
+              ? "沿用答对进度的会话条件"
+              : "暂无对应有效会话，已按目标音集合汇总"}
+          </small>
         </div>
         <div className="note-heat-stack">
           <div className="note-heat-row">

@@ -20,6 +20,7 @@ function deriveV1PracticeComparisonSnapshot(
     enabledGroupIds: session.enabledGroupIds,
     includeInterStaffLedgerSpellings: session.includeLedgerVariants,
     promptDisplayMode: session.promptDisplayMode,
+    promptNoteDuration: "quarter",
     queueStrategy: session.queueStrategy,
     staffNotationMode: "grand",
   });
@@ -28,10 +29,19 @@ function deriveV1PracticeComparisonSnapshot(
 export function getPracticeSessionComparisonSnapshot(
   session: PracticeSessionRecord,
 ): PracticeComparisonSnapshot | undefined {
+  if (session.schemaVersion === 3) {
+    return {
+      effectiveQueueAlgorithm: session.startSnapshot.practiceConfig.effectiveQueueAlgorithm,
+      promptDisplayMode: session.startSnapshot.presentationConfig.promptDisplayMode,
+      promptNoteDuration: session.startSnapshot.presentationConfig.promptNoteDuration,
+      targetNoteSetKey: session.startSnapshot.practiceConfig.targetNoteSetKey,
+    };
+  }
   if (session.schemaVersion === 2) {
     return {
       effectiveQueueAlgorithm: session.effectiveQueueAlgorithm,
       promptDisplayMode: session.promptDisplayMode,
+      promptNoteDuration: "quarter",
       targetNoteSetKey: session.targetNoteSetKey,
     };
   }
