@@ -688,7 +688,7 @@ export function StatsView({
           p90Ms: stat?.p90Ms,
         },
         note,
-        value: stat?.medianMs,
+        value: stat?.p90Ms,
       })),
     [rangeStaffNotes],
   );
