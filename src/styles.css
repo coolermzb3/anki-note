@@ -21,6 +21,9 @@
   --danger: #c84c3d;
   --success: #2f8f5f;
   --shadow: 0 16px 40px rgba(66, 50, 34, 0.08);
+  --control-height: 40px;
+  --control-height-compact: 36px;
+  --segmented-control-height: 44px;
 }
 
 * {
@@ -43,7 +46,7 @@ select {
 }
 
 button {
-  min-height: 40px;
+  min-height: var(--control-height);
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -106,7 +109,7 @@ select:focus-visible {
 
 input,
 select {
-  min-height: 40px;
+  min-height: var(--control-height);
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -360,34 +363,26 @@ button.primary.backup-decision-button .backup-action-summary {
   display: flex;
   flex-direction: column;
   gap: 0;
-  height: 42px;
+  height: var(--segmented-control-height);
   max-width: 100%;
   overflow: clip;
-  padding: 1px;
+  padding: 0;
 }
 
 .global-range-staffs.segmented {
   background: transparent;
   border: 0;
-  flex: 1;
+  flex: none;
   flex-wrap: nowrap;
-  height: 38px;
-  padding: 0;
+  min-height: 0;
 }
 
 .global-range-staffs.segmented button {
-  height: 100%;
-  min-height: 0;
   min-width: 104px;
 }
 
 .global-range-staff-section-grand {
-  height: 72px;
-}
-
-.global-range-staff-section-grand .global-range-staffs.segmented {
-  flex: none;
-  height: 42px;
+  height: auto;
 }
 
 .global-range-group-choice {
@@ -422,6 +417,7 @@ button.primary.backup-decision-button .backup-action-summary {
 .global-range-ledger-choice input {
   height: 14px;
   margin: 0;
+  min-height: 0;
   width: 14px;
 }
 
@@ -884,7 +880,7 @@ main.has-backup-reminder .setup-grid::after {
 }
 
 .choice {
-  min-height: 42px;
+  min-height: var(--control-height);
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -949,7 +945,8 @@ main.has-backup-reminder .setup-grid::after {
 }
 
 .segmented {
-  padding: 4px;
+  min-height: var(--segmented-control-height);
+  padding: 3px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-soft);
@@ -957,6 +954,8 @@ main.has-backup-reminder .setup-grid::after {
 }
 
 .segmented button {
+  height: var(--control-height-compact);
+  min-height: var(--control-height-compact);
   min-width: 96px;
   border-color: transparent;
   background: transparent;
@@ -980,8 +979,21 @@ main.has-backup-reminder .setup-grid::after {
   position: relative;
 }
 
-.practice-start-paused-choice {
-  min-height: 42px;
+.practice-start-paused-option {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  min-height: var(--control-height);
+  width: fit-content;
+}
+
+.practice-start-paused-option input {
+  accent-color: var(--accent);
+  height: 16px;
+  margin: 0;
+  min-height: 0;
+  width: 16px;
 }
 
 .practice-start-action:focus-visible {
@@ -1593,8 +1605,8 @@ main.has-backup-reminder .setup-grid::after {
 .session-progress-controls .segmented,
 .session-progress-history-limit,
 .session-progress-benchmark {
-  height: 44px;
-  min-height: 44px;
+  height: var(--segmented-control-height);
+  min-height: var(--segmented-control-height);
 }
 
 .session-progress-benchmark {
@@ -1623,12 +1635,6 @@ main.has-backup-reminder .setup-grid::after {
 
 .session-progress-controls .segmented {
   flex-wrap: nowrap;
-  padding: 3px;
-}
-
-.session-progress-controls .segmented button {
-  height: 36px;
-  min-height: 36px;
 }
 
 .session-progress-history-limit {
@@ -1803,17 +1809,6 @@ main.has-backup-reminder .setup-grid::after {
   min-width: 76px;
 }
 
-.stats-range-filter .segmented {
-  height: 44px;
-  min-height: 44px;
-  padding: 3px;
-}
-
-.stats-range-filter .segmented button {
-  height: 36px;
-  min-height: 36px;
-}
-
 .chart-panel-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1825,17 +1820,6 @@ main.has-backup-reminder .setup-grid::after {
 
 .stats-carousel-card > .panel-heading {
   min-height: 52px;
-}
-
-.chart-panel-actions > .segmented {
-  height: 44px;
-  min-height: 44px;
-  padding: 3px;
-}
-
-.chart-panel-actions > .segmented button {
-  height: 36px;
-  min-height: 36px;
 }
 
 .switch-line {
@@ -1973,10 +1957,10 @@ main.has-backup-reminder .setup-grid::after {
 }
 
 .chart-carousel-arrow {
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  min-height: 36px;
+  width: var(--control-height-compact);
+  height: var(--control-height-compact);
+  min-width: var(--control-height-compact);
+  min-height: var(--control-height-compact);
   padding: 0;
   border-radius: 8px;
   border-color: transparent;

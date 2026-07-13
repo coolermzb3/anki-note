@@ -1489,6 +1489,25 @@ export function PracticeView({
               </div>
             </div>
 
+            {promptDisplayMode === "staff-page" ? (
+              <div className="control-block">
+                <span className="control-label">谱页选项</span>
+                <label className="practice-start-paused-option">
+                  <input
+                    checked={startPausedReading}
+                    type="checkbox"
+                    onChange={(event) =>
+                      setStaffPageUiPreferences((current) => ({
+                        ...current,
+                        startPausedReading: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span>开始后暂停（读谱）</span>
+                </label>
+              </div>
+            ) : null}
+
             {mode === "fixed-count" ? (
               <div className="control-block">
                 <span className="control-label">题数</span>
@@ -1610,21 +1629,6 @@ export function PracticeView({
                 <BarChart3 size={18} />
                 统计
               </button>
-              {promptDisplayMode === "staff-page" ? (
-                <label className={startPausedReading ? "choice choice-active practice-start-paused-choice" : "choice practice-start-paused-choice"}>
-                  <input
-                    checked={startPausedReading}
-                    type="checkbox"
-                    onChange={(event) =>
-                      setStaffPageUiPreferences((current) => ({
-                        ...current,
-                        startPausedReading: event.target.checked,
-                      }))
-                    }
-                  />
-                  <span>开始后暂停（读谱）</span>
-                </label>
-              ) : null}
             </div>
           </div>
         </div>
