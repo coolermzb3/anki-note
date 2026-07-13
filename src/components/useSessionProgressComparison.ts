@@ -22,9 +22,9 @@ import {
 } from "../domain/sessionProgressSelection";
 import { buildTargetNoteSetKey } from "../domain/targetNoteSet";
 import type {
-  EffectiveQueueAlgorithm,
   PracticeSessionRecord,
   PromptNoteDuration,
+  QueueComparisonFamily,
   ReviewRecord,
   TargetNote,
 } from "../domain/types";
@@ -38,7 +38,7 @@ const COMPARISON_COLORS = ["#4477aa", "#ee6677", "#228833", "#aa3377"] as const;
 interface ConditionMetadata {
   label: string;
   order: readonly SessionProgressConditionValue[];
-  valueLabel: (value: SessionProgressConditionValue, algorithms: EffectiveQueueAlgorithm[]) => string;
+  valueLabel: (value: SessionProgressConditionValue, families: QueueComparisonFamily[]) => string;
 }
 
 const CONDITION_METADATA: Record<SessionProgressConditionDimension, ConditionMetadata> = {
@@ -47,21 +47,18 @@ const CONDITION_METADATA: Record<SessionProgressConditionDimension, ConditionMet
     order: ["single-note", "staff-page"],
     valueLabel: (value) => value === "single-note" ? "单音" : "谱页",
   },
-  effectiveQueueAlgorithm: {
+  queueComparisonFamily: {
     label: "队列算法",
-    order: ["adaptive-v1", "focused-v1", "melody-v1", "melody-v2"],
-    valueLabel: (value, algorithms) => {
-      if (value === "adaptive-v1") {
-        return "常规";
+    order: ["adaptive", "melody-v1", "melody-v2"],
+    valueLabel: (value, families) => {
+      if (value === "adaptive") {
+        return "自适应";
       }
-      if (value === "focused-v1") {
-        return "薄弱项";
-      }
-      const hasBothMelodyVersions = algorithms.includes("melody-v1") && algorithms.includes("melody-v2");
+      const hasBothMelodyVersions = families.includes("melody-v1") && families.includes("melody-v2");
       if (!hasBothMelodyVersions) {
-        return "自动旋律";
+        return "旋律生成";
       }
-      return value === "melody-v1" ? "自动旋律（旧版）" : "自动旋律（当前）";
+      return value === "melody-v1" ? "旋律生成（旧版）" : "旋律生成（当前）";
     },
   },
   promptNoteDuration: {
@@ -178,8 +175,8 @@ export function useSessionProgressComparison({
     ? getSessionProgressChartWindowMs(timeBenchmarkGroup.latestSession, timeBenchmarkReviews, mode)
     : 0;
   const comparisonDimension = selection ? getSessionProgressComparisonDimension(selection) : undefined;
-  const availableAlgorithms = useMemo(
-    () => [...new Set(targetGroups.map((group) => group.key.effectiveQueueAlgorithm))],
+  const availableFamilies = useMemo(
+    () => [...new Set(targetGroups.map((group) => group.key.queueComparisonFamily))],
     [targetGroups],
   );
   const benchmarks = useMemo(
@@ -204,7 +201,7 @@ export function useSessionProgressComparison({
           ? "#256f67"
           : COMPARISON_COLORS[Math.max(0, colorIndex) % COMPARISON_COLORS.length],
         id: group.keyString,
-        label: metadata && value !== undefined ? metadata.valueLabel(value, availableAlgorithms) : "当前条件",
+        label: metadata && value !== undefined ? metadata.valueLabel(value, availableFamilies) : "当前条件",
         series: buildSessionProgressGroupSeries({
           bestSessionId: benchmarks.get(group.keyString)?.bestSessionId,
           chartWindowMs,
@@ -217,7 +214,7 @@ export function useSessionProgressComparison({
       };
     });
   }, [
-    availableAlgorithms,
+    availableFamilies,
     benchmarks,
     chartWindowMs,
     comparisonDimension,
@@ -238,7 +235,7 @@ export function useSessionProgressComparison({
     const availableValues = new Set<SessionProgressConditionValue>(
       targetGroups.map((group) => getSessionProgressGroupDimensionValue(group.key, dimension)),
     );
-    const visibleOrder = dimension === "effectiveQueueAlgorithm"
+    const visibleOrder = dimension === "queueComparisonFamily"
       ? metadata.order.filter((value) => value !== "melody-v1" || availableValues.has(value))
       : metadata.order;
     return visibleOrder.map((value) => {
@@ -257,7 +254,7 @@ export function useSessionProgressComparison({
       return {
         count,
         disabled: !availableValues.has(value),
-        label: metadata.valueLabel(value, availableAlgorithms),
+        label: metadata.valueLabel(value, availableFamilies),
         value,
       };
     });

@@ -7,6 +7,7 @@ import type {
   PracticeQueueStrategy,
   PromptDisplayMode,
   PromptNoteDuration,
+  QueueComparisonFamily,
   StaffNotationMode,
   TargetNote,
 } from "./types";
@@ -33,13 +34,17 @@ export interface PracticeComparisonInput {
 }
 
 export function getEffectiveQueueAlgorithm(strategy: PracticeQueueStrategy): EffectiveQueueAlgorithm {
-  if (strategy === "focused") {
-    return "focused-v1";
-  }
   if (strategy === "melody") {
     return "melody-v2";
   }
-  return "adaptive-v1";
+  return "adaptive-v2";
+}
+
+export function getQueueComparisonFamily(algorithm: EffectiveQueueAlgorithm): QueueComparisonFamily {
+  if (algorithm === "melody-v1" || algorithm === "melody-v2") {
+    return algorithm;
+  }
+  return "adaptive";
 }
 
 export function applyQueueCandidateFilter(

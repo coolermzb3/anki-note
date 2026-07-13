@@ -1,12 +1,12 @@
 import { getPracticeSessionComparisonSnapshot } from "./legacyPracticeSessionCompatibility";
-import type { PracticeComparisonSnapshot } from "./practiceComparison";
+import { getQueueComparisonFamily, type PracticeComparisonSnapshot } from "./practiceComparison";
 import { isStatisticalReview } from "./reviews";
 import { hasEnoughStatReviews } from "./stats";
 import type {
-  EffectiveQueueAlgorithm,
   PracticeSessionRecord,
   PromptDisplayMode,
   PromptNoteDuration,
+  QueueComparisonFamily,
   ReviewRecord,
 } from "./types";
 
@@ -27,7 +27,7 @@ export interface SessionProgressSeries {
 }
 
 export interface SessionProgressGroupKey {
-  effectiveQueueAlgorithm: EffectiveQueueAlgorithm;
+  queueComparisonFamily: QueueComparisonFamily;
   promptDisplayMode: PromptDisplayMode;
   promptNoteDuration: PromptNoteDuration;
   targetNoteSetKey: string;
@@ -95,7 +95,8 @@ function sameComparisonSnapshot(
       reference.targetNoteSetKey === candidate.targetNoteSetKey &&
       reference.promptDisplayMode === candidate.promptDisplayMode &&
       reference.promptNoteDuration === candidate.promptNoteDuration &&
-      reference.effectiveQueueAlgorithm === candidate.effectiveQueueAlgorithm,
+      getQueueComparisonFamily(reference.effectiveQueueAlgorithm) ===
+        getQueueComparisonFamily(candidate.effectiveQueueAlgorithm),
   );
 }
 
@@ -103,7 +104,7 @@ export function serializeSessionProgressGroupKey(key: SessionProgressGroupKey): 
   return [
     key.targetNoteSetKey,
     key.promptDisplayMode,
-    key.effectiveQueueAlgorithm,
+    key.queueComparisonFamily,
     key.promptNoteDuration,
   ].join("\u001f");
 }
@@ -111,7 +112,15 @@ export function serializeSessionProgressGroupKey(key: SessionProgressGroupKey): 
 export function getSessionProgressGroupKey(
   session: PracticeSessionRecord,
 ): SessionProgressGroupKey | undefined {
-  return getPracticeSessionComparisonSnapshot(session);
+  const snapshot = getPracticeSessionComparisonSnapshot(session);
+  return snapshot
+    ? {
+        promptDisplayMode: snapshot.promptDisplayMode,
+        promptNoteDuration: snapshot.promptNoteDuration,
+        queueComparisonFamily: getQueueComparisonFamily(snapshot.effectiveQueueAlgorithm),
+        targetNoteSetKey: snapshot.targetNoteSetKey,
+      }
+    : undefined;
 }
 
 export function sameSessionProgressGroupKey(

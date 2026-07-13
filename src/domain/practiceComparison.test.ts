@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPracticeComparisonSnapshot } from "./practiceComparison";
+import { buildPracticeComparisonSnapshot, getQueueComparisonFamily } from "./practiceComparison";
 
 function snapshot(overrides: Partial<Parameters<typeof buildPracticeComparisonSnapshot>[0]> = {}) {
   return buildPracticeComparisonSnapshot({
@@ -36,6 +36,15 @@ describe("practice comparison snapshot", () => {
 
   it("records the coverage-aware melody generator as melody-v2", () => {
     expect(snapshot({ queueStrategy: "melody" })?.effectiveQueueAlgorithm).toBe("melody-v2");
+  });
+
+  it("keeps old regular and focused algorithms in the adaptive comparison family", () => {
+    expect((["adaptive-v1", "focused-v1", "adaptive-v2"] as const).map(getQueueComparisonFamily)).toEqual([
+      "adaptive",
+      "adaptive",
+      "adaptive",
+    ]);
+    expect(snapshot()?.effectiveQueueAlgorithm).toBe("adaptive-v2");
   });
 
   it("keeps prompt note duration in the direct comparison snapshot", () => {

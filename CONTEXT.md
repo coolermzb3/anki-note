@@ -78,7 +78,7 @@ _Avoid_: Countdown, timed preview, queue strategy
 
 **Comparable practice session**:
 A fixed-count or fixed-duration practice session that can be compared with another session because it used the same
-effective target-note set, prompt display mode, effective queue algorithm, and prompt note duration.
+effective target-note set, prompt display mode, queue comparison family, and prompt note duration.
 Direct comparability governs progress benchmarks and record claims. Fixed-count and fixed-duration sessions may be directly comparable because their review curves share the same underlying meaning, while open-ended sessions and automatic target-note playback do not enter this comparison.
 _Avoid_: Same round, identical UI state
 
@@ -86,20 +86,28 @@ _Avoid_: Same round, identical UI state
 The card selection flow for a practice session. A practice queue decides which target note appears next, without changing what counts as a review or answer input.
 _Avoid_: Deck scheduler, spaced-repetition scheduler
 
+**Offline queue audit**:
+A read-only analysis of accumulated backup data that compares a deployed practice queue's actual draw distribution and whole-range recognition trend with its intended behavior. It is a periodic product review, not runtime monitoring, an algorithm rotation, or a causal experiment.
+_Avoid_: Online validation, A/B test, live dashboard
+
 **Practice queue strategy**:
-The learner-selected policy used to build the practice queue. Current strategies are a regular adaptive queue, a focused weak-note queue, a melody queue, and a single-note drill queue.
+The learner-selected policy used to build the practice queue. Current strategies are the unified adaptive queue, a melody queue, and a single-note drill queue; legacy regular and focused strategies belong to the unified queue's comparison family but are no longer selectable.
 _Avoid_: Training mode, scheduler
 
 **Effective queue algorithm**:
-The stable, versioned scheduling behavior applied after the effective target-note set is established. The regular adaptive strategy and single-note drill strategy use the same adaptive algorithm after candidate filtering, while focused and melody strategies use distinct algorithms; ordinary weight tuning keeps the same version, while a change in training semantics creates a new version and direct comparison group.
+The stable, versioned scheduling behavior applied after the effective target-note set is established. Ordinary tuning keeps the same version, while a material change in card-selection semantics creates a new version; comparison families may deliberately preserve progress continuity across replaced versions.
 _Avoid_: Selected strategy label, queue configuration
+
+**Queue comparison family**:
+The canonical queue identity used only for practice-progress matching. The unified default family includes legacy regular and focused queues plus the current default algorithm; a drill reuses the default family after candidate filtering, while melody remains separate.
+_Avoid_: Stored algorithm version, selected strategy label
 
 **Melody queue**:
 A practice queue strategy that generates eight-note local phrases while moving between the least-covered registers of the selected practice range. Register changes may use a direct leap or up to three non-equidistant transition notes; a melody queue still produces ordinary target-note reviews and does not add rhythm, ear-training answers, or a separate scoring model.
 _Avoid_: Song mode, generated sheet music
 
 **Single-note drill queue**:
-A practice queue strategy that restricts prompts to one or more selected answer note names across the enabled practice range. When exactly one answer note name is selected, completed prompts are kept only as session activity; when multiple answer note names are selected, prompts are ordinary reviews scoped to those names.
+A practice queue strategy that restricts prompts to one or more selected answer note names across the enabled practice range. One selected name is session-only, two through six produce independently comparable target-note sets, and all seven reuse the same target-note set and queue comparison family as the default queue.
 _Avoid_: Separate deck, filtered group
 
 **Staff notation mode**:
@@ -172,16 +180,28 @@ An incorrect answer note name submitted during a review. Wrong answers belong to
 _Avoid_: Failed card, incorrect review
 
 **Error rate**:
-The share of reviews for a target note or practice group that include at least one wrong answer.
+The share of reviews for a target note or practice group that include at least one wrong answer; multiple wrong inputs in one review still count as one erroneous review.
 _Avoid_: Failure rate, miss rate
 
 **Common confusion**:
 The wrong answer note name most often submitted for a target note. Common confusions are used to identify notes that the learner repeatedly mistakes for another natural note name.
 _Avoid_: Easy mistake, wrong note
 
+**Eligible long-term review**:
+A statistical review from a practice session containing at least five statistical reviews. It can provide scheduling and recognition evidence for its target note regardless of practice queue or enabled-group combination; single-name drill activity is not long-term history.
+_Avoid_: Exact-configuration review, raw answer input, single-name drill review
+
 **Recognition trend**:
-Recent movement in recognition time for a target note or practice group. The first statistics view uses trends to show whether recognition is getting faster, slower, or staying similar.
-_Avoid_: Progress chart, learning curve
+A chronological sequence of equal-note recognition snapshots sampled after each eligible practice session or at the end of each practice day. Session grouping changes the sampling frequency, while the selected display range only limits which snapshot boundaries are shown; snapshots with different recognition cohorts are never joined by a continuous line.
+_Avoid_: Raw session average, queue distribution, causal learning effect
+
+**Recognition cohort**:
+The currently enabled target notes that have accumulated at least 20 eligible long-term reviews by a recognition snapshot. Practiced evidence remains valid across different historical enabled-group combinations, while notes without enough evidence stay outside the cohort and are reported through coverage.
+_Avoid_: Exact practice configuration, complete enabled range, queue comparison group
+
+**Equal-note recognition snapshot**:
+Recognition-time P10, P50, and P90 plus error rate at one session or day boundary, calculated per recognition-cohort note from its latest 100 eligible long-term reviews across all practice queues and then averaged with every cohort note receiving equal weight. It measures recent practiced-range performance without letting a queue's draw frequency change the metric; single-name drill activity remains outside long-term history.
+_Avoid_: Session-only percentile, pooled review percentile, composite progress score
 
 **Browser data store**:
 The practice records, staff-recall runs, and settings stored inside one browser origin, such as the published site or the local development server. Browser data stores are separate even when they point at the same backup directory.

@@ -14,7 +14,7 @@ import { getNotesForGroups } from "../domain/notes";
 import {
   buildDailyStats,
   buildNoteStats,
-  buildPracticeSessionStats,
+  buildRecognitionTrend,
   filterLongTermReviews,
   positiveTertileThresholds,
 } from "../domain/stats";
@@ -47,8 +47,8 @@ type RangeKey = (typeof RANGE_KEYS)[number];
 const RECOGNITION_TIME_GROUPINGS = ["day", "practice-session"] as const;
 type RecognitionTimeGrouping = (typeof RECOGNITION_TIME_GROUPINGS)[number];
 const STATS_CAROUSEL_CARD_IDS = ["recognition-time", "session-progress", "note-range"] as const;
-const STATS_CAROUSEL_CARD_LABELS = ["识别时长", "答对进度", "音域分布"] as const;
-const STATS_CAROUSEL_PAIR_LABELS = ["识别时长和答对进度", "答对进度和音域分布", "音域分布和识别时长"] as const;
+const STATS_CAROUSEL_CARD_LABELS = ["识别趋势", "答对进度", "音域分布"] as const;
+const STATS_CAROUSEL_PAIR_LABELS = ["识别趋势和答对进度", "答对进度和音域分布", "音域分布和识别趋势"] as const;
 const STATS_CAROUSEL_DRAG_THRESHOLD_PX = 48;
 const STATS_CAROUSEL_REAL_OFFSET = 1;
 const STATS_UI_PREFERENCES_KEY = "anki-note.statsUiPreferences";
@@ -63,10 +63,13 @@ type StatsCarouselTrackStyle = CSSProperties & {
   "--stats-carousel-translate": string;
 };
 interface RecognitionTimeChartStat {
+  breakBefore: boolean;
+  coveredNoteCount: number;
+  errorRate?: number;
   key: string;
   label: string;
   tooltipLabel: string;
-  completedReviews: number;
+  totalNoteCount: number;
   p10?: number;
   median?: number;
   p90?: number;
@@ -324,6 +327,18 @@ function isStatsCarouselDragBlockedTarget(target: EventTarget | null): boolean {
 }
 
 function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChartsOption {
+  const plottedData = data.flatMap((stat) => stat.breakBefore
+    ? [{
+        ...stat,
+        errorRate: undefined,
+        key: `${stat.key}-break`,
+        label: "",
+        median: undefined,
+        p10: undefined,
+        p90: undefined,
+        tooltipLabel: "",
+      }, stat]
+    : [stat]);
   const showPointSymbols = data.length === 1;
   const dataZoomSliderStyle = {
     backgroundColor: RECOGNITION_CHART_COLORS.sliderBackground,
@@ -355,7 +370,12 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
 
   return {
     animation: false,
-    color: [RECOGNITION_CHART_COLORS.p10, RECOGNITION_CHART_COLORS.median, RECOGNITION_CHART_COLORS.p90],
+    color: [
+      RECOGNITION_CHART_COLORS.p10,
+      RECOGNITION_CHART_COLORS.median,
+      RECOGNITION_CHART_COLORS.p90,
+      RECOGNITION_CHART_COLORS.errorRate,
+    ],
     dataZoom: [
       { end: 100, filterMode: "none", start: 0, type: "inside", xAxisIndex: 0 },
       {
@@ -367,14 +387,14 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
         type: "slider",
         xAxisIndex: 0,
       },
-      { filterMode: "none", type: "inside", yAxisIndex: 0 },
+      { filterMode: "none", type: "inside", yAxisIndex: [0, 1] },
       {
         ...dataZoomSliderStyle,
         filterMode: "none",
         right: 12,
         type: "slider",
         width: 34,
-        yAxisIndex: 0,
+        yAxisIndex: [0, 1],
       },
     ],
     grid: {
@@ -395,7 +415,7 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
     series: [
       {
         connectNulls: false,
-        data: data.map((stat) => stat.p10 ?? null),
+        data: plottedData.map((stat) => stat.p10 ?? null),
         name: "P10",
         showSymbol: showPointSymbols,
         smooth: true,
@@ -404,7 +424,7 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
       },
       {
         connectNulls: false,
-        data: data.map((stat) => stat.median ?? null),
+        data: plottedData.map((stat) => stat.median ?? null),
         lineStyle: { width: 2.5 },
         name: "中位",
         showSymbol: showPointSymbols,
@@ -414,12 +434,22 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
       },
       {
         connectNulls: false,
-        data: data.map((stat) => stat.p90 ?? null),
+        data: plottedData.map((stat) => stat.p90 ?? null),
         name: "P90",
         showSymbol: showPointSymbols,
         smooth: true,
         symbolSize: 7,
         type: "line",
+      },
+      {
+        connectNulls: false,
+        data: plottedData.map((stat) => stat.errorRate ?? null),
+        name: "错音率",
+        showSymbol: showPointSymbols,
+        smooth: true,
+        symbolSize: 7,
+        type: "line",
+        yAxisIndex: 1,
       },
     ],
     tooltip: {
@@ -429,10 +459,10 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
       formatter: (params) => {
         const items = Array.isArray(params) ? params : [params];
         const firstItem = items[0] as { dataIndex?: number } | undefined;
-        const stat = firstItem?.dataIndex === undefined ? undefined : data[firstItem.dataIndex];
+        const stat = firstItem?.dataIndex === undefined ? undefined : plottedData[firstItem.dataIndex];
         const title = stat?.tooltipLabel ?? "";
-        const completed = stat
-          ? `<div style="color:${RECOGNITION_CHART_COLORS.muted}">完成 ${stat.completedReviews} 次</div>`
+        const coverage = stat?.tooltipLabel
+          ? `<div style="color:${RECOGNITION_CHART_COLORS.muted}">已纳入 ${stat.coveredNoteCount}/${stat.totalNoteCount} 个音</div>`
           : "";
         const rows = items
           .map((item) => {
@@ -440,11 +470,14 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
             if (point.value === null || point.value === undefined || point.value === "") {
               return "";
             }
-            return `<div>${point.marker ?? ""}${point.seriesName ?? ""}: ${point.value}s</div>`;
+            const value = Number(point.value);
+            const isErrorRate = point.seriesName === "错音率";
+            const formattedValue = Number.isFinite(value) ? value.toFixed(isErrorRate ? 1 : 2) : point.value;
+            return `<div>${point.marker ?? ""}${point.seriesName ?? ""}: ${formattedValue}${isErrorRate ? "%" : "s"}</div>`;
           })
           .filter(Boolean)
           .join("");
-        return `<div><strong>${title}</strong>${completed}${rows}</div>`;
+        return title ? `<div><strong>${title}</strong>${coverage}${rows}</div>` : "";
       },
       transitionDuration: 0,
       trigger: "axis",
@@ -456,20 +489,33 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
         hideOverlap: true,
       },
       boundaryGap: false,
-      data: data.map((stat) => stat.label),
+      data: plottedData.map((stat) => stat.label),
       splitLine: { lineStyle: { color: RECOGNITION_CHART_COLORS.grid, type: "dashed" }, show: true },
       type: "category",
     },
-    yAxis: {
-      axisLabel: {
-        color: RECOGNITION_CHART_COLORS.muted,
-        fontSize: 11,
-        formatter: "{value}s",
+    yAxis: [
+      {
+        axisLabel: {
+          color: RECOGNITION_CHART_COLORS.muted,
+          fontSize: 11,
+          formatter: "{value}s",
+        },
+        scale: true,
+        splitLine: { lineStyle: { color: RECOGNITION_CHART_COLORS.grid, type: "dashed" } },
+        type: "value",
       },
-      min: 0,
-      splitLine: { lineStyle: { color: RECOGNITION_CHART_COLORS.grid, type: "dashed" } },
-      type: "value",
-    },
+      {
+        axisLabel: {
+          color: RECOGNITION_CHART_COLORS.muted,
+          fontSize: 11,
+          formatter: "{value}%",
+        },
+        max: 100,
+        min: 0,
+        splitLine: { show: false },
+        type: "value",
+      },
+    ],
   };
 }
 
@@ -510,7 +556,7 @@ function RecognitionTimeChart({ data }: { data: RecognitionTimeChartStat[] }): J
     chartRef.current?.setOption(makeRecognitionTimeChartOption(data), true);
   }, [data]);
 
-  return <div aria-label="识别时长折线图" className="recognition-time-chart" ref={chartElementRef} role="img" />;
+  return <div aria-label="识别趋势折线图" className="recognition-time-chart" ref={chartElementRef} role="img" />;
 }
 
 export function StatsView({
@@ -605,38 +651,45 @@ export function StatsView({
     return longTermReviews.filter((review) => activeTargetNoteIds.has(review.targetNoteId));
   }, [activeNotes, longTermReviews]);
   const filteredReviews = useMemo(() => filterByRange(groupScopedReviews, range), [groupScopedReviews, range]);
+  const recognitionTrend = useMemo(
+    () => buildRecognitionTrend(
+      longTermReviews,
+      sessions,
+      activeNotes.map((note) => note.id),
+      recognitionTimeGrouping,
+    ),
+    [activeNotes, longTermReviews, recognitionTimeGrouping, sessions],
+  );
   const recognitionTimeStats = useMemo(() => {
-    const source =
-      recognitionTimeGrouping === "day"
-        ? buildDailyStats(filteredReviews).map((day) => ({
-            key: day.date,
-            label: formatShortDate(day.date),
-            tooltipLabel: formatShortDate(day.date),
-            completedReviews: day.completedReviews,
-            p10Ms: day.p10Ms,
-            medianMs: day.medianMs,
-            p90Ms: day.p90Ms,
-          }))
-        : buildPracticeSessionStats(filteredReviews, sessions).map((session) => {
-            const startedAt = formatShortDateTime(session.startedAt);
-            return {
-              key: session.sessionId,
-              label: startedAt.label,
-              tooltipLabel: startedAt.tooltipLabel,
-              completedReviews: session.completedReviews,
-              p10Ms: session.p10Ms,
-              medianMs: session.medianMs,
-              p90Ms: session.p90Ms,
-            };
-          });
-
-    return source.map((stat) => ({
-      ...stat,
-      p10: stat.p10Ms === undefined ? undefined : Number((stat.p10Ms / 1000).toFixed(2)),
-      median: stat.medianMs === undefined ? undefined : Number((stat.medianMs / 1000).toFixed(2)),
-      p90: stat.p90Ms === undefined ? undefined : Number((stat.p90Ms / 1000).toFixed(2)),
-    }));
-  }, [filteredReviews, recognitionTimeGrouping, sessions]);
+    const visible = range === "all"
+      ? recognitionTrend
+      : (() => {
+          const cutoff = new Date();
+          cutoff.setDate(cutoff.getDate() - Number(range) + 1);
+          cutoff.setHours(0, 0, 0, 0);
+          return recognitionTrend.filter((point) => new Date(point.boundaryAt) >= cutoff);
+        })();
+    return visible.map((stat, index) => {
+      const formatted = recognitionTimeGrouping === "day"
+        ? { label: formatShortDate(stat.key), tooltipLabel: formatShortDate(stat.key) }
+        : formatShortDateTime(stat.boundaryAt);
+      return {
+        ...formatted,
+        breakBefore: index > 0 && visible[index - 1].cohortKey !== stat.cohortKey,
+        coveredNoteCount: stat.coveredNoteCount,
+        errorRate: stat.errorRate === undefined ? undefined : stat.errorRate * 100,
+        key: stat.key,
+        median: stat.medianMs === undefined ? undefined : stat.medianMs / 1000,
+        p10: stat.p10Ms === undefined ? undefined : stat.p10Ms / 1000,
+        p90: stat.p90Ms === undefined ? undefined : stat.p90Ms / 1000,
+        totalNoteCount: stat.totalNoteCount,
+      };
+    });
+  }, [range, recognitionTimeGrouping, recognitionTrend]);
+  const recognitionCoverage = recognitionTrend[recognitionTrend.length - 1] ?? {
+    coveredNoteCount: 0,
+    totalNoteCount: activeNotes.length,
+  };
   const sessionProgressComparison = useSessionProgressComparison({
     activeNotes,
     historyLimit: sessionProgressHistoryLimit,
@@ -826,9 +879,9 @@ export function StatsView({
       return (
         <div className="panel chart-panel stats-carousel-card">
           <div className="panel-heading">
-            <h2>识别时长</h2>
+            <h2>识别趋势</h2>
             <div className="chart-panel-actions">
-              <div className="segmented" aria-label="识别时长分组">
+              <div className="segmented" aria-label="识别趋势分组">
                 <button
                   className={recognitionTimeGrouping === "day" ? "active" : ""}
                   onClick={() => setRecognitionTimeGrouping("day")}
@@ -845,10 +898,20 @@ export function StatsView({
             </div>
           </div>
           <div className="chart-box">
-            {recognitionTimeStats.length === 0 ? (
-              <div className="empty-state">暂无记录</div>
+            {recognitionCoverage.coveredNoteCount === 0 ? (
+              <div className="empty-state">
+                数据正在积累：0/{recognitionCoverage.totalNoteCount} 个音已完成至少 20 次有效练习。再练习几次，回来看看整体进步吧。
+              </div>
+            ) : recognitionTimeStats.length === 0 ? (
+              <div className="empty-state">所选时间范围内暂无趋势点</div>
             ) : (
-              <RecognitionTimeChart data={recognitionTimeStats} />
+              <>
+                <RecognitionTimeChart data={recognitionTimeStats} />
+                <small className="note-range-filter-note">
+                  已纳入 {recognitionCoverage.coveredNoteCount}/{recognitionCoverage.totalNoteCount} 个音
+                  {recognitionCoverage.coveredNoteCount < recognitionCoverage.totalNoteCount ? "，其余数据积累中" : ""}
+                </small>
+              </>
             )}
           </div>
         </div>
@@ -909,7 +972,7 @@ export function StatsView({
           </div>
           <div className="note-heat-row">
             <div className="note-heat-row-heading">
-              <h3>错误次数</h3>
+              <h3>错音次数</h3>
               <div className="range-legend">
                 <span>
                   <LegendSwatch color={STATS_COLORS.range.neutral} />
@@ -930,7 +993,7 @@ export function StatsView({
               </div>
             </div>
             <StatsRangeStaff
-              label="错误次数音域分布"
+              label="错音次数音域分布"
               notes={errorStaffNotes}
               staffNotationMode={staffNotationMode}
               tone="red"

@@ -58,4 +58,15 @@ describe("makeDefaultSettings", () => {
       answerKeyboardScale: undefined,
     } as unknown as Parameters<typeof normalizeAppSettings>[0]).answerKeyboardScale).toBe(1);
   });
+
+  it("migrates the retired focused preference to the adaptive queue", () => {
+    const normalized = normalizeAppSettings({
+      ...makeDefaultSettings(),
+      focusedTraining: true,
+      queueStrategy: "focused",
+    });
+
+    expect(normalized.queueStrategy).toBe("adaptive");
+    expect(normalized.focusedTraining).toBe(false);
+  });
 });

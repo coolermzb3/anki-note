@@ -38,6 +38,7 @@ export const STATS_COLORS = {
     p10: "#2f7d74",
     median: "#2b2520",
     p90: "#c84c3d",
+    errorRate: "#6f5bb5",
     grid: "#e5dccf",
     muted: "#7a6f61",
     panel: "#fffaf2",

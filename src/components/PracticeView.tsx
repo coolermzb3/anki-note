@@ -186,17 +186,12 @@ const PRACTICE_QUEUE_STRATEGIES: readonly PracticeQueueStrategy[] = ["adaptive",
 const PRACTICE_QUEUE_OPTIONS: Array<{ strategy: PracticeQueueStrategy; label: string; description: string }> = [
   {
     strategy: "adaptive",
-    label: "常规队列",
-    description: "按新卡、慢卡和易错卡做轻量加权",
-  },
-  {
-    strategy: "focused",
-    label: "薄弱项优先",
-    description: "约 80% 慢卡/易错卡，20% 全量探索",
+    label: "自适应队列",
+    description: "根据近期识别速度优先练习薄弱音，同时保持全音域复习。",
   },
   {
     strategy: "melody",
-    label: "自动旋律生成",
+    label: "旋律生成",
     description: "在启用组音域内生成级进为主的练习",
   },
   {
@@ -273,7 +268,9 @@ function parsePracticeSetupUiPreferences(
     mode: isPracticeMode(value.mode) ? value.mode : fallback.mode,
     promptDisplayMode: isPromptDisplayMode(value.promptDisplayMode) ? value.promptDisplayMode : fallback.promptDisplayMode,
     promptNoteDuration: isPromptNoteDuration(value.promptNoteDuration) ? value.promptNoteDuration : fallback.promptNoteDuration,
-    queueStrategy: isPracticeQueueStrategy(value.queueStrategy) ? value.queueStrategy : fallback.queueStrategy,
+    queueStrategy: isPracticeQueueStrategy(value.queueStrategy)
+      ? value.queueStrategy === "focused" ? "adaptive" : value.queueStrategy
+      : fallback.queueStrategy,
   };
 }
 
@@ -482,7 +479,7 @@ export function PracticeView({
       drillNoteNames,
       fixedCount,
       fixedDurationSeconds,
-      focusedTraining: queueStrategy === "focused",
+      focusedTraining: false,
       promptDisplayMode,
       promptNoteDuration,
       queueStrategy,
@@ -644,7 +641,7 @@ export function PracticeView({
       autoPlayTarget,
       queueStrategy,
       drillNoteNames,
-      focusedTraining: queueStrategy === "focused",
+      focusedTraining: false,
     };
     await onSettingsSaved(nextSettings);
     return nextSettings;
@@ -770,6 +767,8 @@ export function PracticeView({
       const notes = selectNotePage({
         notes: sourceNotes,
         reviews: sourceReviews,
+        sessions,
+        currentSessionId: sessionRef.current?.id,
         queueStrategy: sourceQueueStrategy,
         drillNoteNames: sourceDrillNoteNames,
         lastTargetNoteId: lastTargetNoteIdRef.current,
@@ -784,7 +783,7 @@ export function PracticeView({
       syncStaffPage(page);
       startPrompt(notes[0]);
     },
-    [getNextStaffPageCount, startPrompt, syncStaffPage],
+    [getNextStaffPageCount, sessions, startPrompt, syncStaffPage],
   );
 
   const startStaffPageScroll = useCallback(
@@ -808,6 +807,8 @@ export function PracticeView({
       const nextRow = selectNotePage({
         notes: enabledNotes,
         reviews: [...schedulerReviews, ...sessionReviewsRef.current],
+        sessions,
+        currentSessionId: sessionRef.current?.id,
         queueStrategy,
         drillNoteNames,
         lastTargetNoteId: page.notes[page.notes.length - 1]?.id,
@@ -866,6 +867,7 @@ export function PracticeView({
       queueStrategy,
       resumeActiveTimers,
       schedulerReviews,
+      sessions,
       staffPageScrollDurationMs,
       startPrompt,
       syncStaffPage,
@@ -903,13 +905,15 @@ export function PracticeView({
           : selectNextNote({
               notes: enabledNotes,
               reviews: nextReviews,
+              sessions,
+              currentSessionId: sessionRef.current?.id,
               queueStrategy,
               drillNoteNames,
               lastTargetNoteId: lastTargetNoteIdRef.current,
             });
       startPrompt(note);
     },
-    [drillNoteNames, drawMelodyNote, enabledNotes, fixedCount, mode, queueStrategy, schedulerReviews, startPrompt],
+    [drillNoteNames, drawMelodyNote, enabledNotes, fixedCount, mode, queueStrategy, schedulerReviews, sessions, startPrompt],
   );
 
   const finishCurrentReview = useCallback(
@@ -1126,6 +1130,8 @@ export function PracticeView({
           : selectNextNote({
               notes: nextEnabledNotes,
               reviews: nextSchedulerReviews,
+              sessions,
+              currentSessionId: nextSession.id,
               queueStrategy: practiceConfig.queueStrategy,
               drillNoteNames: practiceConfig.drillNoteNames,
             });
@@ -1139,6 +1145,7 @@ export function PracticeView({
     queueNotes.length,
     prefersReducedMotion,
     schedulerReviews,
+    sessions,
     startPausedReading,
     staffPageUiPreferences.smoothStaffPageScroll,
     staffNotationMode,
@@ -1670,7 +1677,7 @@ export function PracticeView({
               <div className="note-row note-row-header">
                 <span>目标音</span>
                 <span>中位时长</span>
-                <span>错误率</span>
+                <span>错音率</span>
                 <span>常错音</span>
               </div>
               {weakestNotes.map((note) => (

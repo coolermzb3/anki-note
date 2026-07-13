@@ -1,0 +1,34 @@
+[
+  {
+    "name": "tie_crosses_boundary",
+    "notes": [
+      { "id": "A", "count": 100, "medianMs": 4000 },
+      { "id": "B", "count": 100, "medianMs": 3000 },
+      { "id": "C", "count": 100, "medianMs": 3000 },
+      { "id": "D", "count": 100, "medianMs": 1000 }
+    ],
+    "adjustedMedianMs": { "A": 4000, "B": 3000, "C": 3000, "D": 1000 },
+    "weights": { "A": 5, "B": 4, "C": 4, "D": 2 }
+  },
+  {
+    "name": "five_reviews_use_prior",
+    "notes": [
+      { "id": "A", "count": 5, "medianMs": 1000 },
+      { "id": "B", "count": 5, "medianMs": 2000 },
+      { "id": "C", "count": 100, "medianMs": 3000 }
+    ],
+    "adjustedMedianMs": { "A": 2000, "B": 2000, "C": 3000 },
+    "weights": { "A": 2.5, "B": 2.5, "C": 5 }
+  },
+  {
+    "name": "all_scores_tied",
+    "notes": [
+      { "id": "A", "count": 100, "medianMs": 1200 },
+      { "id": "B", "count": 100, "medianMs": 1200 },
+      { "id": "C", "count": 100, "medianMs": 1200 },
+      { "id": "D", "count": 100, "medianMs": 1200 }
+    ],
+    "adjustedMedianMs": { "A": 1200, "B": 1200, "C": 1200, "D": 1200 },
+    "weights": { "A": 3.75, "B": 3.75, "C": 3.75, "D": 3.75 }
+  }
+]

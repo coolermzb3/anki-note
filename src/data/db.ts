@@ -51,7 +51,8 @@ export class AppDatabase extends Dexie {
 export const db = new AppDatabase();
 
 export function resolveQueueStrategy(settings: { queueStrategy?: PracticeQueueStrategy; focusedTraining?: boolean }): PracticeQueueStrategy {
-  return settings.queueStrategy ?? (settings.focusedTraining ? "focused" : "adaptive");
+  const stored = settings.queueStrategy ?? (settings.focusedTraining ? "focused" : "adaptive");
+  return stored === "focused" ? "adaptive" : stored;
 }
 
 export function resolveDrillNoteNames(settings: { drillNoteNames?: NoteName[] }): NoteName[] {
@@ -122,7 +123,7 @@ export function normalizeAppSettings(existing: StoredAppSettings): AppSettings {
     pianoVolume: normalizePianoVolume(existing.pianoVolume),
     queueStrategy,
     drillNoteNames: resolveDrillNoteNames(existing),
-    focusedTraining: existing.focusedTraining ?? queueStrategy === "focused",
+    focusedTraining: false,
     inactivityThresholdSeconds: existing.inactivityThresholdSeconds ?? defaults.inactivityThresholdSeconds,
     correctDelayMs: existing.correctDelayMs ?? defaults.correctDelayMs,
   };

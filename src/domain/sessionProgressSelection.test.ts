@@ -6,12 +6,12 @@ import {
   getSessionProgressComparisonDimension,
   resolveSessionProgressSelection,
 } from "./sessionProgressSelection";
-import type { EffectiveQueueAlgorithm, PracticeSessionRecordV1, PromptDisplayMode } from "./types";
+import type { PracticeSessionRecordV1, PromptDisplayMode, QueueComparisonFamily } from "./types";
 
 function group(
   id: string,
   promptDisplayMode: PromptDisplayMode,
-  effectiveQueueAlgorithm: EffectiveQueueAlgorithm,
+  queueComparisonFamily: QueueComparisonFamily,
   startedAt: string,
 ): SessionProgressGroup {
   const latestSession: PracticeSessionRecordV1 = {
@@ -24,14 +24,14 @@ function group(
     startedAt,
   };
   const key = {
-    effectiveQueueAlgorithm,
+    queueComparisonFamily,
     promptDisplayMode,
     promptNoteDuration: "quarter" as const,
     targetNoteSetKey: "target-set",
   };
   return {
     key,
-    keyString: [key.targetNoteSetKey, promptDisplayMode, effectiveQueueAlgorithm, key.promptNoteDuration].join("\u001f"),
+    keyString: [key.targetNoteSetKey, promptDisplayMode, queueComparisonFamily, key.promptNoteDuration].join("\u001f"),
     latestSession,
     sessionCount: 1,
     sessionIds: [latestSession.id],
@@ -40,7 +40,7 @@ function group(
 
 describe("session progress selection", () => {
   it("reconciles other dimensions to the nearest valid single group", () => {
-    const single = group("single", "single-note", "adaptive-v1", "2026-07-01T10:00:00.000Z");
+    const single = group("single", "single-note", "adaptive", "2026-07-01T10:00:00.000Z");
     const staff = group("staff", "staff-page", "melody-v2", "2026-07-02T10:00:00.000Z");
     const result = resolveSessionProgressSelection({
       current: createSessionProgressSelection(single),
@@ -52,13 +52,13 @@ describe("session progress selection", () => {
 
     expect(result.rejected).toBe(false);
     expect(result.selection.promptDisplayModes).toEqual(["staff-page"]);
-    expect(result.selection.effectiveQueueAlgorithms).toEqual(["melody-v2"]);
+    expect(result.selection.queueComparisonFamilies).toEqual(["melody-v2"]);
     expect(result.selection.chartBenchmarkGroupKey).toBe(staff.keyString);
   });
 
   it("builds a valid one-dimensional slice and preserves the benchmark group", () => {
-    const single = group("single", "single-note", "adaptive-v1", "2026-07-02T10:00:00.000Z");
-    const staff = group("staff", "staff-page", "adaptive-v1", "2026-07-01T10:00:00.000Z");
+    const single = group("single", "single-note", "adaptive", "2026-07-02T10:00:00.000Z");
+    const staff = group("staff", "staff-page", "adaptive", "2026-07-01T10:00:00.000Z");
     const result = resolveSessionProgressSelection({
       current: createSessionProgressSelection(single),
       dimension: "promptDisplayMode",
@@ -74,7 +74,7 @@ describe("session progress selection", () => {
   });
 
   it("rejects a multi-selection without a common fixed-condition slice", () => {
-    const single = group("single", "single-note", "adaptive-v1", "2026-07-02T10:00:00.000Z");
+    const single = group("single", "single-note", "adaptive", "2026-07-02T10:00:00.000Z");
     const staff = group("staff", "staff-page", "melody-v2", "2026-07-01T10:00:00.000Z");
     const current = createSessionProgressSelection(single);
     const result = resolveSessionProgressSelection({
@@ -90,26 +90,26 @@ describe("session progress selection", () => {
   });
 
   it("moves the comparison axis and collapses the old axis to the benchmark value", () => {
-    const singleAdaptive = group("single-adaptive", "single-note", "adaptive-v1", "2026-07-03T10:00:00.000Z");
-    const staffAdaptive = group("staff-adaptive", "staff-page", "adaptive-v1", "2026-07-02T10:00:00.000Z");
-    const singleFocused = group("single-focused", "single-note", "focused-v1", "2026-07-01T10:00:00.000Z");
+    const singleAdaptive = group("single-adaptive", "single-note", "adaptive", "2026-07-03T10:00:00.000Z");
+    const staffAdaptive = group("staff-adaptive", "staff-page", "adaptive", "2026-07-02T10:00:00.000Z");
+    const singleMelody = group("single-melody", "single-note", "melody-v2", "2026-07-01T10:00:00.000Z");
     const displaySlice = resolveSessionProgressSelection({
       current: createSessionProgressSelection(singleAdaptive),
       dimension: "promptDisplayMode",
-      groups: [singleAdaptive, staffAdaptive, singleFocused],
+      groups: [singleAdaptive, staffAdaptive, singleMelody],
       preferredValue: "staff-page",
       values: ["single-note", "staff-page"],
     }).selection;
     const result = resolveSessionProgressSelection({
       current: displaySlice,
-      dimension: "effectiveQueueAlgorithm",
-      groups: [singleAdaptive, staffAdaptive, singleFocused],
-      preferredValue: "focused-v1",
-      values: ["adaptive-v1", "focused-v1"],
+      dimension: "queueComparisonFamily",
+      groups: [singleAdaptive, staffAdaptive, singleMelody],
+      preferredValue: "melody-v2",
+      values: ["adaptive", "melody-v2"],
     });
 
     expect(result.rejected).toBe(false);
     expect(result.selection.promptDisplayModes).toEqual(["single-note"]);
-    expect(result.selection.effectiveQueueAlgorithms).toEqual(["adaptive-v1", "focused-v1"]);
+    expect(result.selection.queueComparisonFamilies).toEqual(["adaptive", "melody-v2"]);
   });
 });

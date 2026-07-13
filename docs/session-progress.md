@@ -8,7 +8,7 @@ The statistics page's global range and staff controls define the effective targe
 
 The latest user edit is authoritative. The resolver changes the fewest other coordinates needed to reach a valid point or slice, then breaks ties with the candidate whose time-benchmark group has the most recent eligible session. An impossible slice is rejected with an explanation. Clicking an option body replaces the current selection and closes the menu; its separate checkbox adds or removes that value for comparison without closing the menu. Menus also close after an outside click, Escape, or opening another selector. When a new multi-selection dimension replaces an existing one, a temporary inline notice explains that only one dimension may be multi-selected.
 
-Effective algorithm versions retain distinct record scopes. When only one melody version has history it is labeled `自动旋律`; when old and current versions coexist, the selector distinguishes them. Multi-note drill history remains valid only when its effective target-note set equals the set produced by the current global controls. The statistics page does not reproduce the drill note-name editor.
+Effective algorithm versions retain distinct record scopes. When only one melody version has history it is labeled `旋律生成`; when old and current versions coexist, the selector distinguishes them. Multi-note drill history remains valid only when its effective target-note set equals the set produced by the current global controls. The statistics page does not reproduce the drill note-name editor.
 
 ## Curves and time benchmark
 

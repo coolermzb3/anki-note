@@ -3,6 +3,7 @@ import {
   buildDailyStats,
   buildNoteStats,
   buildPracticeSessionStats,
+  buildRecognitionTrend,
   filterLongTermReviews,
   hasEnoughStatReviews,
   isLongTermStatsEligible,
@@ -159,6 +160,93 @@ describe("stats", () => {
     expect(stats[0].completedReviews).toBe(2);
     expect(stats[0].medianMs).toBe(2000);
     expect(stats[1].medianMs).toBe(5000);
+  });
+
+  it("builds recognition trend snapshots by averaging each established note equally", () => {
+    const sessions = [makeSession({
+      endedAt: "2026-07-04T13:00:00.000+08:00",
+      id: "trend-session",
+      startedAt: "2026-07-04T10:00:00.000+08:00",
+    })];
+    const reviews = [
+      ...Array.from({ length: 20 }, (_, index) => makeReview({
+        activeMs: 1000,
+        id: `c-${index}`,
+        sessionId: "trend-session",
+        targetNoteId: "C4",
+      })),
+      ...Array.from({ length: 80 }, (_, index) => makeReview({
+        activeMs: 3000,
+        id: `d-${index}`,
+        sessionId: "trend-session",
+        targetNoteId: "D4",
+        wrongAnswers: [{ atActiveMs: 500, noteName: "C" }],
+      })),
+    ];
+
+    const [point] = buildRecognitionTrend(reviews, sessions, ["C4", "D4"], "practice-session");
+
+    expect(point.coveredNoteCount).toBe(2);
+    expect(point.medianMs).toBe(2000);
+    expect(point.errorRate).toBe(0.5);
+  });
+
+  it("changes cohorts only at sampled boundaries and keeps the last boundary of a day", () => {
+    const sessions = [
+      makeSession({
+        endedAt: "2026-07-04T10:30:00.000+08:00",
+        id: "first",
+        startedAt: "2026-07-04T10:00:00.000+08:00",
+      }),
+      makeSession({
+        endedAt: "2026-07-04T11:30:00.000+08:00",
+        id: "second",
+        startedAt: "2026-07-04T11:00:00.000+08:00",
+      }),
+    ];
+    const reviews = [
+      ...Array.from({ length: 20 }, (_, index) => makeReview({
+        answeredAt: "2026-07-04T10:20:00.000+08:00",
+        endedAt: "2026-07-04T10:20:00.000+08:00",
+        id: `first-${index}`,
+        sessionId: "first",
+        targetNoteId: "C4",
+      })),
+      ...Array.from({ length: 20 }, (_, index) => makeReview({
+        answeredAt: "2026-07-04T11:20:00.000+08:00",
+        endedAt: "2026-07-04T11:20:00.000+08:00",
+        id: `second-${index}`,
+        sessionId: "second",
+        targetNoteId: "D4",
+      })),
+    ];
+
+    const bySession = buildRecognitionTrend(reviews, sessions, ["C4", "D4"], "practice-session");
+    const byDay = buildRecognitionTrend(reviews, sessions, ["C4", "D4"], "day");
+
+    expect(bySession.map((point) => point.cohortKey)).toEqual(["C4", "C4|D4"]);
+    expect(byDay).toHaveLength(1);
+    expect(byDay[0].cohortKey).toBe("C4|D4");
+  });
+
+  it("limits each recognition metric to that note's latest 100 reviews", () => {
+    const sessions = [makeSession({
+      endedAt: "2026-07-04T13:00:00.000+08:00",
+      id: "latest-window",
+      startedAt: "2026-07-04T10:00:00.000+08:00",
+    })];
+    const reviews = Array.from({ length: 120 }, (_, index) => makeReview({
+      activeMs: index < 20 ? 5000 : 1000,
+      id: `window-${index}`,
+      sessionId: "latest-window",
+      targetNoteId: "C4",
+      wrongAnswers: index < 20 ? [{ atActiveMs: 500, noteName: "D" }] : [],
+    }));
+
+    const [point] = buildRecognitionTrend(reviews, sessions, ["C4"], "practice-session");
+
+    expect(point.medianMs).toBe(1000);
+    expect(point.errorRate).toBe(0);
   });
 
   it("builds practice session stats from review session ids without session records", () => {

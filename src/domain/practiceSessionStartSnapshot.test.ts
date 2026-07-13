@@ -59,7 +59,7 @@ describe("practice session start snapshot", () => {
       queueStrategy: "melody" as const,
     },
     {
-      effectiveQueueAlgorithm: "focused-v1" as const,
+      effectiveQueueAlgorithm: "adaptive-v2" as const,
       fixedCount: undefined,
       fixedDurationSeconds: 42,
       focusedTraining: true,

@@ -1,0 +1,15 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check-fix
+        name: ruff check --fix
+        entry: uv run --project analysis ruff check --no-cache --fix
+        language: system
+        files: ^analysis/.*\.py$
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --project analysis ruff format --no-cache
+        language: system
+        files: ^analysis/.*\.py$
+        types: [python]

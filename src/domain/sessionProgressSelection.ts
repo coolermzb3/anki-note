@@ -1,18 +1,14 @@
-import type {
-  EffectiveQueueAlgorithm,
-  PromptDisplayMode,
-  PromptNoteDuration,
-} from "./types";
+import type { PromptDisplayMode, PromptNoteDuration, QueueComparisonFamily } from "./types";
 import type { SessionProgressGroup, SessionProgressGroupKey } from "./sessionProgress";
 
 export type SessionProgressConditionValue =
   | PromptDisplayMode
-  | EffectiveQueueAlgorithm
+  | QueueComparisonFamily
   | PromptNoteDuration;
 
 export interface SessionProgressSelection {
   chartBenchmarkGroupKey: string;
-  effectiveQueueAlgorithms: EffectiveQueueAlgorithm[];
+  queueComparisonFamilies: QueueComparisonFamily[];
   promptDisplayModes: PromptDisplayMode[];
   promptNoteDurations: PromptNoteDuration[];
   targetNoteSetKey: string;
@@ -26,7 +22,7 @@ type SessionProgressSelectionValueKey = {
 
 const SESSION_PROGRESS_DIMENSION_DESCRIPTORS = {
   promptDisplayMode: { selectionKey: "promptDisplayModes" },
-  effectiveQueueAlgorithm: { selectionKey: "effectiveQueueAlgorithms" },
+  queueComparisonFamily: { selectionKey: "queueComparisonFamilies" },
   promptNoteDuration: { selectionKey: "promptNoteDurations" },
 } as const satisfies Record<string, { selectionKey: SessionProgressSelectionValueKey }>;
 
@@ -171,7 +167,7 @@ export function resolveSessionProgressSelection({
     ) ?? selectedGroups[0];
     candidateSelection = { ...candidateSelection, chartBenchmarkGroupKey: preferredBenchmark.keyString };
     const signature = JSON.stringify({
-      effectiveQueueAlgorithms: candidateSelection.effectiveQueueAlgorithms,
+      queueComparisonFamilies: candidateSelection.queueComparisonFamilies,
       promptDisplayModes: candidateSelection.promptDisplayModes,
       promptNoteDurations: candidateSelection.promptNoteDurations,
       chartBenchmarkGroupKey: candidateSelection.chartBenchmarkGroupKey,

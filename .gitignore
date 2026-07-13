@@ -8,5 +8,10 @@ dist/
 /vitest.config.js
 /vitest.config.d.ts
 /backup/
+/analysis/output/
+/analysis/.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
 /demo/chart-interaction-demo.html
 /%SystemDrive%/

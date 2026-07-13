@@ -1,0 +1,7 @@
+{
+  "coldStartReviewCount": 5,
+  "maintenanceGap": 90,
+  "newcomerRate": 0.25,
+  "performanceReviewLimit": 100,
+  "tierWeights": [5, 3, 2]
+}

@@ -1,5 +1,6 @@
 import { ALL_NOTES, NOTE_NAMES } from "./notes";
 import { isStatisticalReview } from "./reviews";
+import adaptiveV2Spec from "./adaptiveV2Spec.json";
 import type { NoteName, PracticeGroupId, PracticeSessionRecord, ReviewRecord, TargetNoteId } from "./types";
 
 export interface DailyStat {
@@ -40,7 +41,22 @@ export interface PracticeSessionStat {
   p90Ms?: number;
 }
 
+export type RecognitionTrendGrouping = "day" | "practice-session";
+
+export interface RecognitionTrendPoint {
+  boundaryAt: string;
+  cohortKey: string;
+  coveredNoteCount: number;
+  errorRate?: number;
+  key: string;
+  p10Ms?: number;
+  medianMs?: number;
+  p90Ms?: number;
+  totalNoteCount: number;
+}
+
 export const MIN_SESSION_STAT_REVIEWS = 5;
+const PERFORMANCE_REVIEW_LIMIT = adaptiveV2Spec.performanceReviewLimit;
 export type PositiveHeatLevel = 1 | 2 | 3;
 export type HeatLevel = 0 | PositiveHeatLevel;
 
@@ -197,6 +213,76 @@ export function buildPracticeSessionStats(
       };
     })
     .sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime() || a.sessionId.localeCompare(b.sessionId));
+}
+
+function average(values: number[]): number | undefined {
+  return values.length === 0 ? undefined : values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function reviewCompletedAt(review: ReviewRecord): number {
+  return new Date(review.answeredAt ?? review.endedAt).getTime();
+}
+
+export function buildRecognitionTrend(
+  reviews: ReviewRecord[],
+  sessions: PracticeSessionRecord[],
+  targetNoteIds: readonly TargetNoteId[],
+  grouping: RecognitionTrendGrouping,
+): RecognitionTrendPoint[] {
+  const targetIds = [...new Set(targetNoteIds)].sort();
+  const targetIdSet = new Set(targetIds);
+  const statisticalReviews = reviews
+    .filter((review) => targetIdSet.has(review.targetNoteId) && isStatisticalReview(review))
+    .sort(
+      (left, right) =>
+        reviewCompletedAt(left) - reviewCompletedAt(right) ||
+        new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime(),
+    );
+  const sessionBoundaries = buildPracticeSessionStats(statisticalReviews, sessions)
+    .map((session) => ({
+      boundaryAt: session.endedAt ?? session.startedAt,
+      key: session.sessionId,
+    }))
+    .sort(
+      (left, right) =>
+        new Date(left.boundaryAt).getTime() - new Date(right.boundaryAt).getTime() || left.key.localeCompare(right.key),
+    );
+  const boundaries = grouping === "day"
+    ? [...new Map(sessionBoundaries.map((boundary) => [localDateKey(boundary.boundaryAt), boundary])).entries()]
+        .map(([date, boundary]) => ({ ...boundary, key: date }))
+    : sessionBoundaries;
+
+  return boundaries.map((boundary) => {
+    const evidence = statisticalReviews.filter(
+      (review) => reviewCompletedAt(review) <= new Date(boundary.boundaryAt).getTime(),
+    );
+    const byNote = new Map(targetIds.map((noteId) => [noteId, [] as ReviewRecord[]]));
+    for (const review of evidence) {
+      byNote.get(review.targetNoteId)?.push(review);
+    }
+    const cohort = targetIds.filter((noteId) => (byNote.get(noteId)?.length ?? 0) >= 20);
+    const noteMetrics = cohort.map((noteId) => {
+      const recent = (byNote.get(noteId) ?? []).slice(-PERFORMANCE_REVIEW_LIMIT);
+      const activeTimes = recent.map((review) => review.activeMs);
+      return {
+        errorRate: recent.filter((review) => review.wrongAnswers.length > 0).length / recent.length,
+        medianMs: percentile(activeTimes, 0.5)!,
+        p10Ms: percentile(activeTimes, 0.1)!,
+        p90Ms: percentile(activeTimes, 0.9)!,
+      };
+    });
+    return {
+      boundaryAt: boundary.boundaryAt,
+      cohortKey: cohort.join("|"),
+      coveredNoteCount: cohort.length,
+      errorRate: average(noteMetrics.map((metric) => metric.errorRate)),
+      key: boundary.key,
+      medianMs: average(noteMetrics.map((metric) => metric.medianMs)),
+      p10Ms: average(noteMetrics.map((metric) => metric.p10Ms)),
+      p90Ms: average(noteMetrics.map((metric) => metric.p90Ms)),
+      totalNoteCount: targetIds.length,
+    };
+  });
 }
 
 export function buildNoteStats(
