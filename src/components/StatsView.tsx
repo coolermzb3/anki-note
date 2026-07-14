@@ -1,5 +1,5 @@
 import * as echarts from "echarts";
-import type { EChartsOption } from "echarts";
+import type { EChartsOption, LineSeriesOption } from "echarts";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   useEffect,
@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type TransitionEvent as ReactTransitionEvent,
 } from "react";
-import { getNotesForGroups } from "../domain/notes";
+import { formatTargetNoteLabel, getNotesForGroups } from "../domain/notes";
 import {
   buildDailyStats,
   buildNoteStats,
@@ -64,6 +64,7 @@ type StatsCarouselTrackStyle = CSSProperties & {
   "--stats-carousel-translate": string;
 };
 interface RecognitionTimeChartStat {
+  addedNoteLabels: string[];
   breakBefore: boolean;
   coveredNoteCount: number;
   errorRate?: number;
@@ -327,20 +328,80 @@ function isStatsCarouselDragBlockedTarget(target: EventTarget | null): boolean {
   );
 }
 
-function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChartsOption {
-  const plottedData = data.flatMap((stat) => stat.breakBefore
-    ? [{
-        ...stat,
-        errorRate: undefined,
-        key: `${stat.key}-break`,
-        label: "",
-        median: undefined,
-        p10: undefined,
-        p90: undefined,
-        tooltipLabel: "",
-      }, stat]
-    : [stat]);
-  const showPointSymbols = data.length === 1;
+type RecognitionMetricKey = "errorRate" | "median" | "p10" | "p90";
+
+function makeRecognitionLineSeries({
+  color,
+  data,
+  markLine,
+  metric,
+  name,
+  width = 2,
+  yAxisIndex = 0,
+}: {
+  color: string;
+  data: RecognitionTimeChartStat[];
+  markLine?: LineSeriesOption["markLine"];
+  metric: RecognitionMetricKey;
+  name: string;
+  width?: number;
+  yAxisIndex?: number;
+}): LineSeriesOption[] {
+  const segments: Array<Array<number | null>> = [Array(data.length).fill(null)];
+  for (const [index, stat] of data.entries()) {
+    if (index > 0 && stat.breakBefore) {
+      segments.push(Array(data.length).fill(null));
+    }
+    segments[segments.length - 1][index] = stat[metric] ?? null;
+  }
+
+  return segments
+    .filter((segment) => segment.some((value) => value !== null))
+    .map((segment, index) => ({
+      connectNulls: false,
+      data: segment,
+      itemStyle: { color },
+      lineStyle: { color, width },
+      markLine: index === 0 ? markLine : undefined,
+      name,
+      showSymbol: segment.filter((value) => value !== null).length === 1,
+      smooth: true,
+      symbolSize: 7,
+      type: "line",
+      yAxisIndex,
+    }));
+}
+
+export function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChartsOption {
+  const inclusionMarkers = data.flatMap((stat, dataIndex) => stat.addedNoteLabels.length > 0
+    ? [{ dataIndex, label: `新纳入 ${stat.addedNoteLabels.length} 个音` }]
+    : []);
+  const inclusionMarkLine: LineSeriesOption["markLine"] = inclusionMarkers.length > 0
+    ? {
+        data: inclusionMarkers.map((marker) => ({
+          label: { formatter: marker.label },
+          xAxis: marker.dataIndex,
+        })),
+        label: {
+          align: "center",
+          backgroundColor: RECOGNITION_CHART_COLORS.panel,
+          borderRadius: 4,
+          color: RECOGNITION_CHART_COLORS.muted,
+          distance: 4,
+          fontSize: 11,
+          padding: [2, 4],
+          position: "end",
+        },
+        lineStyle: {
+          color: RECOGNITION_CHART_COLORS.muted,
+          opacity: 0.7,
+          type: "dashed",
+          width: 1,
+        },
+        silent: true,
+        symbol: "none",
+      }
+    : undefined;
   const dataZoomSliderStyle = {
     backgroundColor: RECOGNITION_CHART_COLORS.sliderBackground,
     borderColor: RECOGNITION_CHART_COLORS.sliderBorder,
@@ -405,6 +466,7 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
       top: 38,
     },
     legend: {
+      data: ["P10", "中位", "P90", "错音率"],
       icon: "rect",
       itemGap: 14,
       itemHeight: 3,
@@ -414,44 +476,33 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
       top: 4,
     },
     series: [
-      {
-        connectNulls: false,
-        data: plottedData.map((stat) => stat.p10 ?? null),
+      ...makeRecognitionLineSeries({
+        color: RECOGNITION_CHART_COLORS.p10,
+        data,
+        metric: "p10",
         name: "P10",
-        showSymbol: showPointSymbols,
-        smooth: true,
-        symbolSize: 7,
-        type: "line",
-      },
-      {
-        connectNulls: false,
-        data: plottedData.map((stat) => stat.median ?? null),
-        lineStyle: { width: 2.5 },
+      }),
+      ...makeRecognitionLineSeries({
+        color: RECOGNITION_CHART_COLORS.median,
+        data,
+        markLine: inclusionMarkLine,
+        metric: "median",
         name: "中位",
-        showSymbol: showPointSymbols,
-        smooth: true,
-        symbolSize: 7,
-        type: "line",
-      },
-      {
-        connectNulls: false,
-        data: plottedData.map((stat) => stat.p90 ?? null),
+        width: 2.5,
+      }),
+      ...makeRecognitionLineSeries({
+        color: RECOGNITION_CHART_COLORS.p90,
+        data,
+        metric: "p90",
         name: "P90",
-        showSymbol: showPointSymbols,
-        smooth: true,
-        symbolSize: 7,
-        type: "line",
-      },
-      {
-        connectNulls: false,
-        data: plottedData.map((stat) => stat.errorRate ?? null),
+      }),
+      ...makeRecognitionLineSeries({
+        color: RECOGNITION_CHART_COLORS.errorRate,
+        data,
+        metric: "errorRate",
         name: "错音率",
-        showSymbol: showPointSymbols,
-        smooth: true,
-        symbolSize: 7,
-        type: "line",
         yAxisIndex: 1,
-      },
+      }),
     ],
     tooltip: {
       axisPointer: { animation: false, type: "line" },
@@ -460,10 +511,13 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
       formatter: (params) => {
         const items = Array.isArray(params) ? params : [params];
         const firstItem = items[0] as { dataIndex?: number } | undefined;
-        const stat = firstItem?.dataIndex === undefined ? undefined : plottedData[firstItem.dataIndex];
+        const stat = firstItem?.dataIndex === undefined ? undefined : data[firstItem.dataIndex];
         const title = stat?.tooltipLabel ?? "";
         const coverage = stat?.tooltipLabel
           ? `<div style="color:${RECOGNITION_CHART_COLORS.muted}">已纳入 ${stat.coveredNoteCount}/${stat.totalNoteCount} 个音</div>`
+          : "";
+        const inclusion = stat?.addedNoteLabels.length
+          ? `<div style="color:${RECOGNITION_CHART_COLORS.muted}">新纳入：${stat.addedNoteLabels.join("、")}</div>`
           : "";
         const rows = items
           .map((item) => {
@@ -478,7 +532,7 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
           })
           .filter(Boolean)
           .join("");
-        return title ? `<div><strong>${title}</strong>${coverage}${rows}</div>` : "";
+        return title ? `<div><strong>${title}</strong>${coverage}${inclusion}${rows}</div>` : "";
       },
       transitionDuration: 0,
       trigger: "axis",
@@ -490,7 +544,7 @@ function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChar
         hideOverlap: true,
       },
       boundaryGap: false,
-      data: plottedData.map((stat) => stat.label),
+      data: data.map((stat) => stat.label),
       splitLine: { lineStyle: { color: RECOGNITION_CHART_COLORS.grid, type: "dashed" }, show: true },
       type: "category",
     },
@@ -647,10 +701,10 @@ export function StatsView({
     () => getNotesForGroups(settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode),
     [settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode],
   );
+  const activeTargetNoteIds = useMemo(() => new Set(activeNotes.map((note) => note.id)), [activeNotes]);
   const groupScopedReviews = useMemo(() => {
-    const activeTargetNoteIds = new Set(activeNotes.map((note) => note.id));
     return longTermReviews.filter((review) => activeTargetNoteIds.has(review.targetNoteId));
-  }, [activeNotes, longTermReviews]);
+  }, [activeTargetNoteIds, longTermReviews]);
   const filteredReviews = useMemo(() => filterByRange(groupScopedReviews, range), [groupScopedReviews, range]);
   const recognitionTrendBySession = useMemo(
     () => buildRecognitionTrend(
@@ -680,9 +734,16 @@ export function StatsView({
       const formatted = recognitionTimeGrouping === "day"
         ? { label: formatShortDate(stat.key), tooltipLabel: formatShortDate(stat.key) }
         : formatShortDateTime(stat.boundaryAt);
+      const previousCoveredNoteIds = new Set(visible[index - 1]?.coveredNoteIds ?? []);
+      const addedNoteLabels = index === 0
+        ? []
+        : activeNotes
+            .filter((note) => stat.coveredNoteIds.includes(note.id) && !previousCoveredNoteIds.has(note.id))
+            .map((note) => formatTargetNoteLabel(note, activeTargetNoteIds));
       return {
         ...formatted,
-        breakBefore: index > 0 && visible[index - 1].cohortKey !== stat.cohortKey,
+        addedNoteLabels,
+        breakBefore: addedNoteLabels.length > 0,
         coveredNoteCount: stat.coveredNoteCount,
         errorRate: stat.errorRate === undefined ? undefined : stat.errorRate * 100,
         key: stat.key,
@@ -692,7 +753,7 @@ export function StatsView({
         totalNoteCount: stat.totalNoteCount,
       };
     });
-  }, [range, recognitionTimeGrouping, recognitionTrend]);
+  }, [activeNotes, activeTargetNoteIds, range, recognitionTimeGrouping, recognitionTrend]);
   const recognitionCoverage = recognitionTrend[recognitionTrend.length - 1] ?? {
     coveredNoteCount: 0,
     totalNoteCount: activeNotes.length,

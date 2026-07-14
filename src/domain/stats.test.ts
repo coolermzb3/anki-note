@@ -225,9 +225,9 @@ describe("stats", () => {
     const bySession = buildRecognitionTrend(reviews, sessions, ["C4", "D4"], "practice-session");
     const byDay = groupRecognitionTrendByDay(bySession);
 
-    expect(bySession.map((point) => point.cohortKey)).toEqual(["C4", "C4|D4"]);
+    expect(bySession.map((point) => point.coveredNoteIds)).toEqual([["C4"], ["C4", "D4"]]);
     expect(byDay).toHaveLength(1);
-    expect(byDay[0].cohortKey).toBe("C4|D4");
+    expect(byDay[0].coveredNoteIds).toEqual(["C4", "D4"]);
     expect(buildRecognitionTrend(reviews, sessions, ["C4", "D4"], "day")).toEqual(byDay);
   });
 

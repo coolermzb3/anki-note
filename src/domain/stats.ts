@@ -45,8 +45,8 @@ export type RecognitionTrendGrouping = "day" | "practice-session";
 
 export interface RecognitionTrendPoint {
   boundaryAt: string;
-  cohortKey: string;
   coveredNoteCount: number;
+  coveredNoteIds: TargetNoteId[];
   errorRate?: number;
   key: string;
   p10Ms?: number;
@@ -273,8 +273,8 @@ export function buildRecognitionTrend(
     });
     return {
       boundaryAt: boundary.boundaryAt,
-      cohortKey: cohort.join("|"),
       coveredNoteCount: cohort.length,
+      coveredNoteIds: cohort,
       errorRate: average(noteMetrics.map((metric) => metric.errorRate)),
       key: boundary.key,
       medianMs: average(noteMetrics.map((metric) => metric.medianMs)),
