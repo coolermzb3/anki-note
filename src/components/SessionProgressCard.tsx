@@ -24,6 +24,7 @@ function SessionProgressConditionSelector({
   isOpen,
   onOpenChange,
   onSelectOnly,
+  onSetValues,
   onToggle,
   options,
   selectedValues,
@@ -32,6 +33,7 @@ function SessionProgressConditionSelector({
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onSelectOnly: (value: SessionProgressConditionValue) => void;
+  onSetValues: (values: SessionProgressConditionValue[]) => void;
   onToggle: (value: SessionProgressConditionValue) => void;
   options: SessionProgressConditionOption[];
   selectedValues: SessionProgressConditionValue[];
@@ -41,6 +43,8 @@ function SessionProgressConditionSelector({
     .map((option) => option.label)
     .join("、");
   const isMultiple = selectedValues.length > 1;
+  const selectableValues = options.filter((option) => !option.disabled).map((option) => option.value);
+  const allSelected = selectableValues.length > 0 && selectableValues.every((value) => selectedValues.includes(value));
   return (
     <div className="session-progress-condition-selector">
       <button
@@ -56,6 +60,15 @@ function SessionProgressConditionSelector({
       </button>
       {isOpen ? (
         <div className="session-progress-condition-menu">
+          <button
+            aria-label={`全选${sessionProgressDimensionLabel(dimension)}`}
+            className="session-progress-condition-toggle-all"
+            disabled={selectableValues.length === 0 || allSelected}
+            onClick={() => onSetValues(selectableValues)}
+            type="button"
+          >
+            全选
+          </button>
           {options.map((option) => (
             <div className="session-progress-condition-option" key={option.value}>
               <label aria-label={`${selectedValues.includes(option.value) ? "移除" : "加入"}${option.label}对比`}>
@@ -156,6 +169,12 @@ export function SessionProgressCard({
               key={dimension}
               onOpenChange={(open) => setOpenSelector(open ? dimension : null)}
               onSelectOnly={(value) => model.applyCondition(dimension, value, [value])}
+              onSetValues={(values) => {
+                const preferredValue = values[0];
+                if (preferredValue !== undefined) {
+                  model.applyCondition(dimension, preferredValue, values);
+                }
+              }}
               onToggle={(value) => model.toggleCondition(dimension, value)}
               options={model.conditionOptions(dimension)}
               selectedValues={getSessionProgressSelectionValues(model.selection!, dimension)}

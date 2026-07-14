@@ -112,4 +112,19 @@ describe("session progress selection", () => {
     expect(result.selection.promptDisplayModes).toEqual(["single-note"]);
     expect(result.selection.queueComparisonFamilies).toEqual(["adaptive", "melody-v2"]);
   });
+
+  it("rejects clearing a condition dimension", () => {
+    const single = group("single", "single-note", "adaptive", "2026-07-01T10:00:00.000Z");
+    const current = createSessionProgressSelection(single);
+    const result = resolveSessionProgressSelection({
+      current,
+      dimension: "promptDisplayMode",
+      groups: [single],
+      preferredValue: "single-note",
+      values: [],
+    });
+
+    expect(result.rejected).toBe(true);
+    expect(result.selection).toBe(current);
+  });
 });

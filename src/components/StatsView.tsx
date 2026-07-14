@@ -47,6 +47,11 @@ const RANGE_KEYS = ["1", "7", "30", "all"] as const;
 type RangeKey = (typeof RANGE_KEYS)[number];
 const RECOGNITION_TIME_GROUPINGS = ["day", "practice-session"] as const;
 type RecognitionTimeGrouping = (typeof RECOGNITION_TIME_GROUPINGS)[number];
+const RECOGNITION_TIME_METRICS = ["duration", "speed"] as const;
+type RecognitionTimeMetric = (typeof RECOGNITION_TIME_METRICS)[number];
+const RECOGNITION_TIME_VALUE_MODES = ["absolute", "relative"] as const;
+type RecognitionTimeValueMode = (typeof RECOGNITION_TIME_VALUE_MODES)[number];
+type RecognitionSeriesKey = "errorRate" | "median" | "p10" | "p90";
 const STATS_CAROUSEL_CARD_IDS = ["recognition-time", "session-progress", "note-range"] as const;
 const STATS_CAROUSEL_CARD_LABELS = ["识别趋势", "答对进度", "音域分布"] as const;
 const STATS_CAROUSEL_PAIR_LABELS = ["识别趋势和答对进度", "答对进度和音域分布", "音域分布和识别趋势"] as const;
@@ -58,6 +63,8 @@ interface StatsUiPreferences {
   carouselCardId: StatsCarouselCardId;
   range: RangeKey;
   recognitionTimeGrouping: RecognitionTimeGrouping;
+  recognitionTimeMetric: RecognitionTimeMetric;
+  recognitionTimeValueMode: RecognitionTimeValueMode;
 }
 type StatsCarouselTrackStyle = CSSProperties & {
   "--stats-carousel-single-translate": string;
@@ -80,6 +87,27 @@ interface RecognitionTimeChartStat {
 const EMPTY_SESSIONS: PracticeSessionRecord[] = [];
 const HEATMAP_WEEK_COUNT = 53;
 const RECOGNITION_CHART_COLORS = STATS_COLORS.recognitionChart;
+const RECOGNITION_ERROR_RATE_OPACITY = 0.5;
+const RECOGNITION_SERIES_OPTIONS: Array<{
+  color: string;
+  key: RecognitionSeriesKey;
+  label: string;
+  opacity?: number;
+  width?: number;
+  yAxisIndex?: number;
+}> = [
+  { color: RECOGNITION_CHART_COLORS.p10, key: "p10", label: "P10" },
+  { color: RECOGNITION_CHART_COLORS.median, key: "median", label: "中位", width: 2.5 },
+  { color: RECOGNITION_CHART_COLORS.p90, key: "p90", label: "P90" },
+  {
+    color: RECOGNITION_CHART_COLORS.errorRate,
+    key: "errorRate",
+    label: "错音率",
+    opacity: RECOGNITION_ERROR_RATE_OPACITY,
+    yAxisIndex: 1,
+  },
+];
+const DEFAULT_RECOGNITION_VISIBLE_SERIES = RECOGNITION_SERIES_OPTIONS.map((option) => option.key);
 const RECOGNITION_CHART_HANDLE_ICON =
   "path://M11,5 H17 A4,4 0 0 1 21,9 V23 A4,4 0 0 1 17,27 H11 A4,4 0 0 1 7,23 V9 A4,4 0 0 1 11,5 Z M14,-3 V5 M14,27 V35";
 const WEEKDAY_LABELS = ["周一", "", "周三", "", "周五", "", "周日"];
@@ -87,6 +115,8 @@ const DEFAULT_STATS_UI_PREFERENCES: StatsUiPreferences = {
   carouselCardId: STATS_CAROUSEL_CARD_IDS[1],
   range: "30",
   recognitionTimeGrouping: "practice-session",
+  recognitionTimeMetric: "duration",
+  recognitionTimeValueMode: "absolute",
 };
 
 function formatShortDateTime(iso: string): { label: string; tooltipLabel: string } {
@@ -265,6 +295,14 @@ function isRecognitionTimeGrouping(value: unknown): value is RecognitionTimeGrou
   return typeof value === "string" && RECOGNITION_TIME_GROUPINGS.includes(value as RecognitionTimeGrouping);
 }
 
+function isRecognitionTimeMetric(value: unknown): value is RecognitionTimeMetric {
+  return typeof value === "string" && RECOGNITION_TIME_METRICS.includes(value as RecognitionTimeMetric);
+}
+
+function isRecognitionTimeValueMode(value: unknown): value is RecognitionTimeValueMode {
+  return typeof value === "string" && RECOGNITION_TIME_VALUE_MODES.includes(value as RecognitionTimeValueMode);
+}
+
 function isStatsCarouselCardId(value: unknown): value is StatsCarouselCardId {
   return typeof value === "string" && STATS_CAROUSEL_CARD_IDS.includes(value as StatsCarouselCardId);
 }
@@ -280,6 +318,12 @@ function parseStatsUiPreferences(value: unknown, fallback: StatsUiPreferences): 
     recognitionTimeGrouping: isRecognitionTimeGrouping(value.recognitionTimeGrouping)
       ? value.recognitionTimeGrouping
       : fallback.recognitionTimeGrouping,
+    recognitionTimeMetric: isRecognitionTimeMetric(value.recognitionTimeMetric)
+      ? value.recognitionTimeMetric
+      : fallback.recognitionTimeMetric,
+    recognitionTimeValueMode: isRecognitionTimeValueMode(value.recognitionTimeValueMode)
+      ? value.recognitionTimeValueMode
+      : fallback.recognitionTimeValueMode,
   };
 }
 
@@ -328,22 +372,22 @@ function isStatsCarouselDragBlockedTarget(target: EventTarget | null): boolean {
   );
 }
 
-type RecognitionMetricKey = "errorRate" | "median" | "p10" | "p90";
-
 function makeRecognitionLineSeries({
   color,
   data,
   markLine,
   metric,
   name,
+  opacity = 1,
   width = 2,
   yAxisIndex = 0,
 }: {
   color: string;
   data: RecognitionTimeChartStat[];
   markLine?: LineSeriesOption["markLine"];
-  metric: RecognitionMetricKey;
+  metric: RecognitionSeriesKey;
   name: string;
+  opacity?: number;
   width?: number;
   yAxisIndex?: number;
 }): LineSeriesOption[] {
@@ -360,8 +404,8 @@ function makeRecognitionLineSeries({
     .map((segment, index) => ({
       connectNulls: false,
       data: segment,
-      itemStyle: { color },
-      lineStyle: { color, width },
+      itemStyle: { color, opacity },
+      lineStyle: { color, opacity, width },
       markLine: index === 0 ? markLine : undefined,
       name,
       showSymbol: segment.filter((value) => value !== null).length === 1,
@@ -372,7 +416,67 @@ function makeRecognitionLineSeries({
     }));
 }
 
-export function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[]): EChartsOption {
+function relativeChange(value: number | undefined, baseline: number | undefined): number | undefined {
+  return value === undefined || baseline === undefined || baseline === 0
+    ? undefined
+    : ((value - baseline) / baseline) * 100;
+}
+
+function errorRateAxisPadding(min: number, max: number): number {
+  return Math.max((max - min) * 0.1, 2);
+}
+
+function errorRateAxisMin({ min, max }: { min: number; max: number }): number {
+  return Number.isFinite(min) && Number.isFinite(max)
+    ? Math.max(0, Math.floor(min - errorRateAxisPadding(min, max)))
+    : 0;
+}
+
+function errorRateAxisMax({ min, max }: { min: number; max: number }): number {
+  return Number.isFinite(min) && Number.isFinite(max)
+    ? Math.min(100, Math.ceil(max + errorRateAxisPadding(min, max)))
+    : 100;
+}
+
+function reciprocal(value: number | undefined): number | undefined {
+  return value === undefined || value === 0 ? undefined : 1 / value;
+}
+
+function makeRecognitionSpeedData(data: RecognitionTimeChartStat[]): RecognitionTimeChartStat[] {
+  return data.map((stat) => ({
+    ...stat,
+    median: reciprocal(stat.median),
+    p10: reciprocal(stat.p10),
+    p90: reciprocal(stat.p90),
+  }));
+}
+
+function makeRelativeRecognitionTimeData(data: RecognitionTimeChartStat[]): RecognitionTimeChartStat[] {
+  let baseline: RecognitionTimeChartStat | undefined;
+  return data.map((stat) => {
+    if (!baseline || stat.breakBefore) {
+      baseline = stat;
+    }
+    return {
+      ...stat,
+      median: relativeChange(stat.median, baseline.median),
+      p10: relativeChange(stat.p10, baseline.p10),
+      p90: relativeChange(stat.p90, baseline.p90),
+    };
+  });
+}
+
+export function makeRecognitionTimeChartOption(
+  data: RecognitionTimeChartStat[],
+  metric: RecognitionTimeMetric = "duration",
+  valueMode: RecognitionTimeValueMode = "absolute",
+  visibleSeries: readonly RecognitionSeriesKey[] = DEFAULT_RECOGNITION_VISIBLE_SERIES,
+): EChartsOption {
+  const metricData = metric === "speed" ? makeRecognitionSpeedData(data) : data;
+  const displayedData = valueMode === "relative" ? makeRelativeRecognitionTimeData(metricData) : metricData;
+  const visibleSeriesSet = new Set(visibleSeries);
+  const markLineSeriesKey = (["median", "p10", "p90", "errorRate"] as const)
+    .find((seriesKey) => visibleSeriesSet.has(seriesKey));
   const inclusionMarkers = data.flatMap((stat, dataIndex) => stat.addedNoteLabels.length > 0
     ? [{ dataIndex, label: `新纳入 ${stat.addedNoteLabels.length} 个音` }]
     : []);
@@ -429,6 +533,12 @@ export function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[])
     showDetail: false,
     textStyle: { color: RECOGNITION_CHART_COLORS.muted },
   };
+  const chartGrid = {
+    bottom: 82,
+    left: 50,
+    right: 72,
+    top: 46,
+  };
 
   return {
     animation: false,
@@ -439,12 +549,15 @@ export function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[])
       RECOGNITION_CHART_COLORS.errorRate,
     ],
     dataZoom: [
-      { end: 100, filterMode: "none", start: 0, type: "inside", xAxisIndex: 0 },
+      { end: 100, filterMode: "empty", start: 0, type: "inside", xAxisIndex: 0 },
       {
         ...dataZoomSliderStyle,
         bottom: 16,
         end: 100,
+        filterMode: "empty",
         height: 34,
+        left: chartGrid.left - 2,
+        right: chartGrid.right,
         start: 0,
         type: "slider",
         xAxisIndex: 0,
@@ -452,58 +565,29 @@ export function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[])
       { filterMode: "none", type: "inside", yAxisIndex: [0, 1] },
       {
         ...dataZoomSliderStyle,
+        bottom: chartGrid.bottom,
         filterMode: "none",
-        right: 12,
+        right: 0,
+        top: chartGrid.top - 3,
         type: "slider",
         width: 34,
         yAxisIndex: [0, 1],
       },
     ],
-    grid: {
-      bottom: 82,
-      left: 50,
-      right: 66,
-      top: 38,
-    },
-    legend: {
-      data: ["P10", "中位", "P90", "错音率"],
-      icon: "rect",
-      itemGap: 14,
-      itemHeight: 3,
-      itemWidth: 18,
-      right: 16,
-      textStyle: { color: RECOGNITION_CHART_COLORS.muted, fontSize: 13 },
-      top: 4,
-    },
-    series: [
-      ...makeRecognitionLineSeries({
-        color: RECOGNITION_CHART_COLORS.p10,
-        data,
-        metric: "p10",
-        name: "P10",
-      }),
-      ...makeRecognitionLineSeries({
-        color: RECOGNITION_CHART_COLORS.median,
-        data,
-        markLine: inclusionMarkLine,
-        metric: "median",
-        name: "中位",
-        width: 2.5,
-      }),
-      ...makeRecognitionLineSeries({
-        color: RECOGNITION_CHART_COLORS.p90,
-        data,
-        metric: "p90",
-        name: "P90",
-      }),
-      ...makeRecognitionLineSeries({
-        color: RECOGNITION_CHART_COLORS.errorRate,
-        data,
-        metric: "errorRate",
-        name: "错音率",
-        yAxisIndex: 1,
-      }),
-    ],
+    grid: chartGrid,
+    legend: { show: false },
+    series: RECOGNITION_SERIES_OPTIONS.flatMap((option) => visibleSeriesSet.has(option.key)
+      ? makeRecognitionLineSeries({
+          color: option.color,
+          data: displayedData,
+          markLine: markLineSeriesKey === option.key ? inclusionMarkLine : undefined,
+          metric: option.key,
+          name: option.label,
+          opacity: option.opacity,
+          width: option.width,
+          yAxisIndex: option.yAxisIndex,
+        })
+      : []),
     tooltip: {
       axisPointer: { animation: false, type: "line" },
       enterable: false,
@@ -511,7 +595,9 @@ export function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[])
       formatter: (params) => {
         const items = Array.isArray(params) ? params : [params];
         const firstItem = items[0] as { dataIndex?: number } | undefined;
-        const stat = firstItem?.dataIndex === undefined ? undefined : data[firstItem.dataIndex];
+        const dataIndex = firstItem?.dataIndex;
+        const stat = dataIndex === undefined ? undefined : data[dataIndex];
+        const metricStat = dataIndex === undefined ? undefined : metricData[dataIndex];
         const title = stat?.tooltipLabel ?? "";
         const coverage = stat?.tooltipLabel
           ? `<div style="color:${RECOGNITION_CHART_COLORS.muted}">已纳入 ${stat.coveredNoteCount}/${stat.totalNoteCount} 个音</div>`
@@ -527,8 +613,27 @@ export function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[])
             }
             const value = Number(point.value);
             const isErrorRate = point.seriesName === "错音率";
-            const formattedValue = Number.isFinite(value) ? value.toFixed(isErrorRate ? 1 : 2) : point.value;
-            return `<div>${point.marker ?? ""}${point.seriesName ?? ""}: ${formattedValue}${isErrorRate ? "%" : "s"}</div>`;
+            let formattedValue: number | string | null | undefined = point.value;
+            if (Number.isFinite(value)) {
+              if (isErrorRate) {
+                formattedValue = `${value.toFixed(1)}%`;
+              } else {
+                const metricValue = point.seriesName === "P10"
+                  ? metricStat?.p10
+                  : point.seriesName === "中位"
+                    ? metricStat?.median
+                    : metricStat?.p90;
+                const absoluteValue = metricValue === undefined
+                  ? ""
+                  : metric === "speed"
+                    ? `${metricValue.toFixed(2)} 音/秒`
+                    : `${metricValue.toFixed(2)}s`;
+                formattedValue = valueMode === "relative"
+                  ? `${value > 0 ? "+" : ""}${value.toFixed(1)}%${absoluteValue ? ` (${absoluteValue})` : ""}`
+                  : absoluteValue;
+              }
+            }
+            return `<div>${point.marker ?? ""}${point.seriesName ?? ""}: ${formattedValue}</div>`;
           })
           .filter(Boolean)
           .join("");
@@ -553,8 +658,10 @@ export function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[])
         axisLabel: {
           color: RECOGNITION_CHART_COLORS.muted,
           fontSize: 11,
-          formatter: "{value}s",
+          formatter: valueMode === "relative" ? "{value}%" : metric === "speed" ? "{value}" : "{value}s",
         },
+        name: valueMode === "absolute" && metric === "speed" ? "音/秒" : undefined,
+        nameTextStyle: { color: RECOGNITION_CHART_COLORS.muted, fontSize: 11 },
         scale: true,
         splitLine: { lineStyle: { color: RECOGNITION_CHART_COLORS.grid, type: "dashed" } },
         type: "value",
@@ -565,8 +672,10 @@ export function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[])
           fontSize: 11,
           formatter: "{value}%",
         },
-        max: 100,
-        min: 0,
+        max: errorRateAxisMax,
+        min: errorRateAxisMin,
+        scale: true,
+        show: visibleSeriesSet.has("errorRate"),
         splitLine: { show: false },
         type: "value",
       },
@@ -574,7 +683,23 @@ export function makeRecognitionTimeChartOption(data: RecognitionTimeChartStat[])
   };
 }
 
-function RecognitionTimeChart({ data }: { data: RecognitionTimeChartStat[] }): JSX.Element {
+function RecognitionTimeChart({
+  data,
+  metric,
+  onSelectAllSeries,
+  onSelectOnlySeries,
+  onToggleSeries,
+  valueMode,
+  visibleSeries,
+}: {
+  data: RecognitionTimeChartStat[];
+  metric: RecognitionTimeMetric;
+  onSelectAllSeries: () => void;
+  onSelectOnlySeries: (seriesKey: RecognitionSeriesKey) => void;
+  onToggleSeries: (seriesKey: RecognitionSeriesKey) => void;
+  valueMode: RecognitionTimeValueMode;
+  visibleSeries: readonly RecognitionSeriesKey[];
+}): JSX.Element {
   const chartElementRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<echarts.EChartsType | null>(null);
 
@@ -608,10 +733,51 @@ function RecognitionTimeChart({ data }: { data: RecognitionTimeChartStat[] }): J
   }, []);
 
   useEffect(() => {
-    chartRef.current?.setOption(makeRecognitionTimeChartOption(data), true);
-  }, [data]);
+    chartRef.current?.setOption(makeRecognitionTimeChartOption(data, metric, valueMode, visibleSeries), true);
+  }, [data, metric, valueMode, visibleSeries]);
 
-  return <div aria-label="识别趋势折线图" className="recognition-time-chart" ref={chartElementRef} role="img" />;
+  return (
+    <div className="recognition-time-chart-shell">
+      <div aria-label="识别趋势图例" className="recognition-trend-legend" role="group">
+        {RECOGNITION_SERIES_OPTIONS.map((option) => {
+          const selected = visibleSeries.includes(option.key);
+          return (
+            <div className="recognition-trend-legend-option" key={option.key}>
+              <label aria-label={`${selected ? "隐藏" : "显示"}${option.label}`}>
+                <input
+                  checked={selected}
+                  onChange={() => onToggleSeries(option.key)}
+                  type="checkbox"
+                />
+              </label>
+              <button
+                aria-label={`仅显示${option.label}`}
+                aria-pressed={visibleSeries.length === 1 && selected}
+                className="recognition-trend-legend-single"
+                onClick={() => onSelectOnlySeries(option.key)}
+                type="button"
+              >
+                <i
+                  aria-hidden="true"
+                  style={{ backgroundColor: option.color, opacity: option.opacity ?? 1 }}
+                />
+                {option.label}
+              </button>
+            </div>
+          );
+        })}
+        <button
+          className="recognition-trend-legend-all"
+          disabled={visibleSeries.length === RECOGNITION_SERIES_OPTIONS.length}
+          onClick={onSelectAllSeries}
+          type="button"
+        >
+          全选
+        </button>
+      </div>
+      <div aria-label="识别趋势折线图" className="recognition-time-chart" ref={chartElementRef} role="img" />
+    </div>
+  );
 }
 
 export function StatsView({
@@ -643,8 +809,13 @@ export function StatsView({
     getStatsCarouselTrackPosition(statsCarouselIndex),
   );
   const [statsCarouselTransitionEnabled, setStatsCarouselTransitionEnabled] = useState(true);
+  const [recognitionVisibleSeries, setRecognitionVisibleSeries] = useState<RecognitionSeriesKey[]>(
+    () => [...DEFAULT_RECOGNITION_VISIBLE_SERIES],
+  );
   const range = statsUiPreferences.range;
   const recognitionTimeGrouping = statsUiPreferences.recognitionTimeGrouping;
+  const recognitionTimeMetric = statsUiPreferences.recognitionTimeMetric;
+  const recognitionTimeValueMode = statsUiPreferences.recognitionTimeValueMode;
   const sessionProgressMode = sessionProgressPreferences.mode;
   const sessionProgressHistoryLimit = sessionProgressPreferences.historyLimit;
   const commitStatsCarouselIndex = (nextIndex: number): void => {
@@ -687,6 +858,19 @@ export function StatsView({
   };
   const setRecognitionTimeGrouping = (nextGrouping: RecognitionTimeGrouping): void => {
     setStatsUiPreferences((current) => ({ ...current, recognitionTimeGrouping: nextGrouping }));
+  };
+  const setRecognitionTimeMetric = (nextMetric: RecognitionTimeMetric): void => {
+    setStatsUiPreferences((current) => ({ ...current, recognitionTimeMetric: nextMetric }));
+  };
+  const setRecognitionTimeValueMode = (nextValueMode: RecognitionTimeValueMode): void => {
+    setStatsUiPreferences((current) => ({ ...current, recognitionTimeValueMode: nextValueMode }));
+  };
+  const toggleRecognitionSeries = (seriesKey: RecognitionSeriesKey): void => {
+    setRecognitionVisibleSeries((current) => current.includes(seriesKey)
+      ? current.length === 1
+        ? current
+        : current.filter((candidate) => candidate !== seriesKey)
+      : [...current, seriesKey]);
   };
   const setSessionProgressMode = (nextMode: typeof sessionProgressMode): void => {
     setSessionProgressPreferences((current) => ({ ...current, mode: nextMode }));
@@ -948,7 +1132,35 @@ export function StatsView({
         <div className="panel chart-panel stats-carousel-card">
           <div className="panel-heading">
             <h2>识别趋势</h2>
-            <div className="chart-panel-actions">
+            <div className="chart-panel-actions recognition-trend-actions">
+              <div className="segmented" aria-label="识别趋势指标">
+                <button
+                  className={recognitionTimeMetric === "speed" ? "active" : ""}
+                  onClick={() => setRecognitionTimeMetric("speed")}
+                >
+                  速度
+                </button>
+                <button
+                  className={recognitionTimeMetric === "duration" ? "active" : ""}
+                  onClick={() => setRecognitionTimeMetric("duration")}
+                >
+                  耗时
+                </button>
+              </div>
+              <div className="segmented" aria-label="识别趋势数值模式">
+                <button
+                  className={recognitionTimeValueMode === "absolute" ? "active" : ""}
+                  onClick={() => setRecognitionTimeValueMode("absolute")}
+                >
+                  绝对
+                </button>
+                <button
+                  className={recognitionTimeValueMode === "relative" ? "active" : ""}
+                  onClick={() => setRecognitionTimeValueMode("relative")}
+                >
+                  相对
+                </button>
+              </div>
               <div className="segmented" aria-label="识别趋势分组">
                 <button
                   className={recognitionTimeGrouping === "day" ? "active" : ""}
@@ -960,7 +1172,7 @@ export function StatsView({
                   className={recognitionTimeGrouping === "practice-session" ? "active" : ""}
                   onClick={() => setRecognitionTimeGrouping("practice-session")}
                 >
-                  按练习会话
+                  按会话
                 </button>
               </div>
             </div>
@@ -974,8 +1186,19 @@ export function StatsView({
               <div className="empty-state">所选时间范围内暂无趋势点</div>
             ) : (
               <>
-                <RecognitionTimeChart data={recognitionTimeStats} />
+                <RecognitionTimeChart
+                  data={recognitionTimeStats}
+                  metric={recognitionTimeMetric}
+                  onSelectAllSeries={() => setRecognitionVisibleSeries([...DEFAULT_RECOGNITION_VISIBLE_SERIES])}
+                  onSelectOnlySeries={(seriesKey) => setRecognitionVisibleSeries([seriesKey])}
+                  onToggleSeries={toggleRecognitionSeries}
+                  valueMode={recognitionTimeValueMode}
+                  visibleSeries={recognitionVisibleSeries}
+                />
                 <small className="note-range-filter-note">
+                  {recognitionTimeValueMode === "relative"
+                    ? `每段首点为 0%，${recognitionTimeMetric === "speed" ? "正值" : "负值"}表示更快；`
+                    : ""}
                   已纳入 {recognitionCoverage.coveredNoteCount}/{recognitionCoverage.totalNoteCount} 个音
                   {recognitionCoverage.coveredNoteCount < recognitionCoverage.totalNoteCount ? "，其余数据积累中" : ""}
                 </small>
