@@ -823,6 +823,28 @@ main.has-backup-reminder .setup-grid::after {
   margin: 0 auto;
 }
 
+.panel-heading.summary-result-heading {
+  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  row-gap: 8px;
+}
+
+.summary-result-heading .summary-quality-warning {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  box-sizing: border-box;
+  color: #8a520f;
+  font-size: 18px;
+  font-weight: 600;
+  grid-column: 1 / -1;
+  line-height: 1.55;
+  padding: 9px 11px;
+  width: 100%;
+}
+
 .setup-panel {
   margin: 0 auto;
 }

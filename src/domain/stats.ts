@@ -56,9 +56,23 @@ export interface RecognitionTrendPoint {
 }
 
 export const MIN_SESSION_STAT_REVIEWS = 5;
+const HEAVY_ERROR_WRONG_ANSWER_COUNT = 3;
 const PERFORMANCE_REVIEW_LIMIT = adaptiveV2Spec.performanceReviewLimit;
 export type PositiveHeatLevel = 1 | 2 | 3;
 export type HeatLevel = 0 | PositiveHeatLevel;
+
+export type LongTermStatsIneligibilityReason =
+  | "not-enough-statistical-reviews"
+  | "too-many-error-reviews"
+  | "too-many-heavy-error-reviews";
+
+export interface LongTermStatsEligibility {
+  eligible: boolean;
+  errorReviewCount: number;
+  heavyErrorReviewCount: number;
+  reason?: LongTermStatsIneligibilityReason;
+  statisticalReviewCount: number;
+}
 
 function groupReviewsBySession(reviews: ReviewRecord[]): Map<string, ReviewRecord[]> {
   const reviewsBySession = new Map<string, ReviewRecord[]>();
@@ -73,12 +87,42 @@ function groupReviewsBySession(reviews: ReviewRecord[]): Map<string, ReviewRecor
   return reviewsBySession;
 }
 
-export function hasEnoughStatReviews(reviews: ReviewRecord[]): boolean {
-  return reviews.filter(isStatisticalReview).length >= MIN_SESSION_STAT_REVIEWS;
+export function getLongTermStatsEligibility(reviews: ReviewRecord[]): LongTermStatsEligibility {
+  let statisticalReviewCount = 0;
+  let errorReviewCount = 0;
+  let heavyErrorReviewCount = 0;
+
+  for (const review of reviews) {
+    if (!isStatisticalReview(review)) {
+      continue;
+    }
+    statisticalReviewCount += 1;
+    if (review.wrongAnswers.length > 0) {
+      errorReviewCount += 1;
+    }
+    if (review.wrongAnswers.length >= HEAVY_ERROR_WRONG_ANSWER_COUNT) {
+      heavyErrorReviewCount += 1;
+    }
+  }
+
+  const reason = statisticalReviewCount < MIN_SESSION_STAT_REVIEWS
+    ? "not-enough-statistical-reviews"
+    : heavyErrorReviewCount * 2 > statisticalReviewCount
+      ? "too-many-heavy-error-reviews"
+      : errorReviewCount * 3 > statisticalReviewCount * 2
+        ? "too-many-error-reviews"
+        : undefined;
+  return {
+    eligible: reason === undefined,
+    errorReviewCount,
+    heavyErrorReviewCount,
+    reason,
+    statisticalReviewCount,
+  };
 }
 
 export function isLongTermStatsEligible(reviews: ReviewRecord[]): boolean {
-  return hasEnoughStatReviews(reviews);
+  return getLongTermStatsEligibility(reviews).eligible;
 }
 
 export function filterLongTermReviews(reviews: ReviewRecord[]): ReviewRecord[] {

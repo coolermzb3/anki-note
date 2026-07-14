@@ -1,7 +1,7 @@
 import { getPracticeSessionComparisonSnapshot } from "./legacyPracticeSessionCompatibility";
 import { getQueueComparisonFamily, type PracticeComparisonSnapshot } from "./practiceComparison";
 import { isStatisticalReview } from "./reviews";
-import { hasEnoughStatReviews } from "./stats";
+import { isLongTermStatsEligible } from "./stats";
 import type {
   PracticeSessionRecord,
   PromptDisplayMode,
@@ -82,7 +82,7 @@ function areFinitePracticeSessions(reference: PracticeSessionRecord, candidate: 
 }
 
 export function isProgressChartEligible(session: PracticeSessionRecord, sessionReviews: ReviewRecord[]): boolean {
-  return session.mode !== "open-ended" && hasEnoughStatReviews(sessionReviews);
+  return session.mode !== "open-ended" && isLongTermStatsEligible(sessionReviews);
 }
 
 function sameComparisonSnapshot(
@@ -324,7 +324,7 @@ export function buildSessionProgressBenchmark({
   sessions,
   reviews,
 }: BuildSessionProgressBenchmarkOptions): SessionProgressBenchmark | undefined {
-  if (currentSession.mode === "open-ended") {
+  if (!isProgressChartEligible(currentSession, currentReviews)) {
     return undefined;
   }
   const currentStartedAt = new Date(currentSession.startedAt).getTime();

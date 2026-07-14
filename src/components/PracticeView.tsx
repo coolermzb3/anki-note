@@ -29,6 +29,7 @@ import {
   buildNoteStats,
   filterLongTermReviews,
   formatMs,
+  getLongTermStatsEligibility,
   percentile,
 } from "../domain/stats";
 import type {
@@ -1419,6 +1420,10 @@ export function PracticeView({
   const sessionQualifiedTimes = (summary?.reviews ?? [])
     .filter(isCompletedReview)
     .map((review) => review.activeMs);
+  const summaryStatsEligibility = summary ? getLongTermStatsEligibility(summary.reviews) : undefined;
+  const summaryHasTooManyErrors =
+    summaryStatsEligibility?.reason === "too-many-heavy-error-reviews" ||
+    summaryStatsEligibility?.reason === "too-many-error-reviews";
   const weakestNotes = summary
     ? buildNoteStats(summary.reviews)
         .filter((stat) => stat.reviewCount > 0)
@@ -1668,9 +1673,14 @@ export function PracticeView({
     return (
       <section className="practice-shell">
         <div className="panel summary-panel">
-          <div className="panel-heading">
+          <div className="panel-heading summary-result-heading">
             <h1>本次结果</h1>
             <p>{summary.session.endReason === "manual-stop" ? "手动结束" : "已完成"}</p>
+            {summaryHasTooManyErrors ? (
+              <p className="summary-quality-warning">
+                错音有点多{'>_<'} 这次先不算~ <br />或许从更少的音区开始练习，或者先去学习页学习/默写一下吧~
+              </p>
+            ) : null}
           </div>
           <div className="metric-grid">
             <div className="metric">
@@ -1711,7 +1721,7 @@ export function PracticeView({
               ))}
             </div>
           </section>
-          {summaryProgressSeries.length > 0 ? (
+          {!summaryHasTooManyErrors && summaryProgressSeries.length > 0 ? (
             <section className="summary-section">
               <div className="summary-section-heading session-progress-heading">
                 <h2>答对进度</h2>

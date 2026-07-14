@@ -1,6 +1,6 @@
 # Session progress comparison
 
-The statistics page first derives the target-note set from its global range and staff controls, then initializes `答对进度` from the latest eligible finite practice session within that set. An eligible session contains at least five statistical reviews. The condition selection and time-benchmark group last only for the current statistics-page visit; the progress-calculation mode and history-N preference remain persisted presentation settings.
+The statistics page first derives the target-note set from its global range and staff controls, then initializes `答对进度` from the latest eligible finite practice session within that set. An eligible session contains at least five statistical reviews, with reviews containing at least three wrong answers making up no more than half and reviews containing any wrong answer making up no more than two thirds. The same current eligibility rule is derived from retained review history for both historical and newly completed sessions. The condition selection and time-benchmark group last only for the current statistics-page visit; the progress-calculation mode and history-N preference remain persisted presentation settings.
 
 ## Conditions and selection
 
@@ -24,6 +24,6 @@ Every exact group owns its recent, best, and new-record claim. The genuinely new
 
 The custom multi-group legend shows each group's metric, recent value, and best value without adding `新纪录` labels. Single-group progress and the practice-completion summary may show `新纪录` only when the newest session strictly improves all earlier metric-covering sessions; an equal best is not a new record. The time-benchmark control is available only in multi-group display.
 
-The practice-completion summary remains single-group and centered on the session that just ended. It shares the ECharts renderer and also keeps the all-history best session visible beyond its ordinary history-N limit, but does not expose statistics-page condition selection or multi-group comparison.
+The practice-completion summary remains single-group and centered on the session that just ended. It shares the ECharts renderer and also keeps the all-history best session visible beyond its ordinary history-N limit, but does not expose statistics-page condition selection or multi-group comparison. When more than half of the session's statistical reviews contain at least three wrong answers, or more than two thirds contain any wrong answer, the summary emphasizes learning guidance below its title and omits the progress section; the retained session does not contribute a curve, benchmark, record claim, scheduling evidence, or long-term statistic.
 
 The statistics-page `音域分布` card normally reuses the selected exact groups. It calculates note speed and errors from the eligible finite sessions represented by those groups and then applies the page's current date range. If the global target-note set has no corresponding eligible progress group, this single-note view falls back to all long-term reviews whose target note belongs to the global set and states that fallback in the card. `识别时长` and `练习量` retain their existing app-range semantics.

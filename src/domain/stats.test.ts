@@ -5,8 +5,8 @@ import {
   buildPracticeSessionStats,
   buildRecognitionTrend,
   filterLongTermReviews,
+  getLongTermStatsEligibility,
   groupRecognitionTrendByDay,
-  hasEnoughStatReviews,
   isLongTermStatsEligible,
   percentile,
   positiveTertileLevel,
@@ -14,6 +14,13 @@ import {
 } from "./stats";
 import { makeReview } from "./testFactories";
 import type { PracticeSessionRecordV1 } from "./types";
+
+const HEAVY_WRONG_ANSWERS = [
+  { atActiveMs: 100, noteName: "D" as const },
+  { atActiveMs: 200, noteName: "E" as const },
+  { atActiveMs: 300, noteName: "F" as const },
+];
+const ONE_WRONG_ANSWER = HEAVY_WRONG_ANSWERS.slice(0, 1);
 
 function makeSession(
   overrides: Partial<PracticeSessionRecordV1> & { id: string; startedAt: string },
@@ -81,10 +88,104 @@ describe("stats", () => {
 
     const filtered = filterLongTermReviews([...shortSession, ...longSession]);
 
-    expect(hasEnoughStatReviews(shortSession)).toBe(false);
     expect(isLongTermStatsEligible(longSession)).toBe(true);
     expect(new Set(filtered.map((review) => review.sessionId))).toEqual(new Set(["long-session"]));
     expect(buildDailyStats(filtered)[0].completedReviews).toBe(5);
+  });
+
+  it("excludes sessions when more than half of their statistical reviews have at least three wrong answers", () => {
+    const invalidSession = Array.from({ length: 5 }, (_, index) =>
+      makeReview({
+        id: `invalid-${index}`,
+        targetNoteId: "C4",
+        sessionId: "invalid-session",
+        wrongAnswers: index < 3 ? HEAVY_WRONG_ANSWERS : [],
+      }),
+    );
+    const exactHalfSession = Array.from({ length: 6 }, (_, index) =>
+      makeReview({
+        id: `exact-half-${index}`,
+        targetNoteId: "D4",
+        sessionId: "exact-half-session",
+        wrongAnswers: index < 3 ? HEAVY_WRONG_ANSWERS : [],
+      }),
+    );
+
+    expect(getLongTermStatsEligibility(invalidSession)).toEqual({
+      eligible: false,
+      errorReviewCount: 3,
+      heavyErrorReviewCount: 3,
+      reason: "too-many-heavy-error-reviews",
+      statisticalReviewCount: 5,
+    });
+    expect(isLongTermStatsEligible(exactHalfSession)).toBe(true);
+    expect(new Set(filterLongTermReviews([...invalidSession, ...exactHalfSession]).map((review) => review.sessionId)))
+      .toEqual(new Set(["exact-half-session"]));
+    expect(invalidSession.every((review) => review.ignored === undefined)).toBe(true);
+  });
+
+  it("excludes sessions when more than two thirds of their statistical reviews contain a wrong answer", () => {
+    const invalidSession = Array.from({ length: 7 }, (_, index) =>
+      makeReview({
+        id: `broad-errors-${index}`,
+        targetNoteId: "C4",
+        sessionId: "broad-errors-session",
+        wrongAnswers: index < 5 ? ONE_WRONG_ANSWER : [],
+      }),
+    );
+    const exactTwoThirdsSession = Array.from({ length: 6 }, (_, index) =>
+      makeReview({
+        id: `exact-two-thirds-${index}`,
+        targetNoteId: "D4",
+        sessionId: "exact-two-thirds-session",
+        wrongAnswers: index < 4 ? ONE_WRONG_ANSWER : [],
+      }),
+    );
+
+    expect(getLongTermStatsEligibility(invalidSession)).toEqual({
+      eligible: false,
+      errorReviewCount: 5,
+      heavyErrorReviewCount: 0,
+      reason: "too-many-error-reviews",
+      statisticalReviewCount: 7,
+    });
+    expect(isLongTermStatsEligible(exactTwoThirdsSession)).toBe(true);
+  });
+
+  it("does not count interrupted or ignored heavy-error reviews toward either session threshold", () => {
+    const statisticalReviews = Array.from({ length: 5 }, (_, index) =>
+      makeReview({
+        id: `statistical-${index}`,
+        targetNoteId: "C4",
+        sessionId: "mixed-heavy-session",
+        wrongAnswers: index < 2 ? HEAVY_WRONG_ANSWERS : [],
+      }),
+    );
+    const excludedReviews = [
+      makeReview({
+        id: "interrupted-heavy",
+        interruptReason: "focus-lost",
+        interrupted: true,
+        sessionId: "mixed-heavy-session",
+        targetNoteId: "C4",
+        wrongAnswers: HEAVY_WRONG_ANSWERS,
+      }),
+      makeReview({
+        id: "ignored-heavy",
+        ignored: true,
+        sessionId: "mixed-heavy-session",
+        targetNoteId: "C4",
+        wrongAnswers: HEAVY_WRONG_ANSWERS,
+      }),
+    ];
+
+    expect(getLongTermStatsEligibility([...statisticalReviews, ...excludedReviews])).toEqual({
+      eligible: true,
+      errorReviewCount: 2,
+      heavyErrorReviewCount: 2,
+      reason: undefined,
+      statisticalReviewCount: 5,
+    });
   });
 
   it("assigns daily heat levels from positive daily-count tertiles", () => {

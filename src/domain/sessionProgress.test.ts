@@ -181,9 +181,25 @@ describe("session progress", () => {
     });
     const shortReviews = makeSessionReviews("current", [1000, 1100, 1200, 1300]);
     const enoughReviews = makeSessionReviews("current", [1000, 1100, 1200, 1300, 1400]);
+    const tooManyHeavyErrorReviews = enoughReviews.map((review, index) => ({
+      ...review,
+      wrongAnswers: index < 3
+        ? [
+            { atActiveMs: 100, noteName: "D" as const },
+            { atActiveMs: 200, noteName: "E" as const },
+            { atActiveMs: 300, noteName: "F" as const },
+          ]
+        : [],
+    }));
+    const tooManyErrorReviews = enoughReviews.map((review, index) => ({
+      ...review,
+      wrongAnswers: index < 4 ? [{ atActiveMs: 100, noteName: "D" as const }] : [],
+    }));
 
     expect(isProgressChartEligible(current, shortReviews)).toBe(false);
     expect(isProgressChartEligible(current, enoughReviews)).toBe(true);
+    expect(isProgressChartEligible(current, tooManyHeavyErrorReviews)).toBe(false);
+    expect(isProgressChartEligible(current, tooManyErrorReviews)).toBe(false);
     expect(isProgressChartEligible({ ...current, mode: "open-ended" }, enoughReviews)).toBe(false);
     expect(
       buildSessionProgressSeries({
@@ -195,6 +211,14 @@ describe("session progress", () => {
         mode: "actual-order",
       }),
     ).toEqual([]);
+    expect(
+      buildSessionProgressBenchmark({
+        currentSession: current,
+        currentReviews: tooManyHeavyErrorReviews,
+        sessions: [],
+        reviews: [],
+      }),
+    ).toBeUndefined();
   });
 
   it("builds actual-order progress by cumulating completed review active time in answer order", () => {

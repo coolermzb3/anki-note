@@ -175,12 +175,20 @@ _Avoid_: Response time, click time
 A review where the learner leaves or manually pauses the current prompt before answering correctly. The first version also treats a review as interrupted after 30 seconds of continuous inactivity or window unfocus, when a fixed-duration session ends, or when the learner stops an open-ended session with an unfinished prompt; interrupted reviews are excluded from default speed and error-rate statistics.
 _Avoid_: Abandoned card, timeout
 
+**Statistical review**:
+A completed, uninterrupted review that is not explicitly excluded from performance evidence. Session-level eligibility still determines whether it contributes to long-term history.
+_Avoid_: Any persisted review, eligible long-term review
+
+**Heavy-error review**:
+A statistical review containing at least three wrong answers before the correct answer. Each review occurrence is judged independently even when the same target note appears more than once in a session.
+_Avoid_: Cheating review, difficult target note
+
 **Wrong answer**:
 An incorrect answer note name submitted during a review. Wrong answers belong to the review for the visible card and do not advance to the next card.
 _Avoid_: Failed card, incorrect review
 
 **Error rate**:
-The share of reviews for a target note or practice group that include at least one wrong answer; multiple wrong inputs in one review still count as one erroneous review.
+The share of reviews for a target note, practice group, or practice session that include at least one wrong answer; multiple wrong inputs in one review still count as one erroneous review.
 _Avoid_: Failure rate, miss rate
 
 **Common confusion**:
@@ -188,8 +196,12 @@ The wrong answer note name most often submitted for a target note. Common confus
 _Avoid_: Easy mistake, wrong note
 
 **Eligible long-term review**:
-A statistical review from a practice session containing at least five statistical reviews. It can provide scheduling and recognition evidence for its target note regardless of practice queue or enabled-group combination; single-name drill activity is not long-term history.
+A statistical review belonging to an eligible practice session. It can provide scheduling and recognition evidence for its target note regardless of practice queue or enabled-group combination; single-name drill activity is not long-term history.
 _Avoid_: Exact-configuration review, raw answer input, single-name drill review
+
+**Eligible practice session**:
+A practice session containing at least five statistical reviews, with heavy-error reviews making up no more than half and reviews containing any wrong answer making up no more than two thirds. The current eligibility rule applies equally to historical and newly completed sessions.
+_Avoid_: Persisted session, permanently valid session
 
 **Recognition trend**:
 A chronological sequence of equal-note recognition snapshots sampled after each eligible practice session or at the end of each practice day. Session grouping changes the sampling frequency, while the selected display range only limits which snapshot boundaries are shown; snapshots with different recognition cohorts are never joined by a continuous line.

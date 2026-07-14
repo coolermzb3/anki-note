@@ -509,6 +509,10 @@ export function App(): JSX.Element {
         </div>
       ) : null}
       <nav className="app-nav" aria-label="主导航">
+        <button className={view === "study" ? "active" : ""} onClick={() => selectView("study")}>
+          <BookOpen size={18} />
+          学习
+        </button>
         <button className={view === "practice" ? "active" : ""} onClick={() => selectView("practice")}>
           <Dumbbell size={18} />
           练习
@@ -516,10 +520,6 @@ export function App(): JSX.Element {
         <button className={view === "stats" ? "active" : ""} onClick={() => selectView("stats")}>
           <BarChart3 size={18} />
           统计
-        </button>
-        <button className={view === "study" ? "active" : ""} onClick={() => selectView("study")}>
-          <BookOpen size={18} />
-          学习
         </button>
         <button className={view === "settings" ? "active" : ""} onClick={() => selectView("settings")}>
           <Settings size={18} />
