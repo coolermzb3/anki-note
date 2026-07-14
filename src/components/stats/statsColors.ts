@@ -1,4 +1,4 @@
-import type { HeatLevel, PositiveHeatLevel } from "../domain/stats";
+import type { HeatLevel, PositiveHeatLevel } from "../../domain/stats";
 
 export type StatsRangeTone = "blue" | "red";
 

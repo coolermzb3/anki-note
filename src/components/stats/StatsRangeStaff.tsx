@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Formatter, Renderer, StaveNote, Voice } from "vexflow";
-import { formatTargetNoteLabel, noteToVexKey } from "../domain/notes";
-import { positiveTertileLevel, type NoteConfusionStat } from "../domain/stats";
-import type { NoteName, Staff, StaffNotationMode, TargetNote } from "../domain/types";
-import { STATS_RANGE_STAFF_LAYOUT } from "./staffLayoutProfiles";
+import { formatTargetNoteLabel, noteToVexKey } from "../../domain/notes";
+import { positiveTertileLevel, type NoteConfusionStat } from "../../domain/stats";
+import type { NoteName, Staff, StaffNotationMode, TargetNote } from "../../domain/types";
+import { STATS_RANGE_STAFF_LAYOUT } from "../staffLayoutProfiles";
 import {
   alignStaveNotesToCenters,
   createStaffRenderSurface,
@@ -13,7 +13,7 @@ import {
   logicalPx,
   staveNoteCenterX,
   type StaffRenderSurface,
-} from "./staffGeometry";
+} from "../staffGeometry";
 import { STATS_COLORS, type StatsRangeTone } from "./statsColors";
 
 export interface StaffHeatNote {

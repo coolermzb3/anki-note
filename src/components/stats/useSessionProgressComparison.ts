@@ -7,7 +7,7 @@ import {
   getSessionProgressChartWindowMs,
   type SessionProgressBenchmark,
   type SessionProgressMode,
-} from "../domain/sessionProgress";
+} from "../../domain/sessionProgress";
 import {
   createSessionProgressSelection,
   getSelectedSessionProgressGroups,
@@ -19,19 +19,19 @@ import {
   type SessionProgressConditionDimension,
   type SessionProgressConditionValue,
   type SessionProgressSelection,
-} from "../domain/sessionProgressSelection";
-import { buildTargetNoteSetKey } from "../domain/targetNoteSet";
+} from "../../domain/sessionProgressSelection";
+import { buildTargetNoteSetKey } from "../../domain/targetNoteSet";
 import type {
   PracticeSessionRecord,
   PromptNoteDuration,
   QueueComparisonFamily,
   ReviewRecord,
   TargetNote,
-} from "../domain/types";
+} from "../../domain/types";
 import type {
   SessionProgressChartGroup,
   SessionProgressGroupLegendItem,
-} from "./SessionProgressChart";
+} from "../SessionProgressChart";
 
 const COMPARISON_COLORS = ["#4477aa", "#ee6677", "#228833", "#aa3377"] as const;
 

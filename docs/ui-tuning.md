@@ -30,4 +30,4 @@
 | 练习页谱页 | 最大行数、每行音符数、单行固定高度、时值分组、连梁和小节线 | [`PRACTICE_PAGE_STAFF_LAYOUT`](../src/components/staffLayoutProfiles.ts)、[`staffPageNotation.ts`](../src/components/staffPageNotation.ts) |
 | 练习页多音区域 | 页面谱表舞台和容器尺寸 | [`.staff-page-stage`](../src/styles.css) |
 | 统计页音域谱表 | 列距、谱表留白、Label 位置与字号 | [`STATS_RANGE_STAFF_LAYOUT`](../src/components/staffLayoutProfiles.ts) |
-| 统计页颜色 | 热力图、音域着色和识别曲线配色 | [`STATS_COLORS`](../src/components/statsColors.ts) |
+| 统计页颜色 | 热力图、音域着色和识别曲线配色 | [`STATS_COLORS`](../src/components/stats/statsColors.ts) |

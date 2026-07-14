@@ -23,7 +23,7 @@ import {
   type PracticeStartPreflightResult,
 } from "./components/PracticeView";
 import { SettingsView } from "./components/SettingsView";
-import { StatsView } from "./components/StatsView";
+import { StatsView } from "./components/stats/StatsView";
 import { StudyView, type StaffRecallStartPreflightResult } from "./components/StudyView";
 import { useBlurButtonAfterPointerClick } from "./components/useBlurButtonAfterPointerClick";
 

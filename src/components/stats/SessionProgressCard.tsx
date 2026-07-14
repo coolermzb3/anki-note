@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
 
-import type { SessionProgressMode } from "../domain/sessionProgress";
+import type { SessionProgressMode } from "../../domain/sessionProgress";
 import {
   getSessionProgressSelectionValues,
   SESSION_PROGRESS_CONDITION_DIMENSIONS,
   type SessionProgressConditionDimension,
   type SessionProgressConditionValue,
-} from "../domain/sessionProgressSelection";
+} from "../../domain/sessionProgressSelection";
 import {
   SessionProgressChart,
   SessionProgressControls,
   SessionProgressGroupLegend,
   SessionProgressLegend,
-} from "./SessionProgressChart";
+} from "../SessionProgressChart";
 import {
   sessionProgressDimensionLabel,
   type SessionProgressComparisonModel,

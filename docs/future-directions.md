@@ -28,3 +28,19 @@ Keep target-note identity based on written pitch and staff placement so existing
 - a specific instrument variant, because physical instrument key alone does not determine notation convention.
 
 Audio playback derives sounding pitch from the written target and instrument profile before selecting the instrument timbre. Supporting concert-pitch answers, microphone validation of played pitch, or automatic conversion of concert scores into transposed parts would be separate larger features, likely requiring accidentals and a broader answer model. This direction is not part of the current staff-notation upgrade.
+
+## Shared staff-rendering adapter
+
+Staff rendering should continue to share geometry and layout primitives while each view retains an explicit layout profile. If duplicated VexFlow setup or interaction code keeps growing, explore a small rendering adapter that accepts the view-specific profile, notes, annotations, and interaction hooks. The adapter should not hide spacing, scale, clef, or hit-area choices behind fixed defaults; callers must remain able to tune those parameters for practice, study, recall, and statistics layouts.
+
+Introduce this adapter only after identifying a stable common lifecycle across the existing renderers. Prefer one narrow end-to-end use case first, then migrate other views when the abstraction makes their code smaller and clearer.
+
+## Practice-session runtime
+
+Before splitting the practice page into more visual components, define a practice-session runtime boundary around session lifecycle, queue progression, review recording, playback coordination, pause and resume behavior, and exit handling. React components should observe runtime state and dispatch user intents, while persistence and transition rules remain testable without rendering the page.
+
+Design this boundary from concrete lifecycle tests rather than mechanically moving hooks into files. Keep staff-page behavior, single-note behavior, and shared session semantics explicit until their common transitions are proven.
+
+## Domain module organization
+
+Keep domain modules flat while their concepts and dependencies are still small enough to scan directly. Create subdirectories only for stable clusters with several tightly related files, such as queueing, progress comparison, or backup synchronization, and move one cluster at a time with import-only changes. Shared note, review, and settings types should remain easy to discover instead of being nested solely to reduce the top-level file count.
