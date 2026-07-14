@@ -1,11 +1,31 @@
+import numpy as np
 import pandas as pd
 
 from anki_note_analysis.metrics import (
+    _tier_codes_by_row,
     daily_speed_metrics,
     medium_or_higher_active_days,
     recent_per_note_window,
     rolling_equal_note_metrics,
 )
+from anki_note_analysis.policies import tier_labels
+
+
+def test_vectorized_tier_codes_match_policy_tiers() -> None:
+    values = np.array(
+        [
+            [900, 700, 500, 300, 100],
+            [100, np.nan, 500, 300, 900],
+            [400, 400, 400, 400, 400],
+        ],
+        dtype=float,
+    )
+    label_codes = {"weak": 0, "middle": 1, "strong": 2}
+    expected = np.vstack(
+        [tier_labels(pd.Series(row)).map(label_codes).to_numpy(dtype=int) for row in values]
+    )
+
+    np.testing.assert_array_equal(_tier_codes_by_row(values), expected)
 
 
 def test_medium_or_higher_days_match_positive_volume_tertiles() -> None:

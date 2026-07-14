@@ -46,7 +46,8 @@ def plot_recent_notes(metrics: pd.DataFrame, path: Path) -> None:
 
 
 def plot_policy_allocations(allocation: pd.DataFrame, path: Path) -> None:
-    policies = [
+    policy_order = [
+        "adaptive_v2",
         "adaptive_current",
         "focused_current",
         "tier_p50_631",
@@ -54,13 +55,17 @@ def plot_policy_allocations(allocation: pd.DataFrame, path: Path) -> None:
         "tier_p50_532",
         "tier_p90_532",
     ]
+    policies = [policy for policy in policy_order if policy in allocation]
     ordered = allocation.sort_values("window_p50_ms", ascending=False)
-    figure, axes = plt.subplots(3, 2, figsize=(12, 10), sharex=True, sharey=True)
-    for axis, policy in zip(axes.flat, policies, strict=True):
+    row_count = math.ceil(len(policies) / 2)
+    figure, axes = plt.subplots(row_count, 2, figsize=(12, row_count * 3.3), sharex=True, sharey=True)
+    for axis, policy in zip(axes.flat, policies, strict=False):
         axis.bar(ordered["target_note_id"], ordered[policy] * 100)
         axis.set_title(policy)
         axis.tick_params(axis="x", rotation=45)
         axis.set_ylabel("Expected draw share (%)")
+    for axis in axes.flat[len(policies) :]:
+        axis.set_visible(False)
     figure.tight_layout()
     figure.savefig(path, dpi=160)
     plt.close(figure)
@@ -70,7 +75,8 @@ def plot_queue_replay(replay: pd.DataFrame, path: Path) -> None:
     latest_state = replay["state_date"].iloc[-1]
     latest = replay.loc[replay["state_date"].eq(latest_state)]
     policies = latest["policy"].drop_duplicates().tolist()
-    ordering = latest.loc[latest["policy"].eq("tier_p50_631")].copy()
+    ordering_policy = "tier_p50_631" if "tier_p50_631" in policies else policies[0]
+    ordering = latest.loc[latest["policy"].eq(ordering_policy)].copy()
     ordering["tier_order"] = ordering["p50_tier"].map({"weak": 0, "middle": 1, "strong": 2})
     note_order = ordering.sort_values(["tier_order", "mean_draw_share"], ascending=[True, False])[
         "target_note_id"

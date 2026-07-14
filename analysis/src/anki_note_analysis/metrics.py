@@ -55,13 +55,13 @@ def recent_per_note_window(reviews: pd.DataFrame, note_ids: Iterable[str], count
     return target.groupby("targetNoteId", group_keys=False).tail(count).copy()
 
 
-def compare_metric_windows(
+def analyze_metric_windows(
     reviews: pd.DataFrame,
     note_ids: Iterable[str],
     active_day_window: pd.DataFrame,
     *,
     iterations: int = 500,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
     note_ids = list(note_ids)
     windows = {
         "medium_or_higher_days": active_day_window,
@@ -71,8 +71,13 @@ def compare_metric_windows(
     }
     latest_at = reviews["completed_at"].max()
     rows: list[dict[str, float | int | str]] = []
+    recent_stability = pd.DataFrame()
+    recent_summary: dict[str, float] = {}
     for window_name, window in windows.items():
         stability, summary = bootstrap_recent_metrics(window, note_ids, iterations=iterations)
+        if window_name == "last_100_per_note":
+            recent_stability = stability
+            recent_summary = summary
         counts = window.groupby("targetNoteId").size().reindex(note_ids, fill_value=0)
         oldest = window.groupby("targetNoteId")["completed_at"].min().reindex(note_ids)
         oldest_age_days = (latest_at - oldest).dt.total_seconds() / 86400
@@ -91,7 +96,23 @@ def compare_metric_windows(
                 "p50_p67_ms": summary["p50_p67_ms"],
             }
         )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), recent_stability, recent_summary
+
+
+def compare_metric_windows(
+    reviews: pd.DataFrame,
+    note_ids: Iterable[str],
+    active_day_window: pd.DataFrame,
+    *,
+    iterations: int = 500,
+) -> pd.DataFrame:
+    comparison, _, _ = analyze_metric_windows(
+        reviews,
+        note_ids,
+        active_day_window,
+        iterations=iterations,
+    )
+    return comparison
 
 
 def daily_speed_metrics(reviews: pd.DataFrame, note_ids: Iterable[str]) -> pd.DataFrame:
@@ -186,6 +207,16 @@ def cross_day_metric_alignment(
     return pd.DataFrame(rows)
 
 
+def _tier_codes_by_row(values: np.ndarray) -> np.ndarray:
+    sort_values = np.where(np.isnan(values), np.inf, values)
+    ordered = np.argsort(-sort_values, axis=1, kind="stable")
+    chunks = np.array_split(np.arange(values.shape[1]), 3)
+    slot_codes = np.concatenate([np.full(len(chunk), code) for code, chunk in enumerate(chunks)])
+    codes = np.empty_like(ordered)
+    np.put_along_axis(codes, ordered, np.broadcast_to(slot_codes, ordered.shape), axis=1)
+    return codes
+
+
 def bootstrap_recent_metrics(
     reviews: pd.DataFrame,
     note_ids: Iterable[str],
@@ -204,10 +235,6 @@ def bootstrap_recent_metrics(
     point_p90_tiers = tier_labels(point["p90_ms"])
     p50_values = np.full((iterations, len(note_ids)), np.nan)
     p90_values = np.full((iterations, len(note_ids)), np.nan)
-    p50_thresholds = np.full((iterations, 2), np.nan)
-    p90_thresholds = np.full((iterations, 2), np.nan)
-    p50_matches = np.zeros((iterations, len(note_ids)), dtype=bool)
-    p90_matches = np.zeros((iterations, len(note_ids)), dtype=bool)
     for iteration in range(iterations):
         for note_index, note_id in enumerate(note_ids):
             values = samples[note_id]
@@ -216,12 +243,14 @@ def bootstrap_recent_metrics(
             draw = rng.choice(values, size=len(values), replace=True)
             p50_values[iteration, note_index] = np.quantile(draw, 0.5)
             p90_values[iteration, note_index] = np.quantile(draw, 0.9)
-        p50_series = pd.Series(p50_values[iteration], index=note_ids)
-        p90_series = pd.Series(p90_values[iteration], index=note_ids)
-        p50_thresholds[iteration] = np.nanquantile(p50_values[iteration], [1 / 3, 2 / 3])
-        p90_thresholds[iteration] = np.nanquantile(p90_values[iteration], [1 / 3, 2 / 3])
-        p50_matches[iteration] = tier_labels(p50_series).eq(point_p50_tiers).to_numpy()
-        p90_matches[iteration] = tier_labels(p90_series).eq(point_p90_tiers).to_numpy()
+
+    label_codes = {"weak": 0, "middle": 1, "strong": 2}
+    point_p50_codes = point_p50_tiers.map(label_codes).to_numpy(dtype=int)
+    point_p90_codes = point_p90_tiers.map(label_codes).to_numpy(dtype=int)
+    p50_matches = _tier_codes_by_row(p50_values) == point_p50_codes
+    p90_matches = _tier_codes_by_row(p90_values) == point_p90_codes
+    p50_thresholds = np.nanquantile(p50_values, [1 / 3, 2 / 3], axis=1).T
+    p90_thresholds = np.nanquantile(p90_values, [1 / 3, 2 / 3], axis=1).T
 
     stability = point.copy()
     stability["p50_ci_low_ms"] = np.nanquantile(p50_values, 0.025, axis=0)

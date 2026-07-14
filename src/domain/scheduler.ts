@@ -53,27 +53,36 @@ function reviewCompletedAt(review: ReviewRecord): number {
   return new Date(review.answeredAt ?? review.endedAt).getTime();
 }
 
-function qualifiedReviewsFor(noteId: TargetNoteId, reviews: ReviewRecord[]): ReviewRecord[] {
-  return reviews
-    .filter((review) => review.targetNoteId === noteId && isStatisticalReview(review))
-    .sort(
-      (left, right) =>
-        reviewCompletedAt(left) - reviewCompletedAt(right) ||
-        new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime(),
-    );
+function orderedStatisticalReviews(reviews: ReviewRecord[]): ReviewRecord[] {
+  return reviews.filter(isStatisticalReview).sort(
+    (left, right) =>
+      reviewCompletedAt(left) - reviewCompletedAt(right) ||
+      new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime(),
+  );
+}
+
+function buildQualifiedReviewsByNote(
+  notes: readonly TargetNote[],
+  orderedReviews: readonly ReviewRecord[],
+): Map<TargetNoteId, ReviewRecord[]> {
+  const byNote = new Map(notes.map((note) => [note.id, [] as ReviewRecord[]]));
+  for (const review of orderedReviews) {
+    byNote.get(review.targetNoteId)?.push(review);
+  }
+  return byNote;
 }
 
 function plannedCount(noteId: TargetNoteId, plannedTargetNoteIds: readonly TargetNoteId[]): number {
   return plannedTargetNoteIds.filter((candidate) => candidate === noteId).length;
 }
 
-export function getAdaptiveNotePerformance(
+function getAdaptiveNotePerformanceFromHistory(
   notes: readonly TargetNote[],
-  reviews: ReviewRecord[],
+  qualifiedReviewsByNote: ReadonlyMap<TargetNoteId, readonly ReviewRecord[]>,
   plannedTargetNoteIds: readonly TargetNoteId[] = [],
 ): Map<TargetNoteId, AdaptiveNotePerformance> {
   const raw = notes.map((note) => {
-    const qualified = qualifiedReviewsFor(note.id, reviews);
+    const qualified = qualifiedReviewsByNote.get(note.id) ?? [];
     const recent = qualified.slice(-PERFORMANCE_REVIEW_LIMIT);
     const plannedPageCount = plannedCount(note.id, plannedTargetNoteIds);
     return {
@@ -112,6 +121,19 @@ export function getAdaptiveNotePerformance(
       selectionCount: entry.selectionCount,
     }];
   }));
+}
+
+export function getAdaptiveNotePerformance(
+  notes: readonly TargetNote[],
+  reviews: ReviewRecord[],
+  plannedTargetNoteIds: readonly TargetNoteId[] = [],
+): Map<TargetNoteId, AdaptiveNotePerformance> {
+  const orderedReviews = orderedStatisticalReviews(reviews);
+  return getAdaptiveNotePerformanceFromHistory(
+    notes,
+    buildQualifiedReviewsByNote(notes, orderedReviews),
+    plannedTargetNoteIds,
+  );
 }
 
 function tierSlotWeights(noteCount: number): number[] {
@@ -187,17 +209,20 @@ function targetSetForSession(session: PracticeSessionRecord | undefined): Set<st
   return key ? new Set(key.split("|")) : undefined;
 }
 
-function buildQuestionGaps({
+interface PreparedAdaptiveHistory {
+  baseQuestionGaps: ReadonlyMap<TargetNoteId, number>;
+  qualifiedReviewsByNote: ReadonlyMap<TargetNoteId, readonly ReviewRecord[]>;
+}
+
+function buildBaseQuestionGaps({
   currentSessionId,
   notes,
-  plannedTargetNoteIds,
-  reviews,
+  orderedReviews,
   sessions,
 }: {
   currentSessionId?: string;
   notes: readonly TargetNote[];
-  plannedTargetNoteIds: readonly TargetNoteId[];
-  reviews: ReviewRecord[];
+  orderedReviews: readonly ReviewRecord[];
   sessions: PracticeSessionRecord[];
 }): Map<TargetNoteId, number> {
   const gaps = new Map(notes.map((note) => [note.id, 0]));
@@ -206,13 +231,6 @@ function buildQuestionGaps({
     sessions.map((session) => [session.id, targetSetForSession(session)]),
   );
   const currentTargetSet = new Set(relevantIds);
-  const orderedReviews = reviews
-    .filter(isStatisticalReview)
-    .sort(
-      (left, right) =>
-        reviewCompletedAt(left) - reviewCompletedAt(right) ||
-        new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime(),
-    );
   for (const review of orderedReviews) {
     const targetSet = review.sessionId === currentSessionId
       ? currentTargetSet
@@ -226,12 +244,38 @@ function buildQuestionGaps({
       }
     }
   }
+  return gaps;
+}
+
+function applyPlannedQuestionGaps(
+  baseGaps: ReadonlyMap<TargetNoteId, number>,
+  plannedTargetNoteIds: readonly TargetNoteId[],
+): Map<TargetNoteId, number> {
+  const gaps = new Map(baseGaps);
   for (const selectedId of plannedTargetNoteIds) {
-    for (const noteId of relevantIds) {
+    for (const noteId of gaps.keys()) {
       gaps.set(noteId, noteId === selectedId ? 0 : (gaps.get(noteId) ?? 0) + 1);
     }
   }
   return gaps;
+}
+
+function prepareAdaptiveHistory({
+  currentSessionId,
+  notes,
+  reviews,
+  sessions,
+}: {
+  currentSessionId?: string;
+  notes: readonly TargetNote[];
+  reviews: ReviewRecord[];
+  sessions: PracticeSessionRecord[];
+}): PreparedAdaptiveHistory {
+  const orderedReviews = orderedStatisticalReviews(reviews);
+  return {
+    baseQuestionGaps: buildBaseQuestionGaps({ currentSessionId, notes, orderedReviews, sessions }),
+    qualifiedReviewsByNote: buildQualifiedReviewsByNote(notes, orderedReviews),
+  };
 }
 
 function resolvePracticeQueueStrategy(strategy?: PracticeQueueStrategy): PracticeQueueStrategy {
@@ -241,6 +285,69 @@ function resolvePracticeQueueStrategy(strategy?: PracticeQueueStrategy): Practic
 export function getDrillNotes(notes: TargetNote[], drillNoteNames: NoteName[] = []): TargetNote[] {
   const enabledNoteNames = new Set(drillNoteNames);
   return notes.filter((note) => enabledNoteNames.has(note.noteName));
+}
+
+function resolveStrategyNotes(
+  notes: TargetNote[],
+  strategy: PracticeQueueStrategy,
+  drillNoteNames: NoteName[] | undefined,
+): TargetNote[] {
+  const strategyNotes = strategy === "note-drill" ? getDrillNotes(notes, drillNoteNames) : notes;
+  if (strategyNotes.length === 0) {
+    throw new Error("Cannot select a note without enabled drill note names.");
+  }
+  return strategyNotes;
+}
+
+function selectAdaptiveNote({
+  history,
+  lastTargetNoteId,
+  notes,
+  plannedTargetNoteIds,
+  rng,
+}: {
+  history: PreparedAdaptiveHistory;
+  lastTargetNoteId?: TargetNoteId;
+  notes: TargetNote[];
+  plannedTargetNoteIds: readonly TargetNoteId[];
+  rng: () => number;
+}): TargetNote {
+  const eligible = withoutImmediateRepeat(notes, lastTargetNoteId);
+  if (eligible.length === 1) {
+    return eligible[0];
+  }
+  const performance = getAdaptiveNotePerformanceFromHistory(
+    notes,
+    history.qualifiedReviewsByNote,
+    plannedTargetNoteIds,
+  );
+  const mature = eligible.filter((note) => performance.get(note.id)!.selectionCount >= COLD_START_REVIEW_COUNT);
+  const newcomers = eligible.filter((note) => performance.get(note.id)!.selectionCount < COLD_START_REVIEW_COUNT);
+  const gaps = applyPlannedQuestionGaps(history.baseQuestionGaps, plannedTargetNoteIds);
+  const overdue = mature.filter((note) => (gaps.get(note.id) ?? 0) >= MAINTENANCE_GAP);
+  if (overdue.length > 0) {
+    const oldestGap = Math.max(...overdue.map((note) => gaps.get(note.id) ?? 0));
+    return randomChoice(overdue.filter((note) => gaps.get(note.id) === oldestGap), rng);
+  }
+
+  const allBroadlyNew = newcomers.length > 0 && notes.every(
+    (note) => performance.get(note.id)!.selectionCount <= COLD_START_REVIEW_COUNT,
+  );
+  if (allBroadlyNew || mature.length === 0) {
+    const minimumCount = Math.min(...newcomers.map((note) => performance.get(note.id)!.selectionCount));
+    return randomChoice(
+      newcomers.filter((note) => performance.get(note.id)!.selectionCount === minimumCount),
+      rng,
+    );
+  }
+  if (newcomers.length > 0 && rng() < NEWCOMER_RATE) {
+    const minimumCount = Math.min(...newcomers.map((note) => performance.get(note.id)!.selectionCount));
+    return randomChoice(
+      newcomers.filter((note) => performance.get(note.id)!.selectionCount === minimumCount),
+      rng,
+    );
+  }
+  return weightedChoice(mature, getAdaptiveTierWeights(notes, performance), rng);
 }
 
 export function selectNextNote({
@@ -262,43 +369,14 @@ export function selectNextNote({
   if (strategy === "melody") {
     return selectMelodyNotes({ notes, count: 1, lastTargetNoteId, state: melodyState, rng })[0];
   }
-  const strategyNotes = strategy === "note-drill" ? getDrillNotes(notes, drillNoteNames) : notes;
-  if (strategyNotes.length === 0) {
-    throw new Error("Cannot select a note without enabled drill note names.");
-  }
-
-  const eligible = withoutImmediateRepeat(strategyNotes, lastTargetNoteId);
-  if (eligible.length === 1) {
-    return eligible[0];
-  }
-  const performance = getAdaptiveNotePerformance(strategyNotes, reviews, plannedTargetNoteIds);
-  const mature = eligible.filter((note) => performance.get(note.id)!.selectionCount >= COLD_START_REVIEW_COUNT);
-  const newcomers = eligible.filter((note) => performance.get(note.id)!.selectionCount < COLD_START_REVIEW_COUNT);
-  const gaps = buildQuestionGaps({ currentSessionId, notes: strategyNotes, plannedTargetNoteIds, reviews, sessions });
-  const overdue = mature.filter((note) => (gaps.get(note.id) ?? 0) >= MAINTENANCE_GAP);
-  if (overdue.length > 0) {
-    const oldestGap = Math.max(...overdue.map((note) => gaps.get(note.id) ?? 0));
-    return randomChoice(overdue.filter((note) => gaps.get(note.id) === oldestGap), rng);
-  }
-
-  const allBroadlyNew = newcomers.length > 0 && strategyNotes.every(
-    (note) => performance.get(note.id)!.selectionCount <= COLD_START_REVIEW_COUNT,
-  );
-  if (allBroadlyNew || mature.length === 0) {
-    const minimumCount = Math.min(...newcomers.map((note) => performance.get(note.id)!.selectionCount));
-    return randomChoice(
-      newcomers.filter((note) => performance.get(note.id)!.selectionCount === minimumCount),
-      rng,
-    );
-  }
-  if (newcomers.length > 0 && rng() < NEWCOMER_RATE) {
-    const minimumCount = Math.min(...newcomers.map((note) => performance.get(note.id)!.selectionCount));
-    return randomChoice(
-      newcomers.filter((note) => performance.get(note.id)!.selectionCount === minimumCount),
-      rng,
-    );
-  }
-  return weightedChoice(mature, getAdaptiveTierWeights(strategyNotes, performance), rng);
+  const strategyNotes = resolveStrategyNotes(notes, strategy, drillNoteNames);
+  return selectAdaptiveNote({
+    history: prepareAdaptiveHistory({ currentSessionId, notes: strategyNotes, reviews, sessions }),
+    lastTargetNoteId,
+    notes: strategyNotes,
+    plannedTargetNoteIds,
+    rng,
+  });
 }
 
 export interface SelectNotePageOptions extends SelectNextNoteOptions {
@@ -306,7 +384,8 @@ export interface SelectNotePageOptions extends SelectNextNoteOptions {
 }
 
 export function selectNotePage({ count, ...options }: SelectNotePageOptions): TargetNote[] {
-  if (resolvePracticeQueueStrategy(options.queueStrategy) === "melody") {
+  const strategy = resolvePracticeQueueStrategy(options.queueStrategy);
+  if (strategy === "melody") {
     return selectMelodyNotes({
       notes: options.notes,
       count,
@@ -315,16 +394,31 @@ export function selectNotePage({ count, ...options }: SelectNotePageOptions): Ta
       rng: options.rng,
     });
   }
+  if (count <= 0) {
+    return [];
+  }
+  if (options.notes.length === 0) {
+    throw new Error("Cannot select a note without enabled groups.");
+  }
+  const strategyNotes = resolveStrategyNotes(options.notes, strategy, options.drillNoteNames);
+  const history = prepareAdaptiveHistory({
+    currentSessionId: options.currentSessionId,
+    notes: strategyNotes,
+    reviews: options.reviews,
+    sessions: options.sessions ?? [],
+  });
   const selected: TargetNote[] = [];
   let lastTargetNoteId = options.lastTargetNoteId;
   for (let index = 0; index < count; index += 1) {
-    const note = selectNextNote({
-      ...options,
+    const note = selectAdaptiveNote({
+      history,
       lastTargetNoteId,
+      notes: strategyNotes,
       plannedTargetNoteIds: [
         ...(options.plannedTargetNoteIds ?? []),
         ...selected.map((selectedNote) => selectedNote.id),
       ],
+      rng: options.rng ?? Math.random,
     });
     selected.push(note);
     lastTargetNoteId = note.id;

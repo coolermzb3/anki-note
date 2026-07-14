@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,19 @@ def load_backup(backup_dir: Path) -> BackupSnapshot:
         reviews=reviews_frame,
         staff_recall_runs=staff_recall_frame,
     )
+
+
+def backup_content_fingerprint(snapshot: BackupSnapshot) -> str:
+    """Hash the immutable backup inputs used by offline analysis."""
+    digest = sha256()
+    paths = [snapshot.backup_dir / "manifest.json"]
+    paths.extend(snapshot.backup_dir / "days" / f"{date}.json" for date in snapshot.manifest["dates"])
+    for path in paths:
+        digest.update(path.relative_to(snapshot.backup_dir).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def prepare_output_dir(backup_dir: Path, output_dir: Path) -> Path:

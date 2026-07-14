@@ -238,27 +238,27 @@ export function buildRecognitionTrend(
         reviewCompletedAt(left) - reviewCompletedAt(right) ||
         new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime(),
     );
-  const sessionBoundaries = buildPracticeSessionStats(statisticalReviews, sessions)
-    .map((session) => ({
-      boundaryAt: session.endedAt ?? session.startedAt,
-      key: session.sessionId,
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const sessionBoundaries = [...groupReviewsBySession(statisticalReviews).entries()]
+    .map(([sessionId, sessionReviews]) => ({
+      boundaryAt: sessionsById.get(sessionId)?.endedAt ?? latestReviewEndedAt(sessionReviews),
+      key: sessionId,
     }))
     .sort(
       (left, right) =>
         new Date(left.boundaryAt).getTime() - new Date(right.boundaryAt).getTime() || left.key.localeCompare(right.key),
     );
-  const boundaries = grouping === "day"
-    ? [...new Map(sessionBoundaries.map((boundary) => [localDateKey(boundary.boundaryAt), boundary])).entries()]
-        .map(([date, boundary]) => ({ ...boundary, key: date }))
-    : sessionBoundaries;
-
-  return boundaries.map((boundary) => {
-    const evidence = statisticalReviews.filter(
-      (review) => reviewCompletedAt(review) <= new Date(boundary.boundaryAt).getTime(),
-    );
-    const byNote = new Map(targetIds.map((noteId) => [noteId, [] as ReviewRecord[]]));
-    for (const review of evidence) {
+  const byNote = new Map(targetIds.map((noteId) => [noteId, [] as ReviewRecord[]]));
+  let reviewIndex = 0;
+  const sessionTrend = sessionBoundaries.map((boundary) => {
+    const boundaryTime = new Date(boundary.boundaryAt).getTime();
+    while (
+      reviewIndex < statisticalReviews.length &&
+      reviewCompletedAt(statisticalReviews[reviewIndex]) <= boundaryTime
+    ) {
+      const review = statisticalReviews[reviewIndex];
       byNote.get(review.targetNoteId)?.push(review);
+      reviewIndex += 1;
     }
     const cohort = targetIds.filter((noteId) => (byNote.get(noteId)?.length ?? 0) >= 20);
     const noteMetrics = cohort.map((noteId) => {
@@ -283,6 +283,17 @@ export function buildRecognitionTrend(
       totalNoteCount: targetIds.length,
     };
   });
+
+  return grouping === "day" ? groupRecognitionTrendByDay(sessionTrend) : sessionTrend;
+}
+
+export function groupRecognitionTrendByDay(sessionTrend: RecognitionTrendPoint[]): RecognitionTrendPoint[] {
+  const latestByDate = new Map<string, RecognitionTrendPoint>();
+  for (const point of sessionTrend) {
+    const date = localDateKey(point.boundaryAt);
+    latestByDate.set(date, { ...point, key: date });
+  }
+  return [...latestByDate.values()];
 }
 
 export function buildNoteStats(

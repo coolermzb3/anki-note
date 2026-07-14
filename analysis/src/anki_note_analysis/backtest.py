@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
 import math
+import os
 from collections.abc import Iterable
-from dataclasses import asdict
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict, dataclass
+from hashlib import sha256
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -33,6 +38,39 @@ POLICY_NAMES = (
     "tier_p50_631_bootstrap",
     "tier_p50_532_bootstrap",
 )
+
+CACHE_FORMAT_VERSION = 1
+AUTO_JOB_LIMIT = 8
+
+
+@dataclass(frozen=True)
+class ReplayState:
+    state_date: str
+    performance: pd.DataFrame
+    p50_scores: pd.Series
+    p90_scores: pd.Series
+    p50_tiers: pd.Series
+    p90_tiers: pd.Series
+    initial_unseen_counts: pd.Series
+
+
+@dataclass(frozen=True)
+class ReplayJob:
+    state: ReplayState
+    policy: str
+    draw_count: int
+    repetitions: int
+    seed: int
+
+
+@dataclass(frozen=True)
+class ReplayResult:
+    state_date: str
+    policy: str
+    draw_count: int
+    repetitions: int
+    run_counts: np.ndarray
+    run_gaps: np.ndarray
 
 
 def _draw_index(rng: np.random.Generator, probabilities: np.ndarray) -> int:
@@ -77,6 +115,7 @@ def simulate_queue(
     parameters: CurrentWeightParameters = DEFAULT_CURRENT_WEIGHT_PARAMETERS,
     maintenance_gap: int | None = None,
     initial_unseen_counts: pd.Series | None = None,
+    precomputed_tier_codes: np.ndarray | None = None,
 ) -> tuple[pd.Series, pd.Series]:
     if policy not in POLICY_NAMES:
         raise ValueError(f"Unknown policy: {policy}")
@@ -101,22 +140,33 @@ def simulate_queue(
     tier_codes = None
     tier_shares = None
     if policy.startswith("tier_"):
-        metric = p50_scores if "p50" in policy else p90_scores
-        labels = tier_labels(metric).loc[note_ids]
-        tier_codes = labels.map({"weak": 0, "middle": 1, "strong": 2}).to_numpy(dtype=int)
+        if precomputed_tier_codes is None:
+            metric = p50_scores if "p50" in policy else p90_scores
+            labels = tier_labels(metric).loc[note_ids]
+            tier_codes = labels.map({"weak": 0, "middle": 1, "strong": 2}).to_numpy(dtype=int)
+        else:
+            tier_codes = np.asarray(precomputed_tier_codes, dtype=int)
+            if len(tier_codes) != note_count:
+                raise ValueError("precomputed_tier_codes must match the note count")
         tier_shares = np.array((0.6, 0.3, 0.1) if "631" in policy else (0.5, 0.3, 0.2))
     balanced_cold_start = policy.endswith("_bootstrap") and exposures.max() < 5
+    all_indexes = np.arange(note_count)
+    effective_maintenance_gap = ADAPTIVE_V2_SPEC["maintenanceGap"] if policy == "adaptive_v2" else maintenance_gap
 
     for position in range(draw_count):
-        weights = (
-            1
-            + np.maximum(0, parameters.new_card_reward - exposures * parameters.new_card_decay)
-            + np.nan_to_num(
-                np.clip((recent_p50 - parameters.slow_threshold_ms) / parameters.slow_scale_ms, 0, parameters.slow_cap)
+        weights = None
+        if policy in ("adaptive_current", "focused_current"):
+            weights = (
+                1
+                + np.maximum(0, parameters.new_card_reward - exposures * parameters.new_card_decay)
+                + np.nan_to_num(
+                    np.clip(
+                        (recent_p50 - parameters.slow_threshold_ms) / parameters.slow_scale_ms, 0, parameters.slow_cap
+                    )
+                )
+                + error_rates * parameters.error_weight
             )
-            + error_rates * parameters.error_weight
-        )
-        source = np.arange(note_count)
+        source = all_indexes
         guard_eligible = source if last_index is None or note_count <= 1 else source[source != last_index]
         maintenance_eligible = (
             guard_eligible[exposures[guard_eligible] >= ADAPTIVE_V2_SPEC["coldStartReviewCount"]]
@@ -124,7 +174,6 @@ def simulate_queue(
             else guard_eligible
         )
         unseen_counts = position - last_seen[maintenance_eligible] - 1
-        effective_maintenance_gap = ADAPTIVE_V2_SPEC["maintenanceGap"] if policy == "adaptive_v2" else maintenance_gap
         overdue = (
             maintenance_eligible[unseen_counts >= effective_maintenance_gap]
             if effective_maintenance_gap is not None
@@ -153,6 +202,7 @@ def simulate_queue(
                 weights_v2 = _adaptive_v2_mature_weights(exposures, adaptive_v2_recent_p50)
                 selected = int(mature_eligible[_draw_index(rng, weights_v2[mature_eligible])])
         elif policy in ("adaptive_current", "focused_current"):
+            assert weights is not None
             if policy == "focused_current" and rng.random() < 0.8 and note_count > 3 and weights.max() != weights.min():
                 target_count = max(3, math.ceil(note_count / 2))
                 ordered = sorted(range(note_count), key=lambda index: (-weights[index], note_ids[index]))
@@ -217,77 +267,217 @@ def queue_replay_at_state(
     seed: int = 20260713,
     policies: Iterable[str] = POLICY_NAMES,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    note_ids = list(note_ids)
+    policy_names = tuple(policies)
+    state = _prepare_replay_state(history, recent_window, list(note_ids), state_date)
+    results = [
+        _run_replay_job(
+            ReplayJob(
+                state=state,
+                policy=policy,
+                draw_count=draw_count,
+                repetitions=repetitions,
+                seed=seed + policy_index * repetitions,
+            )
+        )
+        for policy_index, policy in enumerate(policy_names)
+    ]
+    return _replay_frames({state_date: state}, results)
+
+
+def _prepare_replay_state(
+    history: pd.DataFrame,
+    recent_window: pd.DataFrame,
+    note_ids: list[str],
+    state_date: str,
+) -> ReplayState:
     performance = note_performance(history, note_ids)
     recent = note_metrics(recent_window, note_ids)
     p50_scores = recent["p50_ms"].fillna(float("inf"))
     p90_scores = recent["p90_ms"].fillna(float("inf"))
-    p50_tiers = tier_labels(p50_scores)
-    p90_tiers = tier_labels(p90_scores)
     initial_unseen_counts = observed_unseen_gaps(history, note_ids).set_index("target_note_id")["current_unseen_gap"]
+    return ReplayState(
+        state_date=state_date,
+        performance=performance,
+        p50_scores=p50_scores,
+        p90_scores=p90_scores,
+        p50_tiers=tier_labels(p50_scores),
+        p90_tiers=tier_labels(p90_scores),
+        initial_unseen_counts=initial_unseen_counts,
+    )
+
+
+def _run_replay_job(job: ReplayJob) -> ReplayResult:
+    note_ids = job.state.performance.index.tolist()
+    run_counts = np.zeros((job.repetitions, len(note_ids)), dtype=int)
+    run_gaps = np.zeros((job.repetitions, len(note_ids)), dtype=int)
+    tier_codes = None
+    if job.policy.startswith("tier_"):
+        tiers = job.state.p50_tiers if "p50" in job.policy else job.state.p90_tiers
+        tier_codes = tiers.loc[note_ids].map({"weak": 0, "middle": 1, "strong": 2}).to_numpy(dtype=int)
+
+    for repetition in range(job.repetitions):
+        counts, gaps = simulate_queue(
+            job.state.performance,
+            job.policy,
+            p50_scores=job.state.p50_scores,
+            p90_scores=job.state.p90_scores,
+            draw_count=job.draw_count,
+            seed=job.seed + repetition,
+            initial_unseen_counts=job.state.initial_unseen_counts if job.policy == "adaptive_v2" else None,
+            precomputed_tier_codes=tier_codes,
+        )
+        run_counts[repetition] = counts.loc[note_ids].to_numpy()
+        run_gaps[repetition] = gaps.loc[note_ids].to_numpy()
+    return ReplayResult(
+        state_date=job.state.state_date,
+        policy=job.policy,
+        draw_count=job.draw_count,
+        repetitions=job.repetitions,
+        run_counts=run_counts,
+        run_gaps=run_gaps,
+    )
+
+
+def _replay_frames(
+    states: dict[str, ReplayState],
+    results: Iterable[ReplayResult],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     note_rows: list[dict[str, float | int | str]] = []
     summary_rows: list[dict[str, float | int | str]] = []
-
-    for policy_index, policy in enumerate(policies):
-        run_counts = np.zeros((repetitions, len(note_ids)), dtype=int)
-        run_gaps = np.zeros((repetitions, len(note_ids)), dtype=int)
-        run_effective_counts = np.zeros(repetitions)
-        run_cvs = np.zeros(repetitions)
-        for repetition in range(repetitions):
-            counts, gaps = simulate_queue(
-                performance,
-                policy,
-                p50_scores=p50_scores,
-                p90_scores=p90_scores,
-                draw_count=draw_count,
-                seed=seed + policy_index * repetitions + repetition,
-                initial_unseen_counts=initial_unseen_counts if policy == "adaptive_v2" else None,
-            )
-            run_counts[repetition] = counts.loc[note_ids].to_numpy()
-            run_gaps[repetition] = gaps.loc[note_ids].to_numpy()
-            shares = counts / draw_count
+    for result in results:
+        state = states[result.state_date]
+        note_ids = state.performance.index.tolist()
+        run_effective_counts = np.zeros(result.repetitions)
+        run_cvs = np.zeros(result.repetitions)
+        for repetition in range(result.repetitions):
+            shares = pd.Series(result.run_counts[repetition], index=note_ids) / result.draw_count
             summary = distribution_summary(shares)
             run_effective_counts[repetition] = summary["effective_note_count"]
             run_cvs[repetition] = summary["coefficient_of_variation"]
 
         for note_index, note_id in enumerate(note_ids):
-            draws = run_counts[:, note_index]
-            gaps = run_gaps[:, note_index]
+            draws = result.run_counts[:, note_index]
+            gaps = result.run_gaps[:, note_index]
             note_rows.append(
                 {
-                    "state_date": state_date,
-                    "policy": policy,
+                    "state_date": result.state_date,
+                    "policy": result.policy,
                     "target_note_id": note_id,
-                    "p50_tier": p50_tiers.loc[note_id],
-                    "p90_tier": p90_tiers.loc[note_id],
+                    "p50_tier": state.p50_tiers.loc[note_id],
+                    "p90_tier": state.p90_tiers.loc[note_id],
                     "mean_draw_count": float(draws.mean()),
                     "draw_count_ci_low": float(np.quantile(draws, 0.025)),
                     "draw_count_ci_high": float(np.quantile(draws, 0.975)),
-                    "mean_draw_share": float(draws.mean() / draw_count),
+                    "mean_draw_share": float(draws.mean() / result.draw_count),
                     "mean_max_unseen_gap": float(gaps.mean()),
                     "max_unseen_gap_p95": float(np.quantile(gaps, 0.95)),
                 }
             )
 
-        weak_p50 = p50_tiers.eq("weak").to_numpy()
-        weak_p90 = p90_tiers.eq("weak").to_numpy()
+        weak_p50 = state.p50_tiers.eq("weak").to_numpy()
+        weak_p90 = state.p90_tiers.eq("weak").to_numpy()
         summary_rows.append(
             {
-                "state_date": state_date,
-                "policy": policy,
-                "draw_count": draw_count,
-                "repetitions": repetitions,
+                "state_date": result.state_date,
+                "policy": result.policy,
+                "draw_count": result.draw_count,
+                "repetitions": result.repetitions,
                 "mean_effective_note_count": float(run_effective_counts.mean()),
                 "mean_coefficient_of_variation": float(run_cvs.mean()),
-                "mean_min_note_draw_count": float(run_counts.min(axis=1).mean()),
-                "min_note_draw_count_p05": float(np.quantile(run_counts.min(axis=1), 0.05)),
-                "mean_worst_unseen_gap": float(run_gaps.max(axis=1).mean()),
-                "worst_unseen_gap_p95": float(np.quantile(run_gaps.max(axis=1), 0.95)),
-                "mean_p50_weak_allocation": float(run_counts[:, weak_p50].sum(axis=1).mean() / draw_count),
-                "mean_p90_weak_allocation": float(run_counts[:, weak_p90].sum(axis=1).mean() / draw_count),
+                "mean_min_note_draw_count": float(result.run_counts.min(axis=1).mean()),
+                "min_note_draw_count_p05": float(np.quantile(result.run_counts.min(axis=1), 0.05)),
+                "mean_worst_unseen_gap": float(result.run_gaps.max(axis=1).mean()),
+                "worst_unseen_gap_p95": float(np.quantile(result.run_gaps.max(axis=1), 0.95)),
+                "mean_p50_weak_allocation": float(
+                    result.run_counts[:, weak_p50].sum(axis=1).mean() / result.draw_count
+                ),
+                "mean_p90_weak_allocation": float(
+                    result.run_counts[:, weak_p90].sum(axis=1).mean() / result.draw_count
+                ),
             }
         )
     return pd.DataFrame(note_rows), pd.DataFrame(summary_rows)
+
+
+def _replay_algorithm_fingerprint() -> str:
+    source_dir = Path(__file__).resolve().parent
+    paths = [
+        source_dir / "backtest.py",
+        source_dir / "backup.py",
+        source_dir / "metrics.py",
+        source_dir / "policies.py",
+        Path(__file__).resolve().parents[3] / "src" / "domain" / "adaptiveV2Spec.json",
+    ]
+    digest = sha256()
+    for path in paths:
+        digest.update(path.name.encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _replay_cache_path(
+    cache_dir: Path,
+    job: ReplayJob,
+    *,
+    input_fingerprint: str,
+    algorithm_fingerprint: str,
+    review_window: int,
+) -> Path:
+    payload = {
+        "format": CACHE_FORMAT_VERSION,
+        "input": input_fingerprint,
+        "algorithm": algorithm_fingerprint,
+        "target_note_ids": job.state.performance.index.tolist(),
+        "state_date": job.state.state_date,
+        "policy": job.policy,
+        "draw_count": job.draw_count,
+        "repetitions": job.repetitions,
+        "review_window": review_window,
+        "seed": job.seed,
+        "numpy_version": np.__version__,
+        "pandas_version": pd.__version__,
+    }
+    cache_key = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return cache_dir / f"{cache_key}.npz"
+
+
+def _load_cached_replay(path: Path, job: ReplayJob) -> ReplayResult | None:
+    if not path.is_file():
+        return None
+    expected_shape = (job.repetitions, len(job.state.performance))
+    try:
+        with np.load(path, allow_pickle=False) as cached:
+            run_counts = cached["run_counts"]
+            run_gaps = cached["run_gaps"]
+    except (OSError, ValueError, KeyError):
+        return None
+    if run_counts.shape != expected_shape or run_gaps.shape != expected_shape:
+        return None
+    return ReplayResult(
+        state_date=job.state.state_date,
+        policy=job.policy,
+        draw_count=job.draw_count,
+        repetitions=job.repetitions,
+        run_counts=run_counts,
+        run_gaps=run_gaps,
+    )
+
+
+def _write_cached_replay(path: Path, result: ReplayResult) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with temporary.open("wb") as handle:
+        np.savez_compressed(handle, run_counts=result.run_counts, run_gaps=result.run_gaps)
+    os.replace(temporary, path)
+
+
+def _worker_count(jobs: int, task_count: int) -> int:
+    if jobs < 0:
+        raise ValueError("jobs cannot be negative")
+    requested = min(os.cpu_count() or 1, AUTO_JOB_LIMIT) if jobs == 0 else jobs
+    return max(1, min(requested, task_count))
 
 
 def historical_queue_replay(
@@ -298,14 +488,26 @@ def historical_queue_replay(
     draw_count: int = 300,
     repetitions: int = 50,
     review_window: int = 100,
+    jobs: int = 0,
+    cache_dir: Path | None = None,
+    cache_input_fingerprint: str | None = None,
+    policies: Iterable[str] = POLICY_NAMES,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if jobs < 0:
+        raise ValueError("jobs cannot be negative")
     note_ids = list(note_ids)
-    states: list[tuple[str, pd.DataFrame, pd.DataFrame]] = []
+    policy_names = POLICY_NAMES if policies is None else tuple(policies)
+    unknown_policies = set(policy_names) - set(POLICY_NAMES)
+    if unknown_policies:
+        raise ValueError(f"unknown policies: {sorted(unknown_policies)}")
+    if not policy_names:
+        raise ValueError("policies cannot be empty")
+    raw_states: list[tuple[str, pd.DataFrame, pd.DataFrame]] = []
     for state_date in state_days[2:]:
         prior = history.loc[history["local_date"].lt(state_date)]
-        states.append((state_date, prior, recent_per_note_window(prior, note_ids, review_window)))
+        raw_states.append((state_date, prior, recent_per_note_window(prior, note_ids, review_window)))
     latest_date = str(history["local_date"].max())
-    states.append(
+    raw_states.append(
         (
             f"after_{latest_date}",
             history,
@@ -313,27 +515,65 @@ def historical_queue_replay(
         )
     )
 
-    note_results: list[pd.DataFrame] = []
-    summaries: list[pd.DataFrame] = []
-    for state_index, (state_date, prior, recent) in enumerate(states):
-        notes, summary = queue_replay_at_state(
-            prior,
-            recent,
-            note_ids,
-            state_date=state_date,
+    states = {
+        state_date: _prepare_replay_state(prior, recent, note_ids, state_date)
+        for state_date, prior, recent in raw_states
+    }
+    replay_jobs = [
+        ReplayJob(
+            state=states[state_date],
+            policy=policy,
             draw_count=draw_count,
             repetitions=repetitions,
-            seed=20260713 + state_index * len(POLICY_NAMES) * repetitions,
+            seed=20260713
+            + state_index * len(POLICY_NAMES) * repetitions
+            + POLICY_NAMES.index(policy) * repetitions,
         )
-        note_results.append(notes)
-        summaries.append(summary)
-    return pd.concat(note_results, ignore_index=True), pd.concat(summaries, ignore_index=True)
+        for state_index, (state_date, _, _) in enumerate(raw_states)
+        for policy in policy_names
+    ]
+
+    cache_paths: dict[int, Path] = {}
+    results: dict[int, ReplayResult] = {}
+    algorithm_fingerprint = _replay_algorithm_fingerprint()
+    if cache_dir is not None and cache_input_fingerprint is not None:
+        cache_dir = Path(cache_dir)
+        for index, replay_job in enumerate(replay_jobs):
+            cache_path = _replay_cache_path(
+                cache_dir,
+                replay_job,
+                input_fingerprint=cache_input_fingerprint,
+                algorithm_fingerprint=algorithm_fingerprint,
+                review_window=review_window,
+            )
+            cache_paths[index] = cache_path
+            cached = _load_cached_replay(cache_path, replay_job)
+            if cached is not None:
+                results[index] = cached
+
+    missing_indexes = [index for index in range(len(replay_jobs)) if index not in results]
+    missing_jobs = [replay_jobs[index] for index in missing_indexes]
+    if missing_jobs:
+        worker_count = _worker_count(jobs, len(missing_jobs))
+        if worker_count == 1:
+            computed = map(_run_replay_job, missing_jobs)
+        else:
+            with ProcessPoolExecutor(max_workers=worker_count) as executor:
+                computed = list(executor.map(_run_replay_job, missing_jobs, chunksize=1))
+        for index, result in zip(missing_indexes, computed, strict=True):
+            results[index] = result
+            if index in cache_paths:
+                _write_cached_replay(cache_paths[index], result)
+
+    ordered_results = [results[index] for index in range(len(replay_jobs))]
+    return _replay_frames(states, ordered_results)
 
 
 def candidate_policy_distributions(
     history: pd.DataFrame,
     recent_window: pd.DataFrame,
     note_ids: Iterable[str],
+    policies: Iterable[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     note_ids = list(note_ids)
     performance = note_performance(history, note_ids)
@@ -342,15 +582,22 @@ def candidate_policy_distributions(
     p90_scores = recent["p90_ms"].fillna(recent["p90_ms"].max())
     adaptive_v2_performance = performance.copy()
     adaptive_v2_performance["recent_p50_ms"] = p50_scores
-    distributions = {
-        "adaptive_v2": adaptive_v2_distribution(adaptive_v2_performance),
-        "adaptive_current": adaptive_distribution(performance),
-        "focused_current": focused_distribution(performance),
-        "tier_p50_631": tier_distribution(performance, p50_scores, (0.6, 0.3, 0.1)),
-        "tier_p90_631": tier_distribution(performance, p90_scores, (0.6, 0.3, 0.1)),
-        "tier_p50_532": tier_distribution(performance, p50_scores, (0.5, 0.3, 0.2)),
-        "tier_p90_532": tier_distribution(performance, p90_scores, (0.5, 0.3, 0.2)),
+    distribution_builders = {
+        "adaptive_v2": lambda: adaptive_v2_distribution(adaptive_v2_performance),
+        "adaptive_current": lambda: adaptive_distribution(performance),
+        "focused_current": lambda: focused_distribution(performance),
+        "tier_p50_631": lambda: tier_distribution(performance, p50_scores, (0.6, 0.3, 0.1)),
+        "tier_p90_631": lambda: tier_distribution(performance, p90_scores, (0.6, 0.3, 0.1)),
+        "tier_p50_532": lambda: tier_distribution(performance, p50_scores, (0.5, 0.3, 0.2)),
+        "tier_p90_532": lambda: tier_distribution(performance, p90_scores, (0.5, 0.3, 0.2)),
     }
+    policy_names = tuple(distribution_builders) if policies is None else tuple(policies)
+    unknown_policies = set(policy_names) - set(distribution_builders)
+    if unknown_policies:
+        raise ValueError(f"unknown policies: {sorted(unknown_policies)}")
+    if not policy_names:
+        raise ValueError("policies cannot be empty")
+    distributions = {policy: distribution_builders[policy]() for policy in policy_names}
     allocation = performance.copy()
     allocation["window_p50_ms"] = recent["p50_ms"]
     allocation["window_p90_ms"] = recent["p90_ms"]

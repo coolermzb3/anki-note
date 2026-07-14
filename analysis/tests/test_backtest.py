@@ -1,7 +1,14 @@
 import pandas as pd
 import pytest
+from pandas.testing import assert_frame_equal
 
-from anki_note_analysis.backtest import observed_unseen_gaps, queue_replay_at_state, simulate_queue
+import anki_note_analysis.backtest as backtest
+from anki_note_analysis.backtest import (
+    historical_queue_replay,
+    observed_unseen_gaps,
+    queue_replay_at_state,
+    simulate_queue,
+)
 from anki_note_analysis.policies import CurrentWeightParameters
 
 
@@ -15,6 +22,26 @@ def _performance() -> pd.DataFrame:
             "error_rate": [0.0, 0.0, 0.0, 0.1, 0.1, 0.2],
         }
     ).set_index("target_note_id")
+
+
+def _historical_reviews() -> tuple[pd.DataFrame, list[str], list[str]]:
+    note_ids = _performance().index.tolist()
+    days = [f"2026-07-{day:02d}" for day in range(1, 5)]
+    rows = [
+        {
+            "id": f"{day}-{note_id}-{index}",
+            "targetNoteId": note_id,
+            "started_at": pd.Timestamp(day, tz="UTC") + pd.Timedelta(minutes=index),
+            "local_date": day,
+            "activeMs": 700 + note_index * 100,
+            "wrong_count": int(note_index == 0 and index == 0),
+            "session_targetNoteSetKey": "|".join(note_ids),
+        }
+        for day in days
+        for note_index, note_id in enumerate(note_ids)
+        for index in range(3)
+    ]
+    return pd.DataFrame(rows), note_ids, days
 
 
 def test_simulation_updates_exposure_and_balances_coverage_draws() -> None:
@@ -63,6 +90,33 @@ def test_queue_replay_reports_one_row_per_policy_and_note() -> None:
     assert len(by_note) == 2 * len(performance)
     assert len(summary) == 2
     assert by_note.groupby("policy")["mean_draw_count"].sum().eq(30).all()
+
+
+def test_queue_replay_uses_all_policies_by_default() -> None:
+    performance = _performance()
+    reviews = pd.DataFrame(
+        [
+            {
+                "id": note_id,
+                "targetNoteId": note_id,
+                "started_at": "2026-07-01T00:00:00Z",
+                "activeMs": row["recent_p50_ms"],
+                "wrong_count": 0,
+            }
+            for note_id, row in performance.iterrows()
+        ]
+    )
+
+    _, summary = queue_replay_at_state(
+        reviews,
+        reviews,
+        performance.index,
+        state_date="test",
+        draw_count=2,
+        repetitions=1,
+    )
+
+    assert summary["policy"].tolist() == list(backtest.POLICY_NAMES)
 
 
 def test_bootstrap_channel_stops_after_each_note_has_five_exposures() -> None:
@@ -275,3 +329,98 @@ def test_adaptive_v2_uses_the_supplied_100_review_p50_window() -> None:
 
     assert counts.iloc[0] > counts.iloc[1]
     assert counts.iloc[0] > counts.iloc[2]
+
+
+def test_historical_replay_parallel_matches_serial() -> None:
+    history, note_ids, days = _historical_reviews()
+
+    serial = historical_queue_replay(history, note_ids, days, draw_count=20, repetitions=3, jobs=1)
+    parallel = historical_queue_replay(history, note_ids, days, draw_count=20, repetitions=3, jobs=2)
+
+    for serial_frame, parallel_frame in zip(serial, parallel, strict=True):
+        assert_frame_equal(serial_frame, parallel_frame)
+
+
+def test_historical_replay_can_limit_policies_without_changing_production_result() -> None:
+    history, note_ids, days = _historical_reviews()
+
+    full = historical_queue_replay(history, note_ids, days, draw_count=20, repetitions=3, jobs=1)
+    production = historical_queue_replay(
+        history,
+        note_ids,
+        days,
+        draw_count=20,
+        repetitions=3,
+        jobs=1,
+        policies=("adaptive_v2",),
+    )
+
+    for full_frame, production_frame in zip(full, production, strict=True):
+        expected = full_frame.loc[full_frame["policy"].eq("adaptive_v2")].reset_index(drop=True)
+        assert_frame_equal(expected, production_frame)
+
+
+def test_candidate_snapshot_only_computes_requested_policies(monkeypatch) -> None:
+    history, note_ids, _ = _historical_reviews()
+
+    def unexpected_candidate(*_args, **_kwargs):
+        raise AssertionError("unrequested candidate policy was computed")
+
+    monkeypatch.setattr(backtest, "adaptive_distribution", unexpected_candidate)
+    monkeypatch.setattr(backtest, "focused_distribution", unexpected_candidate)
+    monkeypatch.setattr(backtest, "tier_distribution", unexpected_candidate)
+
+    allocation, summary = backtest.candidate_policy_distributions(
+        history,
+        history,
+        note_ids,
+        policies=("adaptive_v2",),
+    )
+
+    assert "adaptive_v2" in allocation
+    assert summary["policy"].tolist() == ["adaptive_v2"]
+
+
+def test_historical_replay_cache_hits_and_invalidates(tmp_path, monkeypatch) -> None:
+    history, note_ids, days = _historical_reviews()
+    cache_dir = tmp_path / "output" / "cache"
+    arguments = {
+        "draw_count": 20,
+        "repetitions": 2,
+        "jobs": 1,
+        "cache_dir": cache_dir,
+        "cache_input_fingerprint": "backup-a",
+    }
+    first = historical_queue_replay(history, note_ids, days, **arguments)
+    cache_files = sorted(cache_dir.glob("*.npz"))
+    assert len(cache_files) == 3 * len(backtest.POLICY_NAMES)
+
+    original = backtest._run_replay_job
+    calls = []
+
+    def tracking_run(job):
+        calls.append(job)
+        return original(job)
+
+    monkeypatch.setattr(backtest, "_run_replay_job", tracking_run)
+    cached = historical_queue_replay(history, note_ids, days, **arguments)
+    assert not calls
+    for first_frame, cached_frame in zip(first, cached, strict=True):
+        assert_frame_equal(first_frame, cached_frame)
+
+    historical_queue_replay(history, note_ids, days, **{**arguments, "cache_input_fingerprint": "backup-b"})
+    assert calls
+    calls.clear()
+
+    monkeypatch.setattr(backtest, "_replay_algorithm_fingerprint", lambda: "changed-algorithm")
+    historical_queue_replay(history, note_ids, days, **arguments)
+    assert calls
+    calls.clear()
+
+    historical_queue_replay(history, note_ids, days, **{**arguments, "draw_count": 21})
+    assert calls
+    calls.clear()
+
+    monkeypatch.setattr(backtest.pd, "__version__", "changed-pandas")
+    historical_queue_replay(history, note_ids, days, **arguments)
+    assert calls

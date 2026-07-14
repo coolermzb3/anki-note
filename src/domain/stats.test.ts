@@ -5,6 +5,7 @@ import {
   buildPracticeSessionStats,
   buildRecognitionTrend,
   filterLongTermReviews,
+  groupRecognitionTrendByDay,
   hasEnoughStatReviews,
   isLongTermStatsEligible,
   percentile,
@@ -222,11 +223,12 @@ describe("stats", () => {
     ];
 
     const bySession = buildRecognitionTrend(reviews, sessions, ["C4", "D4"], "practice-session");
-    const byDay = buildRecognitionTrend(reviews, sessions, ["C4", "D4"], "day");
+    const byDay = groupRecognitionTrendByDay(bySession);
 
     expect(bySession.map((point) => point.cohortKey)).toEqual(["C4", "C4|D4"]);
     expect(byDay).toHaveLength(1);
     expect(byDay[0].cohortKey).toBe("C4|D4");
+    expect(buildRecognitionTrend(reviews, sessions, ["C4", "D4"], "day")).toEqual(byDay);
   });
 
   it("limits each recognition metric to that note's latest 100 reviews", () => {

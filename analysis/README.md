@@ -8,6 +8,7 @@ From the repository root:
 ```powershell
 uv sync --project analysis
 uv run --project analysis anki-note-analysis
+uv run --project analysis anki-note-analysis --full
 uv run --project analysis pytest
 ```
 
@@ -16,6 +17,18 @@ Optional paths can be supplied explicitly:
 ```powershell
 uv run --project analysis anki-note-analysis --backup-dir backup --output-dir analysis/output
 ```
+
+The default command is the routine audit: it replays the production `adaptive_v2` policy and reports the observed queue
+distribution. Pass `--full` to additionally run all candidate-policy comparisons, bootstrap window analysis, cross-day
+diagnostics, and hyperparameter, maintenance-gap, and cold-start sensitivity experiments.
+
+Historical queue replay uses up to eight worker processes by default, while full-mode sensitivity experiments use up to
+three. Use `--jobs 1` for a serial run, or pass another positive worker count when resource usage needs to be limited.
+Deterministic replay arrays are cached under
+`output/cache/historical_queue_replay/`; the cache is invalidated when backup content, the target-note set, replay
+parameters, NumPy or pandas version, queue-analysis source, or
+[`../src/domain/adaptiveV2Spec.json`](../src/domain/adaptiveV2Spec.json) changes. Removing `output/` is always safe because
+it contains generated analysis artifacts only.
 
 The analysis selects the latest session's effective target-note set and uses each note's latest 100 qualified scheduler
 reviews for queue metrics. This keeps the evidence count equal across notes without allowing low-volume calendar days to

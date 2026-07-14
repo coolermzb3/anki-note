@@ -133,6 +133,39 @@ describe("adaptive-v2 scheduler", () => {
     expect([...counts.values()]).toEqual([5, 5, 5]);
   });
 
+  it("reuses prepared history without changing a page's draw sequence", () => {
+    const notes = getNotesForGroups(["G4-F5"], false).slice(0, 4);
+    const reviews = [
+      ...reviewsFor(notes[0], 100, 3000),
+      ...reviewsFor(notes[1], 100, 2000),
+      ...reviewsFor(notes[2], 100, 1000),
+    ];
+    const seededRng = (): (() => number) => {
+      let state = 42;
+      return () => {
+        state = (state * 1664525 + 1013904223) >>> 0;
+        return state / 2 ** 32;
+      };
+    };
+    const page = selectNotePage({ notes, reviews, count: 24, rng: seededRng() });
+    const repeated: TargetNote[] = [];
+    let lastTargetNoteId: TargetNoteId | undefined;
+    const rng = seededRng();
+    while (repeated.length < page.length) {
+      const note = selectNextNote({
+        lastTargetNoteId,
+        notes,
+        plannedTargetNoteIds: repeated.map((selected) => selected.id),
+        reviews,
+        rng,
+      });
+      repeated.push(note);
+      lastTargetNoteId = note.id;
+    }
+
+    expect(page.map((note) => note.id)).toEqual(repeated.map((note) => note.id));
+  });
+
   it("uses the newcomer channel only for targets below five reviews", () => {
     const notes = getNotesForGroups(["G4-F5"], false).slice(0, 3);
     const reviews = [

@@ -16,6 +16,7 @@ import {
   buildNoteStats,
   buildRecognitionTrend,
   filterLongTermReviews,
+  groupRecognitionTrendByDay,
   positiveTertileThresholds,
 } from "../domain/stats";
 import type {
@@ -651,14 +652,20 @@ export function StatsView({
     return longTermReviews.filter((review) => activeTargetNoteIds.has(review.targetNoteId));
   }, [activeNotes, longTermReviews]);
   const filteredReviews = useMemo(() => filterByRange(groupScopedReviews, range), [groupScopedReviews, range]);
-  const recognitionTrend = useMemo(
+  const recognitionTrendBySession = useMemo(
     () => buildRecognitionTrend(
       longTermReviews,
       sessions,
       activeNotes.map((note) => note.id),
-      recognitionTimeGrouping,
+      "practice-session",
     ),
-    [activeNotes, longTermReviews, recognitionTimeGrouping, sessions],
+    [activeNotes, longTermReviews, sessions],
+  );
+  const recognitionTrend = useMemo(
+    () => recognitionTimeGrouping === "day"
+      ? groupRecognitionTrendByDay(recognitionTrendBySession)
+      : recognitionTrendBySession,
+    [recognitionTimeGrouping, recognitionTrendBySession],
   );
   const recognitionTimeStats = useMemo(() => {
     const visible = range === "all"

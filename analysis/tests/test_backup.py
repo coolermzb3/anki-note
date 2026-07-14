@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from anki_note_analysis.backup import load_backup, prepare_output_dir
+from anki_note_analysis.backup import backup_content_fingerprint, load_backup, prepare_output_dir
 
 
 def _write_minimal_backup(path: Path) -> None:
@@ -23,6 +23,10 @@ def test_load_backup_is_read_only(tmp_path: Path) -> None:
     snapshot = load_backup(backup)
 
     assert snapshot.reviews.empty
+    assert {path: path.read_bytes() for path in backup.rglob("*") if path.is_file()} == before
+
+    first_fingerprint = backup_content_fingerprint(snapshot)
+    assert first_fingerprint == backup_content_fingerprint(snapshot)
     assert {path: path.read_bytes() for path in backup.rglob("*") if path.is_file()} == before
 
 
