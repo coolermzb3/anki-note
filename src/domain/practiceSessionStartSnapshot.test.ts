@@ -13,6 +13,7 @@ describe("practice session start snapshot", () => {
       correctDelayMs: 650,
       inactivityThresholdSeconds: 45,
       pianoVolume: 0.6,
+      playAnswerNote: false,
       promptDisplayMode: "staff-page" as const,
       promptNoteDuration: "sixteenth" as const,
       queueStrategy: "melody" as const,
@@ -34,6 +35,7 @@ describe("practice session start snapshot", () => {
     });
     expect(built?.snapshot.presentationConfig).toEqual({
       autoPlayTarget: true,
+      playAnswerNote: false,
       promptDisplayMode: "staff-page",
       promptNoteDuration: "sixteenth",
       smoothStaffPageScroll: true,

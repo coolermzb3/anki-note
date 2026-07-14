@@ -96,6 +96,7 @@ export function buildPracticeSessionStartSnapshot({
       },
       presentationConfig: {
         autoPlayTarget,
+        playAnswerNote: settings.playAnswerNote,
         promptDisplayMode: settings.promptDisplayMode,
         promptNoteDuration: settings.promptNoteDuration,
         smoothStaffPageScroll,

@@ -74,6 +74,7 @@ export function makeDefaultSettings(): AppSettings {
     fixedCount: 20,
     fixedDurationSeconds: 60,
     autoPlayTarget: false,
+    playAnswerNote: true,
     includeInterStaffLedgerSpellings: false,
     answerKeyboardScale: DEFAULT_ANSWER_KEYBOARD_SCALE,
     pianoVolume: DEFAULT_PIANO_VOLUME,
@@ -115,6 +116,7 @@ export function normalizeAppSettings(existing: StoredAppSettings): AppSettings {
     fixedCount: existing.fixedCount ?? defaults.fixedCount,
     fixedDurationSeconds: existing.fixedDurationSeconds ?? defaults.fixedDurationSeconds,
     autoPlayTarget: existing.autoPlayTarget ?? defaults.autoPlayTarget,
+    playAnswerNote: existing.playAnswerNote ?? defaults.playAnswerNote,
     includeInterStaffLedgerSpellings:
       existing.schemaVersion === 2
         ? existing.includeInterStaffLedgerSpellings ?? defaults.includeInterStaffLedgerSpellings

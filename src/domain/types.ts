@@ -119,6 +119,7 @@ export interface PracticeSessionStartSnapshot {
   };
   presentationConfig: {
     autoPlayTarget: boolean;
+    playAnswerNote?: boolean;
     promptDisplayMode: PromptDisplayMode;
     promptNoteDuration: PromptNoteDuration;
     smoothStaffPageScroll: boolean;
@@ -179,6 +180,7 @@ interface AppSettingsBase {
   fixedCount: number;
   fixedDurationSeconds: number;
   autoPlayTarget: boolean;
+  playAnswerNote: boolean;
   includeInterStaffLedgerSpellings: boolean;
   answerKeyboardScale: number;
   pianoVolume: number;

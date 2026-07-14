@@ -136,6 +136,7 @@ interface CompleteSessionOptions {
 
 interface PracticeSetupUiPreferences {
   autoPlayTarget: boolean;
+  playAnswerNote: boolean;
   drillNoteNames: NoteName[];
   fixedCount: number;
   fixedDurationSeconds: number;
@@ -242,6 +243,7 @@ function normalizeDrillNoteNames(value: unknown, fallback: NoteName[]): NoteName
 function makeDefaultPracticeSetupUiPreferences(settings: AppSettings): PracticeSetupUiPreferences {
   return {
     autoPlayTarget: settings.autoPlayTarget,
+    playAnswerNote: settings.playAnswerNote,
     drillNoteNames: resolveDrillNoteNames(settings),
     fixedCount: settings.fixedCount,
     fixedDurationSeconds: settings.fixedDurationSeconds,
@@ -262,6 +264,7 @@ function parsePracticeSetupUiPreferences(
 
   return {
     autoPlayTarget: typeof value.autoPlayTarget === "boolean" ? value.autoPlayTarget : fallback.autoPlayTarget,
+    playAnswerNote: typeof value.playAnswerNote === "boolean" ? value.playAnswerNote : fallback.playAnswerNote,
     drillNoteNames: normalizeDrillNoteNames(value.drillNoteNames, fallback.drillNoteNames),
     fixedCount: normalizeFixedCount(value.fixedCount, fallback.fixedCount),
     fixedDurationSeconds: normalizeFixedDurationSeconds(value.fixedDurationSeconds, fallback.fixedDurationSeconds),
@@ -331,6 +334,7 @@ export function PracticeView({
   const fixedDurationSeconds =
     runningStartSnapshot?.practiceConfig.fixedDurationSeconds ?? practiceSetupPreferences.fixedDurationSeconds;
   const autoPlayTarget = runningStartSnapshot?.presentationConfig.autoPlayTarget ?? practiceSetupPreferences.autoPlayTarget;
+  const playAnswerNote = runningStartSnapshot?.presentationConfig.playAnswerNote ?? practiceSetupPreferences.playAnswerNote;
   const queueStrategy = runningStartSnapshot?.practiceConfig.queueStrategy ?? practiceSetupPreferences.queueStrategy;
   const drillNoteNames = runningStartSnapshot?.practiceConfig.drillNoteNames ?? practiceSetupPreferences.drillNoteNames;
   const pausedPlaybackBpm = staffPageUiPreferences.pausedPlaybackBpm;
@@ -364,6 +368,9 @@ export function PracticeView({
   };
   const setAutoPlayTarget = (nextAutoPlayTarget: boolean): void => {
     setPracticeSetupPreferences((current) => ({ ...current, autoPlayTarget: nextAutoPlayTarget }));
+  };
+  const setPlayAnswerNote = (nextPlayAnswerNote: boolean): void => {
+    setPracticeSetupPreferences((current) => ({ ...current, playAnswerNote: nextPlayAnswerNote }));
   };
   const setQueueStrategy = (nextQueueStrategy: PracticeQueueStrategy): void => {
     setPracticeSetupPreferences((current) => ({ ...current, queueStrategy: nextQueueStrategy }));
@@ -475,6 +482,7 @@ export function PracticeView({
     () => ({
       ...settings,
       autoPlayTarget,
+      playAnswerNote,
       defaultMode: mode,
       drillNoteNames,
       fixedCount,
@@ -486,6 +494,7 @@ export function PracticeView({
     }),
     [
       autoPlayTarget,
+      playAnswerNote,
       drillNoteNames,
       fixedCount,
       fixedDurationSeconds,
@@ -639,6 +648,7 @@ export function PracticeView({
       fixedCount,
       fixedDurationSeconds,
       autoPlayTarget,
+      playAnswerNote,
       queueStrategy,
       drillNoteNames,
       focusedTraining: false,
@@ -647,6 +657,7 @@ export function PracticeView({
     return nextSettings;
   }, [
     autoPlayTarget,
+    playAnswerNote,
     fixedCount,
     fixedDurationSeconds,
     drillNoteNames,
@@ -1171,7 +1182,9 @@ export function PracticeView({
         return;
       }
       prompt.lastInputAt = performance.now();
-      void playPianoNote(noteName, prompt.note.octave).catch(() => undefined);
+      if (playAnswerNote) {
+        void playPianoNote(noteName, prompt.note.octave).catch(() => undefined);
+      }
       if (noteName !== prompt.note.noteName) {
         prompt.wrongAnswers.push({ noteName, atActiveMs: getPromptActiveMs() });
         setWrongAnswerCount((count) => count + 1);
@@ -1244,6 +1257,7 @@ export function PracticeView({
       markCurrentStaffPageNoteComplete,
       maybeBackupDuringOpenEnded,
       mode,
+      playAnswerNote,
       promptDisplayMode,
       queueStrategy,
       resumeActiveTimers,
@@ -1499,7 +1513,7 @@ export function PracticeView({
             {promptDisplayMode === "staff-page" ? (
               <div className="control-block">
                 <span className="control-label">谱页选项</span>
-                <label className="practice-start-paused-option">
+                <label className="practice-checkbox-option">
                   <input
                     checked={startPausedReading}
                     type="checkbox"
@@ -1607,17 +1621,24 @@ export function PracticeView({
 
             <div className="control-block">
               <span className="control-label">声音</span>
-              <label className={autoPlayTarget ? "choice choice-active choice-detail" : "choice choice-detail"}>
-                <input
-                  checked={autoPlayTarget}
-                  type="checkbox"
-                  onChange={(event) => setAutoPlayTarget(event.target.checked)}
-                />
-                <div className="choice-body">
-                  <strong>自动播放目标音</strong>
-                  <span>卡片出现时播放一次</span>
-                </div>
-              </label>
+              <div className="practice-checkbox-options">
+                <label className="practice-checkbox-option">
+                  <input
+                    checked={autoPlayTarget}
+                    type="checkbox"
+                    onChange={(event) => setAutoPlayTarget(event.target.checked)}
+                  />
+                  <span>自动播放目标音</span>
+                </label>
+                <label className="practice-checkbox-option">
+                  <input
+                    checked={playAnswerNote}
+                    type="checkbox"
+                    onChange={(event) => setPlayAnswerNote(event.target.checked)}
+                  />
+                  <span>按键时播放声音</span>
+                </label>
+              </div>
             </div>
 
             <div className="action-row">

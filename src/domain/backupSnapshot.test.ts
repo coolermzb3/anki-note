@@ -17,6 +17,7 @@ const settings: AppSettings = {
   fixedCount: 20,
   fixedDurationSeconds: 180,
   autoPlayTarget: true,
+  playAnswerNote: true,
   includeInterStaffLedgerSpellings: true,
   answerKeyboardScale: 1,
   pianoVolume: 0.8,

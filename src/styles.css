@@ -873,6 +873,30 @@ main.has-backup-reminder .setup-grid::after {
   grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
 }
 
+.practice-checkbox-options {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.practice-checkbox-option {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  min-height: var(--control-height);
+  width: fit-content;
+}
+
+.practice-checkbox-option input {
+  accent-color: var(--accent);
+  height: 16px;
+  margin: 0;
+  min-height: 0;
+  width: 16px;
+}
+
 .strategy-options {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -977,23 +1001,6 @@ main.has-backup-reminder .setup-grid::after {
 .practice-start-action {
   display: inline-flex;
   position: relative;
-}
-
-.practice-start-paused-option {
-  align-items: center;
-  cursor: pointer;
-  display: inline-flex;
-  gap: 8px;
-  min-height: var(--control-height);
-  width: fit-content;
-}
-
-.practice-start-paused-option input {
-  accent-color: var(--accent);
-  height: 16px;
-  margin: 0;
-  min-height: 0;
-  width: 16px;
 }
 
 .practice-start-action:focus-visible {

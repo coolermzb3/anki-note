@@ -9,6 +9,7 @@ describe("makeDefaultSettings", () => {
       promptDisplayMode: "staff-page",
       promptNoteDuration: "quarter",
       autoPlayTarget: false,
+      playAnswerNote: true,
       enabledGroupIds: ["G3-F4"],
       includeInterStaffLedgerSpellings: false,
       correctDelayMs: 0,
@@ -57,6 +58,16 @@ describe("makeDefaultSettings", () => {
       ...current,
       answerKeyboardScale: undefined,
     } as unknown as Parameters<typeof normalizeAppSettings>[0]).answerKeyboardScale).toBe(1);
+  });
+
+  it("defaults answer-note playback on while preserving an explicit off setting", () => {
+    const current = makeDefaultSettings();
+
+    expect(normalizeAppSettings({
+      ...current,
+      playAnswerNote: undefined,
+    } as unknown as Parameters<typeof normalizeAppSettings>[0]).playAnswerNote).toBe(true);
+    expect(normalizeAppSettings({ ...current, playAnswerNote: false }).playAnswerNote).toBe(false);
   });
 
   it("migrates the retired focused preference to the adaptive queue", () => {
