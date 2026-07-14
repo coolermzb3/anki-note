@@ -188,9 +188,10 @@ describe("stats", () => {
     });
   });
 
-  it("assigns daily heat levels from positive daily-count tertiles", () => {
+  it("assigns daily heat levels from total active-time tertiles", () => {
     const reviews = [
       makeReview({
+        activeMs: 9000,
         id: "day-1-0",
         targetNoteId: "C4",
         answeredAt: "2026-07-01T12:00:00.000+08:00",
@@ -198,6 +199,7 @@ describe("stats", () => {
       }),
       ...Array.from({ length: 2 }, (_, index) =>
         makeReview({
+          activeMs: 1000,
           id: `day-2-${index}`,
           targetNoteId: "C4",
           answeredAt: "2026-07-02T12:00:00.000+08:00",
@@ -206,6 +208,7 @@ describe("stats", () => {
       ),
       ...Array.from({ length: 3 }, (_, index) =>
         makeReview({
+          activeMs: 2000,
           id: `day-3-${index}`,
           targetNoteId: "C4",
           answeredAt: "2026-07-03T12:00:00.000+08:00",
@@ -214,10 +217,12 @@ describe("stats", () => {
       ),
     ];
 
-    expect(buildDailyStats(reviews).map((stat) => [stat.date, stat.completedReviews, stat.heatLevel])).toEqual([
-      ["2026-07-01", 1, 1],
-      ["2026-07-02", 2, 2],
-      ["2026-07-03", 3, 3],
+    expect(
+      buildDailyStats(reviews).map((stat) => [stat.date, stat.completedReviews, stat.totalActiveMs, stat.heatLevel]),
+    ).toEqual([
+      ["2026-07-01", 1, 9000, 3],
+      ["2026-07-02", 2, 2000, 1],
+      ["2026-07-03", 3, 6000, 2],
     ]);
   });
 

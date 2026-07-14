@@ -1993,6 +1993,25 @@ main.has-backup-reminder .setup-grid::after {
   margin-bottom: 18px;
 }
 
+.panel-heading .heatmap-daily-average {
+  align-items: center;
+
+  background: var(--accent-soft);
+  border: 1px solid rgba(37, 111, 103, 0.2);
+  color: var(--accent-strong);
+
+  border-radius: 999px;
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 7px 12px;
+}
+
+.heatmap-daily-average strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
 .chart-box {
   max-width: 100%;
   min-width: 0;
@@ -2652,6 +2671,11 @@ main.has-backup-reminder .setup-grid::after {
   }
 
   .stats-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .stats-heatmap-panel .panel-heading {
     align-items: flex-start;
     flex-direction: column;
   }

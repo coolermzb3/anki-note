@@ -6,6 +6,7 @@ import type { NoteName, PracticeGroupId, PracticeSessionRecord, ReviewRecord, Ta
 export interface DailyStat {
   date: string;
   completedReviews: number;
+  totalActiveMs: number;
   p10Ms?: number;
   medianMs?: number;
   p90Ms?: number;
@@ -199,20 +200,28 @@ export function buildDailyStats(reviews: ReviewRecord[]): DailyStat[] {
     byDate.set(date, [...(byDate.get(date) ?? []), review]);
   }
 
-  const nonZeroCounts = [...byDate.values()].map((dayReviews) => dayReviews.length);
+  const totalActiveMsByDate = new Map(
+    [...byDate.entries()].map(([date, dayReviews]) => [
+      date,
+      dayReviews.reduce((total, review) => total + review.activeMs, 0),
+    ]),
+  );
+  const positiveActiveMsTotals = [...totalActiveMsByDate.values()].filter((totalActiveMs) => totalActiveMs > 0);
 
   return [...byDate.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, dayReviews]) => {
       const times = dayReviews.map((review) => review.activeMs);
       const completedReviews = dayReviews.length;
+      const totalActiveMs = totalActiveMsByDate.get(date) ?? 0;
       return {
         date,
         completedReviews,
+        totalActiveMs,
         p10Ms: percentile(times, 0.1),
         medianMs: percentile(times, 0.5),
         p90Ms: percentile(times, 0.9),
-        heatLevel: completedReviews === 0 ? 0 : positiveTertileLevel(completedReviews, nonZeroCounts),
+        heatLevel: totalActiveMs === 0 ? 0 : positiveTertileLevel(totalActiveMs, positiveActiveMsTotals),
       };
     });
 }

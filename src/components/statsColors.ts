@@ -41,7 +41,7 @@ export const STATS_COLORS = {
     errorRate: "#6f5bb5",
     grid: "#e5dccf",
     muted: "#7a6f61",
-    panel: "#fffaf2",
+    panel: "#ffffff",
     rangeFill: "rgba(47, 125, 116, 0.14)",
     rangeMoveHandle: "rgba(47, 125, 116, 0.45)",
     rangePreview: "#efe7dc",

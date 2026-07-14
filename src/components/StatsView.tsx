@@ -18,6 +18,7 @@ import {
   filterLongTermReviews,
   groupRecognitionTrendByDay,
   positiveTertileThresholds,
+  type DailyStat,
 } from "../domain/stats";
 import type {
   AppSettings,
@@ -164,24 +165,55 @@ function monthLabelForWeek(weekStart: Date, index: number): string {
   return index === 0 ? formatMonthLabel(weekStart) : "";
 }
 
-function filterByRange(reviews: ReviewRecord[], range: RangeKey): ReviewRecord[] {
+function rangeCutoff(range: RangeKey, today = new Date()): Date | undefined {
   if (range === "all") {
-    return reviews;
+    return undefined;
   }
-  const days = Number(range);
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days + 1);
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - Number(range) + 1);
   cutoff.setHours(0, 0, 0, 0);
-  return reviews.filter((review) => new Date(review.endedAt) >= cutoff);
+  return cutoff;
 }
 
-function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
+function filterByRange(reviews: ReviewRecord[], range: RangeKey): ReviewRecord[] {
+  const cutoff = rangeCutoff(range);
+  return cutoff ? reviews.filter((review) => new Date(review.endedAt) >= cutoff) : reviews;
+}
+
+function formatPracticeDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [
+    hours > 0 ? `${hours} 小时` : "",
+    minutes > 0 ? `${minutes} 分钟` : "",
+    seconds > 0 || totalSeconds === 0 ? `${seconds} 秒` : "",
+  ].filter(Boolean).join(" ");
+}
+
+export function averageDailyPracticeMs(
+  dailyStats: readonly DailyStat[],
+  range: RangeKey,
+  today = new Date(),
+): number {
+  const cutoff = rangeCutoff(range, today);
+  const cutoffKey = cutoff ? formatDateKey(cutoff) : undefined;
+  const positiveValues = dailyStats
+    .filter((day) => cutoffKey === undefined || day.date >= cutoffKey)
+    .map((day) => day.totalActiveMs)
+    .filter((value) => value > 0);
+  return positiveValues.length === 0
+    ? 0
+    : positiveValues.reduce((total, value) => total + value, 0) / positiveValues.length;
+}
+
+function HeatMap({ dailyStats }: { dailyStats: DailyStat[] }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [tooltip, setTooltip] = useState<{ label: string; left: number; top: number } | undefined>();
   const todayKey = formatDateKey(new Date());
   const { days, weekStarts } = useMemo(() => {
-    const daily = buildDailyStats(reviews);
-    const byDate = new Map(daily.map((day) => [day.date, day]));
+    const byDate = new Map(dailyStats.map((day) => [day.date, day]));
     const todayStart = new Date(`${todayKey}T00:00:00`);
     const firstWeekStart = startOfWeek(todayStart);
     firstWeekStart.setDate(firstWeekStart.getDate() - (HEATMAP_WEEK_COUNT - 1) * 7);
@@ -199,7 +231,7 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
       }).filter((day) => day.date.getTime() <= todayStart.getTime());
     });
     return { days: nextDays, weekStarts: nextWeekStarts };
-  }, [reviews, todayKey]);
+  }, [dailyStats, todayKey]);
 
   useEffect(() => {
     const scroll = scrollRef.current;
@@ -220,7 +252,9 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
     <div className="heatmap-shell" aria-label="练习热力图">
       <div className="heatmap-weekdays" aria-hidden="true">
         {WEEKDAY_LABELS.map((label, index) => (
-          <span key={`${index}-${label}`}>{label ? <span className="heatmap-weekday-label">{label}</span> : null}</span>
+          <span key={`${index}-${label}`}>
+            {label ? <span className="heatmap-weekday-label">{label}</span> : null}
+          </span>
         ))}
       </div>
       <div className="heatmap-scroll" ref={scrollRef} onScroll={() => setTooltip(undefined)}>
@@ -235,15 +269,16 @@ function HeatMap({ reviews }: { reviews: ReviewRecord[] }): JSX.Element {
           <div className="heatmap">
             {days.map((day) => {
               const heatLevel = day.stat?.heatLevel ?? 0;
+              const practiceDuration = formatPracticeDuration(day.stat?.totalActiveMs ?? 0);
               return (
                 <div
-                  aria-label={`${day.key}: ${day.stat?.completedReviews ?? 0} 次`}
+                  aria-label={`${day.key}: ${practiceDuration}`}
                   className="heat-cell"
                   key={day.key}
                   onPointerEnter={(event) => {
                     const tooltipWidth = 150;
                     setTooltip({
-                      label: `${day.key} · ${day.stat?.completedReviews ?? 0} 次`,
+                      label: `${day.key} · ${practiceDuration}`,
                       left: Math.max(8, Math.min(event.clientX + 10, window.innerWidth - tooltipWidth - 8)),
                       top: Math.max(8, event.clientY - 36),
                     });
@@ -510,8 +545,8 @@ export function makeRecognitionTimeChartOption(
           backgroundColor: RECOGNITION_CHART_COLORS.panel,
           borderRadius: 4,
           color: RECOGNITION_CHART_COLORS.muted,
-          distance: 4,
-          fontSize: 11,
+          distance: 6,
+          fontSize: 12,
           padding: [2, 4],
           position: "end",
         },
@@ -931,6 +966,8 @@ export function StatsView({
     return longTermReviews.filter((review) => activeTargetNoteIds.has(review.targetNoteId));
   }, [activeTargetNoteIds, longTermReviews]);
   const filteredReviews = useMemo(() => filterByRange(groupScopedReviews, range), [groupScopedReviews, range]);
+  const dailyStats = useMemo(() => buildDailyStats(groupScopedReviews), [groupScopedReviews]);
+  const averageDailyActiveMs = useMemo(() => averageDailyPracticeMs(dailyStats, range), [dailyStats, range]);
   const recognitionTrendBySession = useMemo(
     () => buildRecognitionTrend(
       longTermReviews,
@@ -947,14 +984,10 @@ export function StatsView({
     [recognitionTimeGrouping, recognitionTrendBySession],
   );
   const recognitionTimeStats = useMemo(() => {
-    const visible = range === "all"
-      ? recognitionTrend
-      : (() => {
-          const cutoff = new Date();
-          cutoff.setDate(cutoff.getDate() - Number(range) + 1);
-          cutoff.setHours(0, 0, 0, 0);
-          return recognitionTrend.filter((point) => new Date(point.boundaryAt) >= cutoff);
-        })();
+    const cutoff = rangeCutoff(range);
+    const visible = cutoff
+      ? recognitionTrend.filter((point) => new Date(point.boundaryAt) >= cutoff)
+      : recognitionTrend;
     return visible.map((stat, index) => {
       const formatted = recognitionTimeGrouping === "day"
         ? { label: formatShortDate(stat.key), tooltipLabel: formatShortDate(stat.key) }
@@ -1364,8 +1397,12 @@ export function StatsView({
       <div className="panel heatmap-panel stats-heatmap-panel">
         <div className="panel-heading">
           <h2>练习量</h2>
+          <p className="heatmap-daily-average">
+            <span>日平均练习时长</span>
+            <strong>{formatPracticeDuration(averageDailyActiveMs)}</strong>
+          </p>
         </div>
-        <HeatMap reviews={groupScopedReviews} />
+        <HeatMap dailyStats={dailyStats} />
       </div>
 
       <div
