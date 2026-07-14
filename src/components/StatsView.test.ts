@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeRecognitionTimeChartOption } from "./StatsView";
+import { makeRecognitionTimeChartOption, parseHiddenRecognitionSeries } from "./StatsView";
 
 function makeChartData() {
   return [1, 2, 3, 4].map((value, index) => ({
@@ -116,5 +116,22 @@ describe("recognition trend chart", () => {
     expect(errorRateAxis.max({ min: 30, max: 40 })).toBe(42);
     expect(errorRateAxis.min({ min: 1, max: 2 })).toBe(0);
     expect(errorRateAxis.max({ min: 99, max: 100 })).toBe(100);
+  });
+});
+
+describe("recognition trend preferences", () => {
+  it("defaults old preferences without legend state to showing every series", () => {
+    expect(parseHiddenRecognitionSeries(undefined)).toEqual([]);
+  });
+
+  it("keeps only known hidden series in canonical order", () => {
+    expect(parseHiddenRecognitionSeries(["errorRate", "unknown", "p10", "errorRate"])).toEqual([
+      "p10",
+      "errorRate",
+    ]);
+  });
+
+  it("recovers corrupted preferences that hide every series", () => {
+    expect(parseHiddenRecognitionSeries(["p10", "median", "p90", "errorRate"])).toEqual([]);
   });
 });

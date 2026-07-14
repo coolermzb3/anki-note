@@ -51,7 +51,8 @@ const RECOGNITION_TIME_METRICS = ["duration", "speed"] as const;
 type RecognitionTimeMetric = (typeof RECOGNITION_TIME_METRICS)[number];
 const RECOGNITION_TIME_VALUE_MODES = ["absolute", "relative"] as const;
 type RecognitionTimeValueMode = (typeof RECOGNITION_TIME_VALUE_MODES)[number];
-type RecognitionSeriesKey = "errorRate" | "median" | "p10" | "p90";
+const RECOGNITION_SERIES_KEYS = ["p10", "median", "p90", "errorRate"] as const;
+type RecognitionSeriesKey = (typeof RECOGNITION_SERIES_KEYS)[number];
 const STATS_CAROUSEL_CARD_IDS = ["recognition-time", "session-progress", "note-range"] as const;
 const STATS_CAROUSEL_CARD_LABELS = ["识别趋势", "答对进度", "音域分布"] as const;
 const STATS_CAROUSEL_PAIR_LABELS = ["识别趋势和答对进度", "答对进度和音域分布", "音域分布和识别趋势"] as const;
@@ -61,6 +62,7 @@ const STATS_UI_PREFERENCES_KEY = "anki-note.statsUiPreferences";
 type StatsCarouselCardId = (typeof STATS_CAROUSEL_CARD_IDS)[number];
 interface StatsUiPreferences {
   carouselCardId: StatsCarouselCardId;
+  hiddenRecognitionSeries: RecognitionSeriesKey[];
   range: RangeKey;
   recognitionTimeGrouping: RecognitionTimeGrouping;
   recognitionTimeMetric: RecognitionTimeMetric;
@@ -107,12 +109,13 @@ const RECOGNITION_SERIES_OPTIONS: Array<{
     yAxisIndex: 1,
   },
 ];
-const DEFAULT_RECOGNITION_VISIBLE_SERIES = RECOGNITION_SERIES_OPTIONS.map((option) => option.key);
+const DEFAULT_RECOGNITION_VISIBLE_SERIES = RECOGNITION_SERIES_KEYS;
 const RECOGNITION_CHART_HANDLE_ICON =
   "path://M11,5 H17 A4,4 0 0 1 21,9 V23 A4,4 0 0 1 17,27 H11 A4,4 0 0 1 7,23 V9 A4,4 0 0 1 11,5 Z M14,-3 V5 M14,27 V35";
 const WEEKDAY_LABELS = ["周一", "", "周三", "", "周五", "", "周日"];
 const DEFAULT_STATS_UI_PREFERENCES: StatsUiPreferences = {
   carouselCardId: STATS_CAROUSEL_CARD_IDS[1],
+  hiddenRecognitionSeries: [],
   range: "30",
   recognitionTimeGrouping: "practice-session",
   recognitionTimeMetric: "duration",
@@ -303,6 +306,18 @@ function isRecognitionTimeValueMode(value: unknown): value is RecognitionTimeVal
   return typeof value === "string" && RECOGNITION_TIME_VALUE_MODES.includes(value as RecognitionTimeValueMode);
 }
 
+export function parseHiddenRecognitionSeries(
+  value: unknown,
+  fallback: RecognitionSeriesKey[] = [],
+): RecognitionSeriesKey[] {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+
+  const hiddenSeries = RECOGNITION_SERIES_KEYS.filter((seriesKey) => value.some((item) => item === seriesKey));
+  return hiddenSeries.length === RECOGNITION_SERIES_KEYS.length ? fallback : hiddenSeries;
+}
+
 function isStatsCarouselCardId(value: unknown): value is StatsCarouselCardId {
   return typeof value === "string" && STATS_CAROUSEL_CARD_IDS.includes(value as StatsCarouselCardId);
 }
@@ -314,6 +329,10 @@ function parseStatsUiPreferences(value: unknown, fallback: StatsUiPreferences): 
 
   return {
     carouselCardId: isStatsCarouselCardId(value.carouselCardId) ? value.carouselCardId : fallback.carouselCardId,
+    hiddenRecognitionSeries: parseHiddenRecognitionSeries(
+      value.hiddenRecognitionSeries,
+      fallback.hiddenRecognitionSeries,
+    ),
     range: isRangeKey(value.range) ? value.range : fallback.range,
     recognitionTimeGrouping: isRecognitionTimeGrouping(value.recognitionTimeGrouping)
       ? value.recognitionTimeGrouping
@@ -809,13 +828,16 @@ export function StatsView({
     getStatsCarouselTrackPosition(statsCarouselIndex),
   );
   const [statsCarouselTransitionEnabled, setStatsCarouselTransitionEnabled] = useState(true);
-  const [recognitionVisibleSeries, setRecognitionVisibleSeries] = useState<RecognitionSeriesKey[]>(
-    () => [...DEFAULT_RECOGNITION_VISIBLE_SERIES],
-  );
   const range = statsUiPreferences.range;
   const recognitionTimeGrouping = statsUiPreferences.recognitionTimeGrouping;
   const recognitionTimeMetric = statsUiPreferences.recognitionTimeMetric;
   const recognitionTimeValueMode = statsUiPreferences.recognitionTimeValueMode;
+  const recognitionVisibleSeries = useMemo(
+    () => RECOGNITION_SERIES_KEYS.filter(
+      (seriesKey) => !statsUiPreferences.hiddenRecognitionSeries.includes(seriesKey),
+    ),
+    [statsUiPreferences.hiddenRecognitionSeries],
+  );
   const sessionProgressMode = sessionProgressPreferences.mode;
   const sessionProgressHistoryLimit = sessionProgressPreferences.historyLimit;
   const commitStatsCarouselIndex = (nextIndex: number): void => {
@@ -865,12 +887,31 @@ export function StatsView({
   const setRecognitionTimeValueMode = (nextValueMode: RecognitionTimeValueMode): void => {
     setStatsUiPreferences((current) => ({ ...current, recognitionTimeValueMode: nextValueMode }));
   };
+  const selectAllRecognitionSeries = (): void => {
+    setStatsUiPreferences((current) => ({ ...current, hiddenRecognitionSeries: [] }));
+  };
+  const selectOnlyRecognitionSeries = (seriesKey: RecognitionSeriesKey): void => {
+    setStatsUiPreferences((current) => ({
+      ...current,
+      hiddenRecognitionSeries: RECOGNITION_SERIES_KEYS.filter((candidate) => candidate !== seriesKey),
+    }));
+  };
   const toggleRecognitionSeries = (seriesKey: RecognitionSeriesKey): void => {
-    setRecognitionVisibleSeries((current) => current.includes(seriesKey)
-      ? current.length === 1
-        ? current
-        : current.filter((candidate) => candidate !== seriesKey)
-      : [...current, seriesKey]);
+    setStatsUiPreferences((current) => {
+      if (current.hiddenRecognitionSeries.includes(seriesKey)) {
+        return {
+          ...current,
+          hiddenRecognitionSeries: current.hiddenRecognitionSeries.filter((candidate) => candidate !== seriesKey),
+        };
+      }
+      if (current.hiddenRecognitionSeries.length === RECOGNITION_SERIES_KEYS.length - 1) {
+        return current;
+      }
+      return {
+        ...current,
+        hiddenRecognitionSeries: [...current.hiddenRecognitionSeries, seriesKey],
+      };
+    });
   };
   const setSessionProgressMode = (nextMode: typeof sessionProgressMode): void => {
     setSessionProgressPreferences((current) => ({ ...current, mode: nextMode }));
@@ -1189,8 +1230,8 @@ export function StatsView({
                 <RecognitionTimeChart
                   data={recognitionTimeStats}
                   metric={recognitionTimeMetric}
-                  onSelectAllSeries={() => setRecognitionVisibleSeries([...DEFAULT_RECOGNITION_VISIBLE_SERIES])}
-                  onSelectOnlySeries={(seriesKey) => setRecognitionVisibleSeries([seriesKey])}
+                  onSelectAllSeries={selectAllRecognitionSeries}
+                  onSelectOnlySeries={selectOnlyRecognitionSeries}
                   onToggleSeries={toggleRecognitionSeries}
                   valueMode={recognitionTimeValueMode}
                   visibleSeries={recognitionVisibleSeries}
