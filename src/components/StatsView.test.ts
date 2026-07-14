@@ -46,7 +46,7 @@ describe("recognition trend chart", () => {
     });
     expect(dataZoom[1]).toMatchObject({ left: grid.left - 2, right: grid.right });
     expect(dataZoom[3]).toMatchObject({ bottom: grid.bottom, top: grid.top - 3 });
-    expect(dataZoom.slice(0, 2).map((zoom) => zoom.filterMode)).toEqual(["empty", "empty"]);
+    expect(dataZoom.slice(0, 2).map((zoom) => zoom.filterMode)).toEqual(["filter", "filter"]);
   });
 
   it("rebases relative changes at each inclusion boundary", () => {

@@ -568,12 +568,12 @@ export function makeRecognitionTimeChartOption(
       RECOGNITION_CHART_COLORS.errorRate,
     ],
     dataZoom: [
-      { end: 100, filterMode: "empty", start: 0, type: "inside", xAxisIndex: 0 },
+      { end: 100, filterMode: "filter", start: 0, type: "inside", xAxisIndex: 0 },
       {
         ...dataZoomSliderStyle,
         bottom: 16,
         end: 100,
-        filterMode: "empty",
+        filterMode: "filter",
         height: 34,
         left: chartGrid.left - 2,
         right: chartGrid.right,
