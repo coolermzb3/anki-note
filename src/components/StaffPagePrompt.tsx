@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { Beam, Formatter, GhostNote, StaveNote, Voice } from "vexflow";
+import { Beam, Formatter, GhostNote, Stave, StaveNote, Stem, Voice } from "vexflow";
 import { noteToVexKey } from "../domain/notes";
-import type { PromptNoteDuration, Staff, StaffNotationMode, TargetNote } from "../domain/types";
+import type { PromptNoteDuration, StaffNotationMode, TargetNote } from "../domain/types";
 import { PRACTICE_PAGE_STAFF_LAYOUT } from "./staffLayoutProfiles";
 import {
   createStaffRenderSurface,
@@ -12,9 +12,11 @@ import {
 } from "./staffGeometry";
 import {
   getBarlineGapCenter,
+  getCrossStaffOuterStemDirection,
   getQuarterNoteBeats,
   getStaffPageBarlineInterval,
   getStaffPageBeamRuns,
+  getVisibleBeamStemDirection,
   getVexNoteDuration,
 } from "./staffPageNotation";
 
@@ -70,15 +72,29 @@ function colorForIndex(index: number, completedCount: number, wrongIndex: number
 
 function makeStaffPageBeams(
   rowSlots: readonly (TargetNote | undefined)[],
-  tickablesByStaff: Partial<Record<Staff, readonly StaffPageTickable[]>>,
+  rowTickables: readonly StaffPageTickable[],
   noteDuration: PromptNoteDuration,
+  visibleYBounds: { bottomY: number; topY: number },
 ): Beam[] {
-  return getStaffPageBeamRuns(rowSlots, noteDuration).flatMap(({ size, staff, startIndex }) => {
-    const tickables = tickablesByStaff[staff]?.slice(startIndex, startIndex + size);
-    if (!tickables || !tickables.every((tickable) => tickable instanceof StaveNote)) {
+  return getStaffPageBeamRuns(rowSlots, noteDuration).flatMap(({ size, startIndex }) => {
+    const groupNotes = rowSlots.slice(startIndex, startIndex + size);
+    const tickables = rowTickables.slice(startIndex, startIndex + size);
+    if (
+      !groupNotes.every((note): note is TargetNote => note !== undefined) ||
+      !tickables.every((tickable) => tickable instanceof StaveNote)
+    ) {
       return [];
     }
-    return Beam.generateBeams(tickables).map((beam) =>
+    const staveNotes = tickables as StaveNote[];
+    const isCrossStaff = groupNotes.some((note) => note.staff !== groupNotes[0].staff);
+    const noteYs = staveNotes.map((staveNote) => ({ y: staveNote.getYs()[0] }));
+    const preferredDirection =
+      getVisibleBeamStemDirection(noteYs, visibleYBounds, Stem.HEIGHT) ??
+      (isCrossStaff ? getCrossStaffOuterStemDirection(noteYs) : undefined);
+    const stemDirection =
+      preferredDirection === undefined ? undefined : preferredDirection === "up" ? Stem.UP : Stem.DOWN;
+    const beams = Beam.generateBeams(staveNotes, stemDirection === undefined ? {} : { stemDirection });
+    return beams.map((beam) =>
       beam.setStyle({ fillStyle: NEUTRAL_COLOR, strokeStyle: NEUTRAL_COLOR }),
     );
   });
@@ -177,6 +193,10 @@ export function StaffPagePrompt({
           surface.scale,
         );
         const baseY = rowIndex * rowStep;
+        const visibleYBounds = {
+          bottomY: baseY + logicalPx(PRACTICE_PAGE_STAFF_LAYOUT.vertical.viewHeightPx, surface.scale),
+          topY: baseY,
+        };
         const rowGroup = context.openGroup("staff-page-system");
         const rowStartIndex = rowIndex * PRACTICE_PAGE_STAFF_LAYOUT.multirow.notesPerRow;
         const rowSlots = Array.from(
@@ -208,48 +228,49 @@ export function StaffPagePrompt({
         const { noteArea } = system;
         if (system.mode === "grand") {
           const { bass, treble } = system;
-          const trebleTickables = rowSlots.map((note, slotIndex) =>
-            note?.staff === "treble"
-              ? makeStaveNote(note, colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex), noteDuration)
-              : new GhostNote(vexDuration),
-          );
-          const bassTickables = rowSlots.map((note, slotIndex) =>
-            note?.staff === "bass"
-              ? makeStaveNote(note, colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex), noteDuration)
-              : new GhostNote(vexDuration),
-          );
-          const trebleVoice = new Voice(voiceOptions).addTickables(trebleTickables);
-          const bassVoice = new Voice(voiceOptions).addTickables(bassTickables);
-          beams = makeStaffPageBeams(rowSlots, { bass: bassTickables, treble: trebleTickables }, noteDuration);
+          const tickables = rowSlots.map((note, slotIndex) => {
+            if (!note) {
+              return new GhostNote(vexDuration).setStave(treble);
+            }
+            return makeStaveNote(
+              note,
+              colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex),
+              noteDuration,
+            ).setStave(note.staff === "treble" ? treble : bass);
+          });
+          const voice = new Voice(voiceOptions).addTickables(tickables);
           treble.setNoteStartX(noteArea.left);
           bass.setNoteStartX(noteArea.left);
           treble.setWidth(Math.max(1, noteArea.right - frameMetrics.x));
           bass.setWidth(Math.max(1, noteArea.right - frameMetrics.x));
-          new Formatter().joinVoices([trebleVoice, bassVoice]).formatToStave([trebleVoice, bassVoice], treble, {
-            context,
-            stave: treble,
-          });
-          trebleVoice.draw(context, treble);
-          bassVoice.draw(context, bass);
-          layoutTickables = trebleTickables;
-          visibleTickables = rowSlots.map((note, index) => {
-            if (!note) {
-              return undefined;
-            }
-            const tickable = note.staff === "treble" ? trebleTickables[index] : bassTickables[index];
-            return tickable instanceof StaveNote ? tickable : undefined;
-          });
+          beams = makeStaffPageBeams(rowSlots, tickables, noteDuration, visibleYBounds);
+          const formatter = new Formatter().joinVoices([voice]);
+          formatter.format(
+            [voice],
+            treble.getNoteEndX() - treble.getNoteStartX() - Stave.defaultPadding,
+            { context },
+          );
+          formatter.postFormat();
+          voice.draw(context);
+          layoutTickables = tickables;
+          visibleTickables = tickables.map((tickable, index) =>
+            rowSlots[index] && tickable instanceof StaveNote ? tickable : undefined,
+          );
           barlineTopY = treble.getYForLine(0);
           barlineBottomY = bass.getYForLine(4);
         } else {
-          const { staff, stave } = system;
+          const { stave } = system;
           const tickables = rowSlots.map((note, slotIndex) =>
             note
-              ? makeStaveNote(note, colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex), noteDuration)
-              : new GhostNote(vexDuration),
+              ? makeStaveNote(
+                  note,
+                  colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex),
+                  noteDuration,
+                ).setStave(stave)
+              : new GhostNote(vexDuration).setStave(stave),
           );
           const voice = new Voice(voiceOptions).addTickables(tickables);
-          beams = makeStaffPageBeams(rowSlots, { [staff]: tickables }, noteDuration);
+          beams = makeStaffPageBeams(rowSlots, tickables, noteDuration, visibleYBounds);
           stave.setNoteStartX(noteArea.left);
           stave.setWidth(Math.max(1, noteArea.right - frameMetrics.x));
           new Formatter().joinVoices([voice]).formatToStave([voice], stave, { context, stave });

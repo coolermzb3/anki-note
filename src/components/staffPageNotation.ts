@@ -1,4 +1,4 @@
-import type { PromptNoteDuration, Staff, TargetNote } from "../domain/types";
+import type { PromptNoteDuration, TargetNote } from "../domain/types";
 
 export const PROMPT_NOTE_DURATIONS: readonly PromptNoteDuration[] = [
   "whole",
@@ -23,8 +23,19 @@ const PROMPT_NOTE_DURATION_CONFIG: Record<PromptNoteDuration, PromptNoteDuration
 
 export interface StaffPageBeamRun {
   size: number;
-  staff: Staff;
   startIndex: number;
+}
+
+export type StaffPageStemDirection = "down" | "up";
+
+export interface StaffPageVisibleYBounds {
+  bottomY: number;
+  topY: number;
+}
+
+function getNoteYRange(notes: readonly { y: number }[]): { bottomY: number; topY: number; ys: number[] } {
+  const ys = notes.map((note) => note.y);
+  return { bottomY: Math.max(...ys), topY: Math.min(...ys), ys };
 }
 
 export function getVexNoteDuration(noteDuration: PromptNoteDuration): PromptNoteDurationConfig["vexDuration"] {
@@ -56,19 +67,45 @@ export function getStaffPageBeamRuns(
   const runs: StaffPageBeamRun[] = [];
   for (let groupStart = 0; groupStart < notes.length; groupStart += groupSize) {
     const groupEnd = Math.min(notes.length, groupStart + groupSize);
-    let runStaff: Staff | undefined;
-    let runStart = groupStart;
+    let runStart: number | undefined;
     for (let index = groupStart; index <= groupEnd; index += 1) {
-      const staff = index < groupEnd ? notes[index]?.staff : undefined;
-      if (staff === runStaff) {
+      if (index < groupEnd && notes[index] !== undefined) {
+        runStart ??= index;
         continue;
       }
-      if (runStaff !== undefined && index - runStart >= 2) {
-        runs.push({ size: index - runStart, staff: runStaff, startIndex: runStart });
+      if (runStart !== undefined && index - runStart >= 2) {
+        runs.push({ size: index - runStart, startIndex: runStart });
       }
-      runStaff = staff;
-      runStart = index;
+      runStart = undefined;
     }
   }
   return runs;
+}
+
+export function getCrossStaffOuterStemDirection(
+  notes: readonly { y: number }[],
+): StaffPageStemDirection {
+  const { bottomY, topY, ys } = getNoteYRange(notes);
+  const upwardStemCost = ys.reduce((sum, y) => sum + y - topY, 0);
+  const downwardStemCost = ys.reduce((sum, y) => sum + bottomY - y, 0);
+  return upwardStemCost <= downwardStemCost ? "up" : "down";
+}
+
+export function getVisibleBeamStemDirection(
+  notes: readonly { y: number }[],
+  visibleBounds: StaffPageVisibleYBounds,
+  minimumClearance: number,
+): StaffPageStemDirection | undefined {
+  const { bottomY, topY } = getNoteYRange(notes);
+  const upwardSpace = topY - visibleBounds.topY;
+  const downwardSpace = visibleBounds.bottomY - bottomY;
+  const upwardFits = upwardSpace >= minimumClearance;
+  const downwardFits = downwardSpace >= minimumClearance;
+  if (upwardFits !== downwardFits) {
+    return upwardFits ? "up" : "down";
+  }
+  if (!upwardFits && upwardSpace !== downwardSpace) {
+    return upwardSpace > downwardSpace ? "up" : "down";
+  }
+  return undefined;
 }

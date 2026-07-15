@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { Staff } from "../domain/types";
 import {
   getBarlineGapCenter,
+  getCrossStaffOuterStemDirection,
   getQuarterNoteBeats,
   getStaffPageBarlineInterval,
   getStaffPageBeamRuns,
+  getVisibleBeamStemDirection,
   getVexNoteDuration,
   PROMPT_NOTE_DURATIONS,
 } from "./staffPageNotation";
@@ -45,58 +47,59 @@ describe("staff-page notation", () => {
     expect(getBarlineGapCenter(40, 30)).toBeUndefined();
   });
 
-  it("beams complete same-staff eighth-note pairs", () => {
+  it("keeps complete eighth-note pairs beamed across staff changes", () => {
     expect(
       getStaffPageBeamRuns(
         [note("treble"), note("treble"), note("bass"), note("treble"), note("bass"), note("bass")],
         "eighth",
       ),
     ).toEqual([
-      { size: 2, staff: "treble", startIndex: 0 },
-      { size: 2, staff: "bass", startIndex: 4 },
+      { size: 2, startIndex: 0 },
+      { size: 2, startIndex: 2 },
+      { size: 2, startIndex: 4 },
     ]);
   });
 
-  it("beams complete same-staff sixteenth-note groups of four", () => {
+  it("keeps complete sixteenth-note groups beamed across staff changes", () => {
     expect(
       getStaffPageBeamRuns(
         [
           note("treble"),
-          note("treble"),
-          note("treble"),
+          note("bass"),
           note("treble"),
           note("bass"),
+          note("treble"),
           note("bass"),
-          note("bass"),
+          note("treble"),
           note("bass"),
         ],
         "sixteenth",
       ),
     ).toEqual([
-      { size: 4, staff: "treble", startIndex: 0 },
-      { size: 4, staff: "bass", startIndex: 4 },
+      { size: 4, startIndex: 0 },
+      { size: 4, startIndex: 4 },
     ]);
   });
 
-  it("prioritizes aligned four-note groups before splitting same-staff runs", () => {
+  it("keeps a short final sixteenth-note group aligned to the beat", () => {
     expect(
       getStaffPageBeamRuns(
         [note("treble"), note("treble"), note("treble"), note("bass"), note("bass"), note("bass"), note("bass")],
         "sixteenth",
       ),
     ).toEqual([
-      { size: 3, staff: "treble", startIndex: 0 },
-      { size: 3, staff: "bass", startIndex: 4 },
+      { size: 4, startIndex: 0 },
+      { size: 3, startIndex: 4 },
     ]);
   });
 
-  it("beams short final runs but leaves isolated notes unbeamed", () => {
+  it("leaves an isolated final note unbeamed", () => {
     expect(
       getStaffPageBeamRuns(
         [note("treble"), note("bass"), note("bass"), note("treble"), note("bass")],
         "sixteenth",
       ),
-    ).toEqual([{ size: 2, staff: "bass", startIndex: 1 }]);
+    ).toEqual([{ size: 4, startIndex: 0 }]);
   });
 
   it("does not beam across an eight-note barline", () => {
@@ -117,13 +120,35 @@ describe("staff-page notation", () => {
         "sixteenth",
       ),
     ).toEqual([
-      { size: 2, staff: "treble", startIndex: 6 },
-      { size: 2, staff: "treble", startIndex: 8 },
+      { size: 4, startIndex: 0 },
+      { size: 4, startIndex: 4 },
+      { size: 2, startIndex: 8 },
     ]);
   });
 
   it("does not beam whole or quarter notes", () => {
     expect(getStaffPageBeamRuns([note("treble"), note("treble")], "whole")).toEqual([]);
     expect(getStaffPageBeamRuns([note("treble"), note("treble")], "quarter")).toEqual([]);
+  });
+
+  it("prioritizes keeping every beam inside the visible row", () => {
+    expect(getVisibleBeamStemDirection([{ y: 20 }, { y: 70 }], { bottomY: 200, topY: 0 }, 35)).toBe(
+      "down",
+    );
+    expect(getVisibleBeamStemDirection([{ y: 50 }, { y: 180 }], { bottomY: 200, topY: 0 }, 35)).toBe(
+      "up",
+    );
+    expect(getVisibleBeamStemDirection([{ y: 10 }, { y: 70 }], { bottomY: 90, topY: 0 }, 35)).toBe(
+      "down",
+    );
+  });
+
+  it("leaves the direction open when both sides have enough room", () => {
+    expect(getVisibleBeamStemDirection([{ y: 50 }, { y: 75 }], { bottomY: 200, topY: 0 }, 35)).toBeUndefined();
+  });
+
+  it("optimizes total stem length for a cross-staff beam", () => {
+    expect(getCrossStaffOuterStemDirection([{ y: 50 }, { y: 55 }, { y: 60 }, { y: 75 }])).toBe("up");
+    expect(getCrossStaffOuterStemDirection([{ y: 50 }, { y: 65 }, { y: 70 }, { y: 75 }])).toBe("down");
   });
 });
