@@ -30,6 +30,7 @@ import {
   type StaffRenderSurface,
 } from "./staffGeometry";
 import { useLocalStorageState } from "./useLocalStorageState";
+import { useDelayedBusy } from "./useDelayedBusy";
 
 type FixedStudyColumnOrderId = Exclude<StudyColumnOrderId, "random">;
 interface StudyUiPreferences {
@@ -826,23 +827,20 @@ export function StudyView({
   staffRecallRuns,
 }: StudyViewProps): JSX.Element {
   const [mode, setMode] = useState<"study" | "staff-recall">("study");
-  const [enteringStaffRecall, setEnteringStaffRecall] = useState(false);
+  const { isBusyVisible: showEnteringStaffRecallStatus, run: runStaffRecallEntry } = useDelayedBusy();
   const [staffRecallRangeLocked, setStaffRecallRangeLocked] = useState(false);
 
   const enterStaffRecall = useCallback(async (): Promise<void> => {
-    if (mode === "staff-recall" || enteringStaffRecall) {
+    if (mode === "staff-recall") {
       return;
     }
-    setEnteringStaffRecall(true);
-    try {
+    await runStaffRecallEntry(async () => {
       const result = await onBeforeStaffRecallStart();
       if (result.proceed) {
         setMode("staff-recall");
       }
-    } finally {
-      setEnteringStaffRecall(false);
-    }
-  }, [enteringStaffRecall, mode, onBeforeStaffRecallStart]);
+    });
+  }, [mode, onBeforeStaffRecallStart, runStaffRecallEntry]);
 
   const enterStudy = useCallback((): void => {
     setStaffRecallRangeLocked(false);
@@ -884,11 +882,11 @@ export function StudyView({
           </button>
           <button
             className={mode === "staff-recall" ? "active" : ""}
-            disabled={enteringStaffRecall}
+            disabled={showEnteringStaffRecallStatus}
             onClick={() => void enterStaffRecall()}
             type="button"
           >
-            {enteringStaffRecall ? "检查中" : "默写"}
+            {showEnteringStaffRecallStatus ? "检查中" : "默写"}
           </button>
         </div>
         {mode === "staff-recall" && staffRecallRangeLocked ? (

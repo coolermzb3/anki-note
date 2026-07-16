@@ -9,6 +9,6 @@ interface FileSystemHandle {
 
 declare namespace React {
   interface HTMLAttributes<T> {
-    inert?: boolean;
+    inert?: boolean | "";
   }
 }

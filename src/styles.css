@@ -2204,7 +2204,7 @@ main.has-backup-reminder .setup-grid::after {
   display: flex;
   gap: 18px;
   width: 100%;
-  transform: translateX(var(--stats-carousel-translate, calc(-50% - 9px)));
+  transform: translateX(var(--stats-carousel-translate, 0));
   transition: transform 0.22s ease;
 }
 
@@ -2213,7 +2213,7 @@ main.has-backup-reminder .setup-grid::after {
 }
 
 .stats-card-carousel-single .stats-card-carousel-track {
-  transform: translateX(var(--stats-carousel-single-translate, calc(-100% - 18px)));
+  transform: translateX(var(--stats-carousel-single-translate, 0));
   width: 100%;
 }
 

@@ -317,7 +317,8 @@ export function App(): JSX.Element {
 
       const checkPromise = (async (): Promise<BackupCheckResult> => {
         try {
-          const result = await syncBackupBeforeActivity({ requestPermission });
+          const outcome = await syncBackupBeforeActivity({ requestPermission });
+          const { result } = outcome;
           if (result === "needs-directory") {
             setBackupReminderVisible(true);
             return { proceed: true, result };
@@ -338,7 +339,9 @@ export function App(): JSX.Element {
             return { proceed: true, result };
           }
           if (result === "ready") {
-            await refreshBackupState();
+            if (outcome.backupStateChanged) {
+              await refreshBackupState();
+            }
             return { proceed: true, result };
           }
           return { proceed: true, result };

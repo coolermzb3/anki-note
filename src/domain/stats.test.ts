@@ -357,6 +357,44 @@ describe("stats", () => {
     expect(point.errorRate).toBe(0);
   });
 
+  it("updates recognition percentiles and errors with the same rolling 100-review window", () => {
+    const baseTime = new Date("2026-07-04T02:00:00.000Z").getTime();
+    const atSecond = (second: number): string => new Date(baseTime + second * 1000).toISOString();
+    const sessions = [
+      makeSession({
+        endedAt: new Date(baseTime + 99_500).toISOString(),
+        id: "first-window",
+        startedAt: atSecond(0),
+      }),
+      makeSession({
+        endedAt: new Date(baseTime + 119_500).toISOString(),
+        id: "second-window",
+        startedAt: atSecond(100),
+      }),
+    ];
+    const reviews = Array.from({ length: 120 }, (_, index) => makeReview({
+      activeMs: 1000 + index,
+      answeredAt: atSecond(index),
+      endedAt: atSecond(index),
+      id: `rolling-${index}`,
+      sessionId: index < 100 ? "first-window" : "second-window",
+      startedAt: atSecond(index),
+      targetNoteId: "C4",
+      wrongAnswers: index < 10 || index >= 115 ? ONE_WRONG_ANSWER : [],
+    }));
+
+    const [first, second] = buildRecognitionTrend(reviews, sessions, ["C4"], "practice-session");
+
+    expect(first.p10Ms).toBeCloseTo(1009.9);
+    expect(first.medianMs).toBeCloseTo(1049.5);
+    expect(first.p90Ms).toBeCloseTo(1089.1);
+    expect(first.errorRate).toBe(0.1);
+    expect(second.p10Ms).toBeCloseTo(1029.9);
+    expect(second.medianMs).toBeCloseTo(1069.5);
+    expect(second.p90Ms).toBeCloseTo(1109.1);
+    expect(second.errorRate).toBe(0.05);
+  });
+
   it("builds practice session stats from review session ids without session records", () => {
     const reviews = [
       makeReview({

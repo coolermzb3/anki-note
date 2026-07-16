@@ -6,6 +6,7 @@ import { normalizeAnswerKeyboardScale, normalizePianoVolume } from "../domain/se
 import type {
   AppSettings,
   BackupDayFile,
+  BackupDayFileMetadata,
   BackupManifest,
   BackupSnapshot,
   BackupState,
@@ -15,6 +16,7 @@ import type {
 } from "../domain/types";
 import {
   db,
+  ensureSettings,
   getBackupState,
   loadAllData,
   makeDefaultSettings,
@@ -31,6 +33,13 @@ interface BrowserData {
   sessions: PracticeSessionRecord[];
   reviews: ReviewRecord[];
   staffRecallRuns: StaffRecallRunRecord[];
+}
+
+interface BackupBrowserFacts {
+  dataSetId: string;
+  hasRecords: boolean;
+  latestReviewPresent: boolean;
+  latestStaffRecallRunPresent: boolean;
 }
 
 interface BackupStatusInspection {
@@ -51,6 +60,11 @@ export type BackupPreflightResult =
   | "synced-up"
   | "data-conflict"
   | "skipped";
+
+export interface BackupPreflightOutcome {
+  result: BackupPreflightResult;
+  backupStateChanged: boolean;
+}
 
 interface DataSummary {
   firstDataAt?: string;
@@ -129,20 +143,31 @@ function backupDataNewerThanBrowser(inspection: BackupStatusInspection): boolean
 }
 
 function backupDataConsistent(
-  data: BrowserData,
   state: BackupState,
   manifest: BackupManifest | null,
+  browser: BackupBrowserFacts,
 ): boolean {
-  if (!manifest || !state.lastSeenBackupVersion) {
-    return false;
-  }
-  if (manifest.dataSetId !== data.settings.dataSetId || getBackupManifestVersion(manifest) !== state.lastSeenBackupVersion) {
-    return false;
-  }
-  const latestReviewPresent = !manifest.lastReviewId || data.reviews.some((review) => review.id === manifest.lastReviewId);
-  const latestStaffRecallRunPresent =
-    !manifest.lastStaffRecallRunId || data.staffRecallRuns.some((run) => run.id === manifest.lastStaffRecallRunId);
-  return latestReviewPresent && latestStaffRecallRunPresent;
+  return Boolean(
+    manifest &&
+      state.lastSeenBackupVersion &&
+      browser.hasRecords &&
+      manifest.dataSetId === browser.dataSetId &&
+      getBackupManifestVersion(manifest) === state.lastSeenBackupVersion &&
+      browser.latestReviewPresent &&
+      browser.latestStaffRecallRunPresent,
+  );
+}
+
+function getBackupBrowserFacts(data: BrowserData, manifest: BackupManifest | null): BackupBrowserFacts {
+  const lastReviewId = manifest?.lastReviewId;
+  const lastStaffRecallRunId = manifest?.lastStaffRecallRunId;
+  return {
+    dataSetId: data.settings.dataSetId,
+    hasRecords: hasBrowserData(data),
+    latestReviewPresent: !lastReviewId || data.reviews.some((review) => review.id === lastReviewId),
+    latestStaffRecallRunPresent:
+      !lastStaffRecallRunId || data.staffRecallRuns.some((run) => run.id === lastStaffRecallRunId),
+  };
 }
 
 async function ensureReadWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
@@ -204,6 +229,99 @@ async function readBackupManifestIfExists(directory: FileSystemDirectoryHandle):
   return readJson<BackupManifest>(directory, "manifest.json");
 }
 
+async function readBackupDayFileMetadata(
+  directory: FileSystemDirectoryHandle,
+  dates: string[],
+): Promise<Record<string, BackupDayFileMetadata> | undefined> {
+  if (dates.length === 0) {
+    return {};
+  }
+  try {
+    const daysDirectory = await directory.getDirectoryHandle("days");
+    const entries = await Promise.all(
+      dates.map(async (date) => {
+        const handle = await daysDirectory.getFileHandle(`${date}.json`);
+        const file = await handle.getFile();
+        return [date, { size: file.size, lastModified: file.lastModified }] as const;
+      }),
+    );
+    return Object.fromEntries(entries);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function backupDayFileMetadataMatches(
+  dates: string[],
+  remembered: Record<string, BackupDayFileMetadata> | undefined,
+  current: Record<string, BackupDayFileMetadata> | undefined,
+): boolean {
+  if (!remembered || !current || Object.keys(remembered).length !== dates.length) {
+    return false;
+  }
+  return dates.every((date) => {
+    const rememberedFile = remembered[date];
+    const currentFile = current[date];
+    return (
+      rememberedFile !== undefined &&
+      currentFile !== undefined &&
+      rememberedFile.size === currentFile.size &&
+      rememberedFile.lastModified === currentFile.lastModified
+    );
+  });
+}
+
+async function readReadyBackupManifest(
+  directory: FileSystemDirectoryHandle,
+  state: BackupState,
+): Promise<BackupManifest | undefined> {
+  const manifest = await readBackupManifestIfExists(directory);
+  if (
+    !manifest ||
+    state.lastError ||
+    !state.lastSeenBackupVersion ||
+    getBackupManifestVersion(manifest) !== state.lastSeenBackupVersion
+  ) {
+    return undefined;
+  }
+
+  if (
+    !state.lastSeenBackupDayFileMetadata ||
+    Object.keys(state.lastSeenBackupDayFileMetadata).length !== manifest.dates.length
+  ) {
+    return undefined;
+  }
+  const dayFileMetadata = await readBackupDayFileMetadata(directory, manifest.dates);
+  if (!backupDayFileMetadataMatches(manifest.dates, state.lastSeenBackupDayFileMetadata, dayFileMetadata)) {
+    return undefined;
+  }
+
+  const [settings, sessionCount, reviewCount, staffRecallRunCount, latestReview, latestStaffRecallRun] =
+    await Promise.all([
+      ensureSettings(),
+      db.practiceSessions.count(),
+      db.reviews.count(),
+      db.staffRecallRuns.count(),
+      manifest.lastReviewId ? db.reviews.get(manifest.lastReviewId) : undefined,
+      manifest.lastStaffRecallRunId ? db.staffRecallRuns.get(manifest.lastStaffRecallRunId) : undefined,
+    ]);
+  const hasBrowserRecords = sessionCount > 0 || reviewCount > 0 || staffRecallRunCount > 0;
+  if (
+    backupDataConsistent(state, manifest, {
+      dataSetId: settings.dataSetId,
+      hasRecords: hasBrowserRecords,
+      latestReviewPresent: !manifest.lastReviewId || Boolean(latestReview),
+      latestStaffRecallRunPresent: !manifest.lastStaffRecallRunId || Boolean(latestStaffRecallRun),
+    })
+  ) {
+    return manifest;
+  }
+  return undefined;
+}
+
 async function inspectBackupStatus(
   directory: FileSystemDirectoryHandle,
   state: BackupState,
@@ -214,11 +332,12 @@ async function inspectBackupStatus(
   const browserModifiedAt = getBackupDataModifiedAt(data.settings, data.sessions, data.reviews, data.staffRecallRuns);
   const backupModifiedAt = getManifestDataModifiedAt(manifest);
   const browserSummary = summarizeData(data.reviews, data.staffRecallRuns);
+  const browserFacts = getBackupBrowserFacts(data, manifest);
   const status = deriveBackupDataStatus({
     hasDirectoryHandle: true,
-    hasBrowserData: hasBrowserData(data),
+    hasBrowserData: browserFacts.hasRecords,
     hasBackupManifest: Boolean(manifest),
-    dataConsistent: backupDataConsistent(data, state, manifest),
+    dataConsistent: backupDataConsistent(state, manifest, browserFacts),
   });
   return { data, browserSummary, backupSummary, browserModifiedAt, backupModifiedAt, manifest, status };
 }
@@ -227,6 +346,7 @@ function buildReadyBackupState(
   state: BackupState,
   directory: FileSystemDirectoryHandle,
   manifest: BackupManifest | null,
+  dayFileMetadata?: Record<string, BackupDayFileMetadata>,
 ): BackupState {
   return {
     ...cleanBackupState(state),
@@ -253,6 +373,7 @@ function buildReadyBackupState(
     conflictBackupRecordCount: undefined,
     conflictBackupStaffRecallRunCount: undefined,
     lastSeenBackupVersion: manifest ? getBackupManifestVersion(manifest) : undefined,
+    lastSeenBackupDayFileMetadata: manifest ? dayFileMetadata : undefined,
     backupDataModifiedAt: getManifestDataModifiedAt(manifest),
     lastBackupAt: manifest?.lastBackupAt,
     lastBackupReviewId: manifest?.lastReviewId,
@@ -265,7 +386,10 @@ async function saveReadyBackupState(
   directory: FileSystemDirectoryHandle,
   manifest: BackupManifest | null,
 ): Promise<void> {
-  await db.backupStates.put(buildReadyBackupState(state, directory, manifest));
+  const dayFileMetadata = manifest
+    ? await readBackupDayFileMetadata(directory, manifest.dates)
+    : undefined;
+  await db.backupStates.put(buildReadyBackupState(state, directory, manifest, dayFileMetadata));
 }
 
 async function saveDivergedBackupState(
@@ -298,6 +422,7 @@ async function saveDivergedBackupState(
     conflictBackupRecordCount: inspection.backupSummary?.recordCount ?? 0,
     conflictBackupStaffRecallRunCount: inspection.backupSummary?.staffRecallRunCount ?? 0,
     lastSeenBackupVersion: undefined,
+    lastSeenBackupDayFileMetadata: undefined,
     lastBackupAt: inspection.manifest?.lastBackupAt,
     lastBackupReviewId: inspection.manifest?.lastReviewId,
     lastError: backupText.messages.dataConflictBeforeBackup,
@@ -361,38 +486,43 @@ export async function syncBackupBeforeActivity({
   requestPermission = false,
 }: {
   requestPermission?: boolean;
-} = {}): Promise<BackupPreflightResult> {
+} = {}): Promise<BackupPreflightOutcome> {
   const state = await getBackupState();
   if (!state.directoryHandle) {
-    return "needs-directory";
+    return { result: "needs-directory", backupStateChanged: false };
   }
   if (explicitDataConflict(state)) {
-    if (conflictDetailsMissing(state)) {
-      await refreshBackupConflictDetails({ requestPermission });
-    }
-    return "data-conflict";
+    const backupStateChanged = conflictDetailsMissing(state)
+      ? await refreshBackupConflictDetails({ requestPermission })
+      : false;
+    return { result: "data-conflict", backupStateChanged };
   }
   if (!(await hasReadWritePermission(state.directoryHandle, requestPermission))) {
-    return "skipped";
+    return { result: "skipped", backupStateChanged: false };
+  }
+
+  const readyManifest = await readReadyBackupManifest(state.directoryHandle, state);
+  if (readyManifest) {
+    return { result: "ready", backupStateChanged: false };
   }
 
   const inspection = await inspectBackupStatus(state.directoryHandle, state);
   if (inspection.status === "browser-only") {
     const snapshot = await writeBrowserSnapshotToDirectory(state.directoryHandle, inspection.data);
     await saveReadyBackupState(state, state.directoryHandle, snapshot.manifest);
-    return "synced-down";
+    return { result: "synced-down", backupStateChanged: true };
   }
   if (inspection.status === "backup-only" || (inspection.status === "diverged" && backupDataNewerThanBrowser(inspection))) {
     await importDirectorySnapshot(state.directoryHandle, state);
-    return "synced-up";
+    return { result: "synced-up", backupStateChanged: true };
   }
   if (inspection.status === "diverged") {
     await saveDivergedBackupState(state, state.directoryHandle, inspection);
-    return "data-conflict";
+    return { result: "data-conflict", backupStateChanged: true };
   }
 
   await saveReadyBackupState(state, state.directoryHandle, inspection.manifest);
-  return "ready";
+  return { result: "ready", backupStateChanged: true };
 }
 
 export async function refreshBackupConflictDetails({

@@ -39,6 +39,13 @@ import {
   type RecognitionTimeValueMode,
 } from "./recognitionTrend";
 import { SessionProgressCard } from "./SessionProgressCard";
+import {
+  getStatsCarouselMoveDirection,
+  getStatsCarouselOrder,
+  normalizeStatsCarouselIndex,
+  rotateStatsCarouselOrder,
+  type StatsCarouselMoveDirection,
+} from "./statsCarousel";
 import { StatsRangeStaff, type StaffHeatNote } from "./StatsRangeStaff";
 import { STATS_COLORS } from "./statsColors";
 import { getStatsRangeCutoff, type StatsRange } from "./statsRange";
@@ -61,7 +68,6 @@ interface StatsViewProps {
 const STATS_CAROUSEL_CARD_LABELS = ["识别趋势", "答对进度", "音域分布"] as const;
 const STATS_CAROUSEL_PAIR_LABELS = ["识别趋势和答对进度", "答对进度和音域分布", "音域分布和识别趋势"] as const;
 const STATS_CAROUSEL_DRAG_THRESHOLD_PX = 48;
-const STATS_CAROUSEL_REAL_OFFSET = 1;
 type StatsCarouselTrackStyle = CSSProperties & {
   "--stats-carousel-single-translate": string;
   "--stats-carousel-translate": string;
@@ -110,26 +116,6 @@ function isFormControlTarget(target: EventTarget | null): boolean {
   );
 }
 
-function normalizeStatsCarouselIndex(index: number): number {
-  return ((index % STATS_CAROUSEL_CARD_IDS.length) + STATS_CAROUSEL_CARD_IDS.length) % STATS_CAROUSEL_CARD_IDS.length;
-}
-
-function getStatsCarouselTrackPosition(index: number): number {
-  return index + STATS_CAROUSEL_REAL_OFFSET;
-}
-
-function getStatsCarouselDotTargetPosition(currentIndex: number, targetIndex: number): number {
-  const directDelta = targetIndex - currentIndex;
-  const cardCount = STATS_CAROUSEL_CARD_IDS.length;
-  if (directDelta > cardCount / 2) {
-    return getStatsCarouselTrackPosition(targetIndex - cardCount);
-  }
-  if (directDelta < -cardCount / 2) {
-    return getStatsCarouselTrackPosition(targetIndex + cardCount);
-  }
-  return getStatsCarouselTrackPosition(targetIndex);
-}
-
 function isStatsCarouselDragBlockedTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) {
     return true;
@@ -155,7 +141,6 @@ function isStatsCarouselDragBlockedTarget(target: EventTarget | null): boolean {
   );
 }
 
-
 export function StatsView({
   settings,
   reviews,
@@ -169,6 +154,7 @@ export function StatsView({
     startY: number;
   } | null>(null);
   const statsCarouselMovingRef = useRef(false);
+  const statsCarouselMoveDirectionRef = useRef<StatsCarouselMoveDirection | null>(null);
   const [statsUiPreferences, setStatsUiPreferences] = useLocalStorageState(
     STATS_UI_PREFERENCES_KEY,
     DEFAULT_STATS_UI_PREFERENCES,
@@ -181,9 +167,8 @@ export function StatsView({
   );
   const [singleCardCarousel, setSingleCardCarousel] = useState(false);
   const statsCarouselIndex = STATS_CAROUSEL_CARD_IDS.indexOf(statsUiPreferences.carouselCardId);
-  const [statsCarouselPosition, setStatsCarouselPosition] = useState(() =>
-    getStatsCarouselTrackPosition(statsCarouselIndex),
-  );
+  const [statsCarouselOrder, setStatsCarouselOrder] = useState(() => getStatsCarouselOrder(statsCarouselIndex));
+  const [statsCarouselOffset, setStatsCarouselOffset] = useState<0 | 1>(0);
   const [statsCarouselTransitionEnabled, setStatsCarouselTransitionEnabled] = useState(true);
   const range = statsUiPreferences.range;
   const recognitionTimeGrouping = statsUiPreferences.recognitionTimeGrouping;
@@ -206,31 +191,42 @@ export function StatsView({
       };
     });
   };
-  const startStatsCarouselMove = (targetPosition: number, targetIndex: number): void => {
+  const startStatsCarouselMove = (targetIndex: number): void => {
     if (statsCarouselMovingRef.current) {
       return;
     }
 
     const normalizedIndex = normalizeStatsCarouselIndex(targetIndex);
-    if (targetPosition === statsCarouselPosition) {
+    const direction = getStatsCarouselMoveDirection(statsCarouselIndex, normalizedIndex);
+    if (direction === undefined) {
       commitStatsCarouselIndex(normalizedIndex);
       return;
     }
 
     statsCarouselMovingRef.current = true;
-    setStatsCarouselTransitionEnabled(true);
-    setStatsCarouselPosition(targetPosition);
+    statsCarouselMoveDirectionRef.current = direction;
     commitStatsCarouselIndex(normalizedIndex);
+    if (direction === 1) {
+      setStatsCarouselTransitionEnabled(true);
+      setStatsCarouselOffset(1);
+      return;
+    }
+
+    setStatsCarouselTransitionEnabled(false);
+    setStatsCarouselOrder((current) => rotateStatsCarouselOrder(current, -1));
+    setStatsCarouselOffset(1);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        setStatsCarouselTransitionEnabled(true);
+        setStatsCarouselOffset(0);
+      });
+    });
   };
   const moveStatsCarousel = (direction: -1 | 1): void => {
-    startStatsCarouselMove(
-      getStatsCarouselTrackPosition(statsCarouselIndex) + direction,
-      statsCarouselIndex + direction,
-    );
+    startStatsCarouselMove(statsCarouselIndex + direction);
   };
   const jumpStatsCarousel = (targetIndex: number): void => {
-    const normalizedIndex = normalizeStatsCarouselIndex(targetIndex);
-    startStatsCarouselMove(getStatsCarouselDotTargetPosition(statsCarouselIndex, normalizedIndex), normalizedIndex);
+    startStatsCarouselMove(targetIndex);
   };
   const setRange = (nextRange: StatsRange): void => {
     setStatsUiPreferences((current) => ({ ...current, range: nextRange }));
@@ -418,7 +414,7 @@ export function StatsView({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [statsCarouselIndex, statsCarouselPosition]);
+  }, [statsCarouselIndex]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 820px)");
@@ -428,38 +424,27 @@ export function StatsView({
     return () => media.removeEventListener("change", updateSingleCardCarousel);
   }, []);
 
-  const statsCarouselTrackCardIds: StatsCarouselCardId[] = [
-    STATS_CAROUSEL_CARD_IDS[STATS_CAROUSEL_CARD_IDS.length - 1],
-    ...STATS_CAROUSEL_CARD_IDS,
-    STATS_CAROUSEL_CARD_IDS[0],
-    STATS_CAROUSEL_CARD_IDS[1],
-  ];
-  const visibleStatsCarouselIndexes = singleCardCarousel
-    ? new Set([statsCarouselPosition])
-    : new Set([statsCarouselPosition, statsCarouselPosition + 1]);
+  const visibleStatsCarouselCardIds = new Set([
+    STATS_CAROUSEL_CARD_IDS[statsCarouselIndex],
+    ...(singleCardCarousel ? [] : [STATS_CAROUSEL_CARD_IDS[normalizeStatsCarouselIndex(statsCarouselIndex + 1)]]),
+  ]);
   const statsCarouselTrackStyle = {
-    "--stats-carousel-single-translate": `calc(-${statsCarouselPosition * 100}% - ${statsCarouselPosition * 18}px)`,
-    "--stats-carousel-translate": `calc(-${statsCarouselPosition * 50}% - ${statsCarouselPosition * 9}px)`,
+    "--stats-carousel-single-translate": `calc(-${statsCarouselOffset * 100}% - ${statsCarouselOffset * 18}px)`,
+    "--stats-carousel-translate": `calc(-${statsCarouselOffset * 50}% - ${statsCarouselOffset * 9}px)`,
   } as StatsCarouselTrackStyle;
   const finishStatsCarouselTransition = (event: ReactTransitionEvent<HTMLDivElement>): void => {
     if (event.target !== event.currentTarget || event.propertyName !== "transform") {
       return;
     }
-    const lastRealPosition = getStatsCarouselTrackPosition(STATS_CAROUSEL_CARD_IDS.length - 1);
-    const firstClonePosition = 0;
-    const lastClonePosition = STATS_CAROUSEL_CARD_IDS.length + STATS_CAROUSEL_REAL_OFFSET;
-    const snapPosition =
-      statsCarouselPosition === firstClonePosition
-        ? lastRealPosition
-        : statsCarouselPosition === lastClonePosition
-          ? getStatsCarouselTrackPosition(0)
-          : undefined;
+    const direction = statsCarouselMoveDirectionRef.current;
+    statsCarouselMoveDirectionRef.current = null;
     statsCarouselMovingRef.current = false;
-    if (snapPosition === undefined) {
+    if (direction !== 1) {
       return;
     }
     setStatsCarouselTransitionEnabled(false);
-    setStatsCarouselPosition(snapPosition);
+    setStatsCarouselOrder((current) => rotateStatsCarouselOrder(current, 1));
+    setStatsCarouselOffset(0);
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => setStatsCarouselTransitionEnabled(true));
     });
@@ -673,14 +658,14 @@ export function StatsView({
             style={statsCarouselTrackStyle}
             onTransitionEnd={finishStatsCarouselTransition}
           >
-            {statsCarouselTrackCardIds.map((cardId, index) => {
-              const visible = visibleStatsCarouselIndexes.has(index);
+            {statsCarouselOrder.map((cardId) => {
+              const visible = visibleStatsCarouselCardIds.has(cardId);
               return (
                 <div
                   aria-hidden={!visible}
                   className="stats-card-carousel-slide"
-                  inert={visible ? undefined : true}
-                  key={`${cardId}-${index}`}
+                  inert={visible ? undefined : ""}
+                  key={cardId}
                 >
                   {renderStatsCard(cardId)}
                 </div>

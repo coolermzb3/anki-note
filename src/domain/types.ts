@@ -232,10 +232,16 @@ export interface BackupState {
   conflictBackupRecordCount?: number;
   conflictBackupStaffRecallRunCount?: number;
   lastSeenBackupVersion?: string;
+  lastSeenBackupDayFileMetadata?: Record<string, BackupDayFileMetadata>;
   backupDataModifiedAt?: string;
   lastBackupAt?: string;
   lastBackupReviewId?: string;
   lastError?: string;
+}
+
+export interface BackupDayFileMetadata {
+  size: number;
+  lastModified: number;
 }
 
 export interface BackupManifest {

@@ -141,6 +141,13 @@ export function percentile(values: number[], percent: number): number | undefine
     return undefined;
   }
   const sorted = [...values].sort((a, b) => a - b);
+  return percentileFromSorted(sorted, percent);
+}
+
+function percentileFromSorted(sorted: readonly number[], percent: number): number | undefined {
+  if (sorted.length === 0) {
+    return undefined;
+  }
   const index = (sorted.length - 1) * percent;
   const lower = Math.floor(index);
   const upper = Math.ceil(index);
@@ -197,7 +204,12 @@ export function buildDailyStats(reviews: ReviewRecord[]): DailyStat[] {
   const byDate = new Map<string, ReviewRecord[]>();
   for (const review of reviews.filter(isStatisticalReview)) {
     const date = localDateKey(review.answeredAt ?? review.endedAt);
-    byDate.set(date, [...(byDate.get(date) ?? []), review]);
+    const dayReviews = byDate.get(date);
+    if (dayReviews) {
+      dayReviews.push(review);
+    } else {
+      byDate.set(date, [review]);
+    }
   }
 
   const totalActiveMsByDate = new Map(
@@ -276,6 +288,50 @@ function reviewCompletedAt(review: ReviewRecord): number {
   return new Date(review.answeredAt ?? review.endedAt).getTime();
 }
 
+interface RecognitionNoteWindow {
+  recent: { activeMs: number; hasError: boolean }[];
+  recentErrorCount: number;
+  sortedActiveMs: number[];
+  totalCount: number;
+}
+
+function sortedInsertionIndex(values: readonly number[], value: number): number {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (values[middle] <= value) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+function addRecognitionReview(window: RecognitionNoteWindow, review: ReviewRecord): void {
+  const recentReview = {
+    activeMs: review.activeMs,
+    hasError: review.wrongAnswers.length > 0,
+  };
+  window.totalCount += 1;
+  window.recent.push(recentReview);
+  window.sortedActiveMs.splice(sortedInsertionIndex(window.sortedActiveMs, recentReview.activeMs), 0, recentReview.activeMs);
+  if (recentReview.hasError) {
+    window.recentErrorCount += 1;
+  }
+
+  if (window.recent.length <= PERFORMANCE_REVIEW_LIMIT) {
+    return;
+  }
+  const removed = window.recent.shift()!;
+  const sortedIndex = window.sortedActiveMs.indexOf(removed.activeMs);
+  window.sortedActiveMs.splice(sortedIndex, 1);
+  if (removed.hasError) {
+    window.recentErrorCount -= 1;
+  }
+}
+
 export function buildRecognitionTrend(
   reviews: ReviewRecord[],
   sessions: PracticeSessionRecord[],
@@ -286,42 +342,65 @@ export function buildRecognitionTrend(
   const targetIdSet = new Set(targetIds);
   const statisticalReviews = reviews
     .filter((review) => targetIdSet.has(review.targetNoteId) && isStatisticalReview(review))
-    .sort(
-      (left, right) =>
-        reviewCompletedAt(left) - reviewCompletedAt(right) ||
-        new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime(),
-    );
-  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
-  const sessionBoundaries = [...groupReviewsBySession(statisticalReviews).entries()]
-    .map(([sessionId, sessionReviews]) => ({
-      boundaryAt: sessionsById.get(sessionId)?.endedAt ?? latestReviewEndedAt(sessionReviews),
-      key: sessionId,
+    .map((review) => ({
+      completedAt: reviewCompletedAt(review),
+      review,
+      startedAt: new Date(review.startedAt).getTime(),
     }))
     .sort(
       (left, right) =>
-        new Date(left.boundaryAt).getTime() - new Date(right.boundaryAt).getTime() || left.key.localeCompare(right.key),
+        left.completedAt - right.completedAt || left.startedAt - right.startedAt,
     );
-  const byNote = new Map(targetIds.map((noteId) => [noteId, [] as ReviewRecord[]]));
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const statisticalReviewsBySession = new Map<string, ReviewRecord[]>();
+  for (const { review } of statisticalReviews) {
+    const sessionReviews = statisticalReviewsBySession.get(review.sessionId);
+    if (sessionReviews) {
+      sessionReviews.push(review);
+    } else {
+      statisticalReviewsBySession.set(review.sessionId, [review]);
+    }
+  }
+  const sessionBoundaries = [...statisticalReviewsBySession.entries()]
+    .map(([sessionId, sessionReviews]) => {
+      const boundaryAt = sessionsById.get(sessionId)?.endedAt ?? latestReviewEndedAt(sessionReviews);
+      return {
+        boundaryAt,
+        boundaryTime: new Date(boundaryAt).getTime(),
+        key: sessionId,
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.boundaryTime - right.boundaryTime || left.key.localeCompare(right.key),
+    );
+  const byNote = new Map<TargetNoteId, RecognitionNoteWindow>(targetIds.map((noteId) => [noteId, {
+    recent: [],
+    recentErrorCount: 0,
+    sortedActiveMs: [],
+    totalCount: 0,
+  }]));
   let reviewIndex = 0;
   const sessionTrend = sessionBoundaries.map((boundary) => {
-    const boundaryTime = new Date(boundary.boundaryAt).getTime();
     while (
       reviewIndex < statisticalReviews.length &&
-      reviewCompletedAt(statisticalReviews[reviewIndex]) <= boundaryTime
+      statisticalReviews[reviewIndex].completedAt <= boundary.boundaryTime
     ) {
-      const review = statisticalReviews[reviewIndex];
-      byNote.get(review.targetNoteId)?.push(review);
+      const review = statisticalReviews[reviewIndex].review;
+      const noteWindow = byNote.get(review.targetNoteId);
+      if (noteWindow) {
+        addRecognitionReview(noteWindow, review);
+      }
       reviewIndex += 1;
     }
-    const cohort = targetIds.filter((noteId) => (byNote.get(noteId)?.length ?? 0) >= 20);
+    const cohort = targetIds.filter((noteId) => (byNote.get(noteId)?.totalCount ?? 0) >= 20);
     const noteMetrics = cohort.map((noteId) => {
-      const recent = (byNote.get(noteId) ?? []).slice(-PERFORMANCE_REVIEW_LIMIT);
-      const activeTimes = recent.map((review) => review.activeMs);
+      const noteWindow = byNote.get(noteId)!;
       return {
-        errorRate: recent.filter((review) => review.wrongAnswers.length > 0).length / recent.length,
-        medianMs: percentile(activeTimes, 0.5)!,
-        p10Ms: percentile(activeTimes, 0.1)!,
-        p90Ms: percentile(activeTimes, 0.9)!,
+        errorRate: noteWindow.recentErrorCount / noteWindow.recent.length,
+        medianMs: percentileFromSorted(noteWindow.sortedActiveMs, 0.5)!,
+        p10Ms: percentileFromSorted(noteWindow.sortedActiveMs, 0.1)!,
+        p90Ms: percentileFromSorted(noteWindow.sortedActiveMs, 0.9)!,
       };
     });
     return {

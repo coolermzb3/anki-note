@@ -76,6 +76,7 @@ import {
   STAFF_PAGE_UI_PREFERENCES_KEY,
 } from "./staffPageUiPreferences";
 import { useLocalStorageState } from "./useLocalStorageState";
+import { useDelayedBusy } from "./useDelayedBusy";
 import { useRemainingNotePlayback } from "./useRemainingNotePlayback";
 
 interface PracticeViewProps {
@@ -325,6 +326,7 @@ export function PracticeView({
   const [staffPageCompletedCount, setStaffPageCompletedCount] = useState(0);
   const [isStaffPageScrolling, setIsStaffPageScrolling] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const { isBusyVisible: showStartingSessionStatus, run: runSessionStart } = useDelayedBusy();
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false,
   );
@@ -1072,90 +1074,96 @@ export function PracticeView({
     if (queueNotes.length === 0) {
       return;
     }
-    void unlockAudio().catch(() => undefined);
-    const preflightResult = await onBeforePracticeStart();
-    if (!preflightResult.proceed) {
-      return;
-    }
-    if (preflightResult.settings) {
-      applySettingsSnapshot(preflightResult.settings);
-    }
-    const nextSettings = preflightResult.settings ?? (await persistConfig());
-    const nextMode = nextSettings.defaultMode;
-    const nextQueueStrategy = resolveQueueStrategy(nextSettings);
-    const nextSchedulerReviews = preflightResult.reviews ? filterLongTermReviews(preflightResult.reviews) : schedulerReviews;
-    const builtStartSnapshot = buildPracticeSessionStartSnapshot({
-      autoPlayTarget: nextSettings.autoPlayTarget,
-      mode: nextMode,
-      prefersReducedMotion,
-      settings: { ...nextSettings, queueStrategy: nextQueueStrategy },
-      smoothStaffPageScroll: staffPageUiPreferences.smoothStaffPageScroll,
-      startPausedReading,
-    });
-    if (!builtStartSnapshot) {
-      return;
-    }
-    const { snapshot: startSnapshot } = builtStartSnapshot;
-    const { practiceConfig, presentationConfig } = startSnapshot;
-    const nextEnabledNotes = builtStartSnapshot.notes;
-    const shouldStartPaused = presentationConfig.promptDisplayMode === "staff-page" && presentationConfig.startPausedReading;
-    setPianoVolume(startSnapshot.interactionConfig.pianoVolume);
-    const startedAt = new Date().toISOString();
-    const nextSession: PracticeSessionRecord = buildPracticeSessionRecordV3({
-      id: newSessionId(),
-      snapshot: startSnapshot,
-      startedAt,
-    });
-    await db.practiceSessions.put(nextSession);
-    sessionRef.current = nextSession;
-    sessionStartSnapshotRef.current = startSnapshot;
-    sessionReviewsRef.current = [];
-    lastTargetNoteIdRef.current = undefined;
-    melodyQueueRef.current = [];
-    melodyGenerationStateRef.current = createMelodyGenerationState();
-    syncStaffPage(null);
-    setIsStaffPageScrolling(false);
-    endingRef.current = false;
-    lastBackupAtRef.current = performance.now();
-    lastBackupCompletedRef.current = 0;
-    sessionActiveBaseMsRef.current = 0;
-    sessionActiveStartedAtRef.current = shouldStartPaused ? null : performance.now();
-    isPausedRef.current = shouldStartPaused;
-    pendingAfterPauseRef.current = null;
-    setSession(nextSession);
-    setCompletedCount(0);
-    setWrongAnswerCount(0);
-    setSummary(null);
-    setIsPaused(shouldStartPaused);
-    setPhase("running");
-    if (presentationConfig.promptDisplayMode === "staff-page") {
-      startStaffPage({
-        sourceNotes: nextEnabledNotes,
-        sourceReviews: nextSchedulerReviews,
-        sourceQueueStrategy: practiceConfig.queueStrategy,
-        sourceDrillNoteNames: practiceConfig.drillNoteNames,
-        nextCompletedCount: 0,
+    await runSessionStart(async () => {
+      void unlockAudio().catch(() => undefined);
+      const preflightResult = await onBeforePracticeStart();
+      if (!preflightResult.proceed) {
+        return;
+      }
+      if (preflightResult.settings) {
+        applySettingsSnapshot(preflightResult.settings);
+      }
+      const nextSettings = preflightResult.settings ?? (await persistConfig());
+      const nextMode = nextSettings.defaultMode;
+      const nextQueueStrategy = resolveQueueStrategy(nextSettings);
+      const nextSchedulerReviews = preflightResult.reviews
+        ? filterLongTermReviews(preflightResult.reviews)
+        : schedulerReviews;
+      const builtStartSnapshot = buildPracticeSessionStartSnapshot({
+        autoPlayTarget: nextSettings.autoPlayTarget,
+        mode: nextMode,
+        prefersReducedMotion,
+        settings: { ...nextSettings, queueStrategy: nextQueueStrategy },
+        smoothStaffPageScroll: staffPageUiPreferences.smoothStaffPageScroll,
+        startPausedReading,
       });
-    } else {
-      const firstNote =
-        practiceConfig.queueStrategy === "melody"
-          ? drawMelodyNote(nextEnabledNotes, practiceConfig.fixedCount)
-          : selectNextNote({
-              notes: nextEnabledNotes,
-              reviews: nextSchedulerReviews,
-              sessions,
-              currentSessionId: nextSession.id,
-              queueStrategy: practiceConfig.queueStrategy,
-              drillNoteNames: practiceConfig.drillNoteNames,
-            });
-      startPrompt(firstNote);
-    }
+      if (!builtStartSnapshot) {
+        return;
+      }
+      const { snapshot: startSnapshot } = builtStartSnapshot;
+      const { practiceConfig, presentationConfig } = startSnapshot;
+      const nextEnabledNotes = builtStartSnapshot.notes;
+      const shouldStartPaused =
+        presentationConfig.promptDisplayMode === "staff-page" && presentationConfig.startPausedReading;
+      setPianoVolume(startSnapshot.interactionConfig.pianoVolume);
+      const startedAt = new Date().toISOString();
+      const nextSession: PracticeSessionRecord = buildPracticeSessionRecordV3({
+        id: newSessionId(),
+        snapshot: startSnapshot,
+        startedAt,
+      });
+      await db.practiceSessions.put(nextSession);
+      sessionRef.current = nextSession;
+      sessionStartSnapshotRef.current = startSnapshot;
+      sessionReviewsRef.current = [];
+      lastTargetNoteIdRef.current = undefined;
+      melodyQueueRef.current = [];
+      melodyGenerationStateRef.current = createMelodyGenerationState();
+      syncStaffPage(null);
+      setIsStaffPageScrolling(false);
+      endingRef.current = false;
+      lastBackupAtRef.current = performance.now();
+      lastBackupCompletedRef.current = 0;
+      sessionActiveBaseMsRef.current = 0;
+      sessionActiveStartedAtRef.current = shouldStartPaused ? null : performance.now();
+      isPausedRef.current = shouldStartPaused;
+      pendingAfterPauseRef.current = null;
+      setSession(nextSession);
+      setCompletedCount(0);
+      setWrongAnswerCount(0);
+      setSummary(null);
+      setIsPaused(shouldStartPaused);
+      setPhase("running");
+      if (presentationConfig.promptDisplayMode === "staff-page") {
+        startStaffPage({
+          sourceNotes: nextEnabledNotes,
+          sourceReviews: nextSchedulerReviews,
+          sourceQueueStrategy: practiceConfig.queueStrategy,
+          sourceDrillNoteNames: practiceConfig.drillNoteNames,
+          nextCompletedCount: 0,
+        });
+      } else {
+        const firstNote =
+          practiceConfig.queueStrategy === "melody"
+            ? drawMelodyNote(nextEnabledNotes, practiceConfig.fixedCount)
+            : selectNextNote({
+                notes: nextEnabledNotes,
+                reviews: nextSchedulerReviews,
+                sessions,
+                currentSessionId: nextSession.id,
+                queueStrategy: practiceConfig.queueStrategy,
+                drillNoteNames: practiceConfig.drillNoteNames,
+              });
+        startPrompt(firstNote);
+      }
+    });
   }, [
     applySettingsSnapshot,
     drawMelodyNote,
     onBeforePracticeStart,
     persistConfig,
     queueNotes.length,
+    runSessionStart,
     prefersReducedMotion,
     schedulerReviews,
     sessions,
@@ -1673,11 +1681,17 @@ export function PracticeView({
                 <button
                   aria-keyshortcuts="Enter"
                   className="primary"
-                  disabled={setupDisabled}
+                  disabled={setupDisabled || showStartingSessionStatus}
                   onClick={() => void startSession()}
                 >
-                  <Play size={18} />
-                  开始<kbd>Enter</kbd>
+                  {showStartingSessionStatus ? (
+                    "检查中"
+                  ) : (
+                    <>
+                      <Play size={18} />
+                      开始<kbd>Enter</kbd>
+                    </>
+                  )}
                 </button>
                 {setupDisabledReason ? (
                   <span className="practice-start-tooltip" role="tooltip">
@@ -1765,9 +1779,20 @@ export function PracticeView({
             </section>
           ) : null}
           <div className="action-row">
-            <button aria-keyshortcuts="Enter" className="primary" onClick={() => void startSession()}>
-              <RotateCcw size={18} />
-              再来一次<kbd>Enter</kbd>
+            <button
+              aria-keyshortcuts="Enter"
+              className="primary"
+              disabled={showStartingSessionStatus}
+              onClick={() => void startSession()}
+            >
+              {showStartingSessionStatus ? (
+                "检查中"
+              ) : (
+                <>
+                  <RotateCcw size={18} />
+                  再来一次<kbd>Enter</kbd>
+                </>
+              )}
             </button>
             <button onClick={() => setPhase("setup")}>
               <SlidersHorizontal size={18} />

@@ -127,7 +127,7 @@ export function useSessionProgressComparison({
   reviews: ReviewRecord[];
   sessions: PracticeSessionRecord[];
 }): SessionProgressComparisonModel {
-  const [selection, setSelection] = useState<SessionProgressSelection | null>(null);
+  const [storedSelection, setStoredSelection] = useState<SessionProgressSelection | null>(null);
   const [selectionAnnouncement, setSelectionAnnouncement] = useState("");
   const [transientNotice, setTransientNotice] = useState("");
   const groups = useMemo(() => buildSessionProgressGroups(sessions, reviews), [reviews, sessions]);
@@ -139,19 +139,21 @@ export function useSessionProgressComparison({
     () => groups.filter((group) => group.key.targetNoteSetKey === targetNoteSetKey),
     [groups, targetNoteSetKey],
   );
+  const selection = useMemo(() => {
+    if (targetGroups.length === 0) {
+      return null;
+    }
+    if (storedSelection && targetGroups.some((group) => group.keyString === storedSelection.chartBenchmarkGroupKey)) {
+      return storedSelection;
+    }
+    return createSessionProgressSelection(targetGroups[0]);
+  }, [storedSelection, targetGroups]);
 
   useEffect(() => {
-    if (targetGroups.length === 0) {
-      setSelection(null);
-      return;
+    if (storedSelection !== null && storedSelection !== selection) {
+      setStoredSelection(selection);
     }
-    setSelection((current) => {
-      if (current && targetGroups.some((group) => group.keyString === current.chartBenchmarkGroupKey)) {
-        return current;
-      }
-      return createSessionProgressSelection(targetGroups[0]);
-    });
-  }, [targetGroups]);
+  }, [selection, storedSelection]);
 
   useEffect(() => {
     if (!transientNotice) {
@@ -280,7 +282,7 @@ export function useSessionProgressComparison({
       setSelectionAnnouncement("所选值之间没有共同的有效条件组合，已保留原选择。");
       return;
     }
-    setSelection(result.selection);
+    setStoredSelection(result.selection);
     const nextMultiDimension = getSessionProgressComparisonDimension(result.selection);
     if (
       values.length > 1 &&
@@ -358,7 +360,10 @@ export function useSessionProgressComparison({
     selectionAnnouncement,
     selectedSessionIds,
     setTimeBenchmark: (groupId) => {
-      setSelection((current) => current ? { ...current, chartBenchmarkGroupKey: groupId } : current);
+      setStoredSelection((current) => {
+        const base = current ?? selection;
+        return base ? { ...base, chartBenchmarkGroupKey: groupId } : current;
+      });
       setSelectionAnnouncement("已切换时长基准，组内纪录保持不变。");
     },
     toggleCondition,
