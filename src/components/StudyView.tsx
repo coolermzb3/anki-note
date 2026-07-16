@@ -873,8 +873,14 @@ export function StudyView({
       <div className="study-header">
         <h1 className="sr-only">学习</h1>
         <div className="segmented study-mode-options" aria-label="学习模式">
-          <button className={mode === "study" ? "active" : ""} onClick={enterStudy} type="button">
+          <button
+            aria-keyshortcuts={mode === "staff-recall" ? "Escape" : undefined}
+            className={mode === "study" ? "active" : ""}
+            onClick={enterStudy}
+            type="button"
+          >
             学习
+            {mode === "staff-recall" ? <kbd>Esc</kbd> : null}
           </button>
           <button
             className={mode === "staff-recall" ? "active" : ""}

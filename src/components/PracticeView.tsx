@@ -50,6 +50,7 @@ import type {
   WrongAnswer,
 } from "../domain/types";
 import { GlobalRangeControls } from "./GlobalRangeControls";
+import { isInteractiveShortcutTarget, shouldHandleGlobalEnter } from "./keyboardShortcuts";
 import {
   SessionProgressChart,
   SessionProgressControls,
@@ -1409,6 +1410,27 @@ export function PracticeView({
         ? "请至少选择一个强化音名"
         : undefined;
   const setupDisabled = setupDisabledReason !== undefined;
+
+  useEffect(() => {
+    if (phase === "running") {
+      return;
+    }
+
+    function handleEnter(event: KeyboardEvent): void {
+      if (
+        !shouldHandleGlobalEnter(event, isInteractiveShortcutTarget(event.target)) ||
+        (phase === "setup" && setupDisabled)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      void startSession();
+    }
+
+    window.addEventListener("keydown", handleEnter);
+    return () => window.removeEventListener("keydown", handleEnter);
+  }, [phase, setupDisabled, startSession]);
+
   const remainingMs = mode === "fixed-duration" ? fixedDurationSeconds * 1000 - getSessionActiveMs() : 0;
   const staffPageRowCount = Math.max(
     1,
@@ -1648,9 +1670,14 @@ export function PracticeView({
 
             <div className="action-row">
               <span className="practice-start-action" tabIndex={setupDisabled ? 0 : undefined}>
-                <button className="primary" disabled={setupDisabled} onClick={() => void startSession()}>
+                <button
+                  aria-keyshortcuts="Enter"
+                  className="primary"
+                  disabled={setupDisabled}
+                  onClick={() => void startSession()}
+                >
                   <Play size={18} />
-                  开始
+                  开始<kbd>Enter</kbd>
                 </button>
                 {setupDisabledReason ? (
                   <span className="practice-start-tooltip" role="tooltip">
@@ -1738,9 +1765,9 @@ export function PracticeView({
             </section>
           ) : null}
           <div className="action-row">
-            <button className="primary" onClick={() => void startSession()}>
+            <button aria-keyshortcuts="Enter" className="primary" onClick={() => void startSession()}>
               <RotateCcw size={18} />
-              再来一次
+              再来一次<kbd>Enter</kbd>
             </button>
             <button onClick={() => setPhase("setup")}>
               <SlidersHorizontal size={18} />
@@ -1782,17 +1809,21 @@ export function PracticeView({
           )}
         </div>
         <div className="topline-actions">
-          <button title="重播目标音 Space" onClick={() => void replayTarget()}>
+          <button aria-keyshortcuts="Space" title="重播目标音 Space" onClick={() => void replayTarget()}>
             <Volume2 size={18} />
-            重播
+            重播<kbd>空格</kbd>
           </button>
-          <button title={isPaused ? "继续 P" : "暂停 P"} onClick={togglePause}>
+          <button aria-keyshortcuts="P" title={isPaused ? "继续 P" : "暂停 P"} onClick={togglePause}>
             {isPaused ? <Play size={18} /> : <Pause size={18} />}
-            {isPaused ? "继续" : "暂停"}
+            {isPaused ? "继续" : "暂停"}<kbd>P</kbd>
           </button>
-          <button title="结束 Esc" onClick={() => void completeSession("manual-stop", "manual-stop")}>
+          <button
+            aria-keyshortcuts="Escape"
+            title="结束 Esc"
+            onClick={() => void completeSession("manual-stop", "manual-stop")}
+          >
             <Square fill="currentColor" size={14} strokeWidth={0} />
-            结束
+            结束<kbd>Esc</kbd>
           </button>
         </div>
       </div>

@@ -21,6 +21,7 @@ import { buildTargetNoteSetKey } from "../domain/targetNoteSet";
 import { formatMs, percentile } from "../domain/stats";
 import type { AppSettings, NoteName, StaffRecallRunRecord, TargetNote, TargetNoteId } from "../domain/types";
 import { HistoryLimitControl } from "./HistoryLimitControl";
+import { isInteractiveShortcutTarget, shouldHandleGlobalEnter } from "./keyboardShortcuts";
 import { PauseOverlay } from "./PauseOverlay";
 import { StaffRecallMap, type StaffRecallColumnState } from "./StaffRecallMap";
 import { StaffRecallTrendChart } from "./StaffRecallTrendChart";
@@ -267,11 +268,17 @@ export function StaffRecallView({
       if (event.code === "KeyP" && !event.repeat && isPausedRef.current) {
         event.preventDefault();
         resumeRecall();
+        return;
       }
+      if (!completedRun || !shouldHandleGlobalEnter(event, isInteractiveShortcutTarget(event.target))) {
+        return;
+      }
+      event.preventDefault();
+      restartRun();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [resumeRecall]);
+  }, [completedRun, restartRun, resumeRecall]);
 
   const persistCompletedRun = useCallback(
     async (nextStates: Record<NoteName, StaffRecallColumnState>): Promise<void> => {
@@ -490,9 +497,9 @@ export function StaffRecallView({
                 </strong>
               </div>
             </div>
-            <button className="primary" onClick={restartRun} type="button">
+            <button aria-keyshortcuts="Enter" className="primary" onClick={restartRun} type="button">
               <RotateCcw size={18} />
-              再来一次
+              再来一次<kbd>Enter</kbd>
             </button>
           </div>
           <div className="staff-recall-trend-heading">

@@ -421,7 +421,7 @@ export function PianoKeyboard({
                 style={keyStyle}
                 type="button"
               >
-                {definition.label ? <span>{definition.label}</span> : null}
+                {definition.label ? <kbd>{definition.label}</kbd> : null}
               </button>
             );
           })}

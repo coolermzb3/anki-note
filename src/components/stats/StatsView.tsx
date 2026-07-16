@@ -1,4 +1,3 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -692,11 +691,12 @@ export function StatsView({
         <div className="chart-carousel-nav stats-card-carousel-nav" aria-label="统计卡片切换" role="group">
           <button
             aria-label="查看上一组统计卡片"
+            aria-keyshortcuts="ArrowLeft"
             className="chart-carousel-arrow"
             onClick={() => moveStatsCarousel(-1)}
             type="button"
           >
-            <ChevronLeft size={20} />
+            <kbd aria-hidden="true">←</kbd>
           </button>
           <div className="chart-carousel-dots" aria-label="统计卡片位置">
             {STATS_CAROUSEL_CARD_IDS.map((cardId, index) => (
@@ -713,11 +713,12 @@ export function StatsView({
           </div>
           <button
             aria-label="查看下一组统计卡片"
+            aria-keyshortcuts="ArrowRight"
             className="chart-carousel-arrow"
             onClick={() => moveStatsCarousel(1)}
             type="button"
           >
-            <ChevronRight size={20} />
+            <kbd aria-hidden="true">→</kbd>
           </button>
         </div>
       </div>

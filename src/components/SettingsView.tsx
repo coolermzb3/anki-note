@@ -1,5 +1,5 @@
 import { DatabaseBackup, Download, FolderOpen, Upload } from "lucide-react";
-import { type WheelEvent, useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import {
   chooseBackupDirectory,
   restoreBackupFromDirectory,
@@ -14,6 +14,7 @@ import type { AppSettings, BackupState } from "../domain/types";
 import { BackupConflictActionContent } from "./BackupConflictActionContent";
 import { PausedPlaybackBpmInput } from "./PausedPlaybackBpmInput";
 import { PlayableKeyboardPreview } from "./PlayableKeyboardPreview";
+import { handleWheelStep } from "./settingsWheel";
 import {
   DEFAULT_STAFF_PAGE_UI_PREFERENCES,
   parseStaffPageUiPreferences,
@@ -23,6 +24,29 @@ import { useLocalStorageState } from "./useLocalStorageState";
 
 type StoredBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean };
 const PIANO_VOLUME_STEP = 0.05;
+const ANSWER_KEYBOARD_SCALE_STEP = 0.05;
+
+function useWheelSteps<T extends HTMLElement>(
+  elementRef: RefObject<T>,
+  onStep: (direction: -1 | 1) => void,
+): void {
+  const onStepRef = useRef(onStep);
+  onStepRef.current = onStep;
+
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element) {
+      return;
+    }
+
+    function handleWheel(event: WheelEvent): void {
+      handleWheelStep(event, onStepRef.current);
+    }
+
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    return () => element.removeEventListener("wheel", handleWheel);
+  }, [elementRef]);
+}
 
 function truncateStart(value: string, maxLength = 24): string {
   if (value.length <= maxLength) {
@@ -63,6 +87,8 @@ export function SettingsView({
   );
   const pianoVolumeRef = useRef(pianoVolumeDraft);
   const answerKeyboardScaleRef = useRef(answerKeyboardScaleDraft);
+  const pianoVolumeControlRef = useRef<HTMLLabelElement>(null);
+  const answerKeyboardScaleControlRef = useRef<HTMLLabelElement>(null);
   const storedBackupState = backupState as StoredBackupState;
   const backupBlockedUntilSync = Boolean(
     backupState.dataConflictBeforeBackup ?? backupState.syncRequiredBeforeBackup ?? storedBackupState.restoreRequiredBeforeBackup,
@@ -98,11 +124,6 @@ export function SettingsView({
     void saveSettings({ ...settings, pianoVolume: normalizedVolume });
   }
 
-  function handlePianoVolumeWheel(event: WheelEvent<HTMLLabelElement>): void {
-    event.preventDefault();
-    savePianoVolume(pianoVolumeRef.current + (event.deltaY < 0 ? PIANO_VOLUME_STEP : -PIANO_VOLUME_STEP));
-  }
-
   function saveAnswerKeyboardScale(nextScale: number): void {
     const normalizedScale = normalizeAnswerKeyboardScale(nextScale);
     if (normalizedScale === answerKeyboardScaleRef.current) {
@@ -112,6 +133,13 @@ export function SettingsView({
     setAnswerKeyboardScaleDraft(normalizedScale);
     void saveSettings({ ...settings, answerKeyboardScale: normalizedScale });
   }
+
+  useWheelSteps(pianoVolumeControlRef, (direction) => {
+    savePianoVolume(pianoVolumeRef.current + direction * PIANO_VOLUME_STEP);
+  });
+  useWheelSteps(answerKeyboardScaleControlRef, (direction) => {
+    saveAnswerKeyboardScale(answerKeyboardScaleRef.current + direction * ANSWER_KEYBOARD_SCALE_STEP);
+  });
 
   function describeDirectorySelection(result: BackupDirectorySelectionResult, selectedBackupState: BackupState): string {
     if (result === "diverged") {
@@ -192,7 +220,7 @@ export function SettingsView({
             <strong>音量</strong>
             <span>目标音、学习页和琴键预览播放音量</span>
           </div>
-          <label className="volume-control" onWheel={handlePianoVolumeWheel}>
+          <label className="volume-control" ref={pianoVolumeControlRef}>
             <input
               aria-label="音量"
               max={100}
@@ -251,7 +279,7 @@ export function SettingsView({
             <strong>琴键大小</strong>
             <span>练习页以此尺寸为基准</span>
           </div>
-          <label className="volume-control">
+          <label className="volume-control" ref={answerKeyboardScaleControlRef}>
             <input
               aria-label="琴键大小"
               max={150}
