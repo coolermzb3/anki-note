@@ -412,6 +412,17 @@ export function PracticeView({
   const lastBackupAtRef = useRef<number>(performance.now());
   const handledNavigationExitRequestIdRef = useRef<number | null>(null);
 
+  function blurQueueStrategyAfterPointerClick(input: HTMLInputElement, clickCount: number): void {
+    if (clickCount === 0) {
+      return;
+    }
+    window.setTimeout(() => {
+      if (document.activeElement === input) {
+        input.blur();
+      }
+    }, 0);
+  }
+
   const getRemainingPlaybackNotes = useCallback((): TargetNote[] => {
     const page = staffPageRef.current;
     const startIndex = page ? Math.max(page.index, page.completedCount) : 0;
@@ -1622,6 +1633,7 @@ export function PracticeView({
                       name="practice-queue-strategy"
                       type="radio"
                       value={option.strategy}
+                      onClick={(event) => blurQueueStrategyAfterPointerClick(event.currentTarget, event.detail)}
                       onChange={() => setQueueStrategy(option.strategy)}
                     />
                     <div className="choice-body">
