@@ -11,6 +11,7 @@ import { getBackupState } from "../data/db";
 import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "../domain/backupText";
 import { normalizeAnswerKeyboardScale, normalizePianoVolume } from "../domain/settings";
 import type { AppSettings, BackupState } from "../domain/types";
+import type { MidiInputController } from "../midi/useMidiInput";
 import { BackupConflictActionContent } from "./BackupConflictActionContent";
 import { PausedPlaybackBpmInput } from "./PausedPlaybackBpmInput";
 import { PlayableKeyboardPreview } from "./PlayableKeyboardPreview";
@@ -65,6 +66,7 @@ interface SettingsViewProps {
   hasBrowserData: boolean;
   onSettingsSaved: (settings: AppSettings) => void | Promise<void>;
   onDataChanged: () => Promise<void>;
+  midi: MidiInputController;
 }
 
 export function SettingsView({
@@ -73,6 +75,7 @@ export function SettingsView({
   hasBrowserData,
   onSettingsSaved,
   onDataChanged,
+  midi,
 }: SettingsViewProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -274,6 +277,56 @@ export function SettingsView({
       </div>
 
       <div className="panel settings-panel keyboard-settings-panel">
+        <div className="setting-row">
+          <div>
+            <strong>MIDI 键盘</strong>
+            <span>
+              {midi.status === "insecure-context"
+                ? "当前页面不是安全连接，请改用 HTTPS 或本机 localhost"
+                : midi.status === "unsupported"
+                  ? "当前浏览器不支持 Web MIDI"
+                  : midi.status === "requesting"
+                    ? "正在请求 MIDI 权限…"
+                    : midi.isConnected
+                      ? `已连接：${midi.selectedInput?.name}`
+                      : midi.status === "ready"
+                        ? midi.inputs.length > 0 ? "请选择 MIDI 输入设备" : "未检测到可用的 MIDI 输入"
+                        : midi.errorMessage ?? "连接后可选择设备并测试按键"}
+            </span>
+          </div>
+          {midi.status === "ready" && midi.inputs.length > 0 ? (
+            <select
+              aria-label="MIDI 输入设备"
+              value={midi.selectedInput ? midi.selectedInputId : ""}
+              onChange={(event) => midi.selectInput(event.target.value)}
+            >
+              {!midi.selectedInput ? <option disabled value="">请选择 MIDI 输入</option> : null}
+              {midi.inputs.map((input) => (
+                <option key={input.id} value={input.id}>
+                  {input.manufacturer ? `${input.manufacturer} · ` : ""}{input.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <button
+              disabled={
+                midi.status === "requesting" ||
+                midi.status === "insecure-context" ||
+                midi.status === "unsupported"
+              }
+              onClick={() => void midi.connect()}
+            >
+              {midi.status === "denied" || midi.status === "error" ? "重新连接" : "连接 MIDI"}
+            </button>
+          )}
+        </div>
+        {midi.isConnected ? (
+          <p className="keyboard-settings-description" aria-live="polite">
+            测试输入：{midi.lastNote
+              ? `${midi.lastNote.keyName}${midi.lastNote.octave}`
+              : "请按下一个琴键"}
+          </p>
+        ) : null}
         <div className="setting-row keyboard-size-row">
           <div>
             <strong>琴键大小</strong>

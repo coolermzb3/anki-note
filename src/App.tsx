@@ -26,6 +26,7 @@ import { SettingsView } from "./components/SettingsView";
 import { StatsView } from "./components/stats/StatsView";
 import { StudyView, type StaffRecallStartPreflightResult } from "./components/StudyView";
 import { useBlurButtonAfterPointerClick } from "./components/useBlurButtonAfterPointerClick";
+import { useMidiInput } from "./midi/useMidiInput";
 
 type View = PracticeNavigationExitTarget;
 
@@ -129,6 +130,7 @@ async function loadFreshAppData(): Promise<AppData> {
 
 export function App(): JSX.Element {
   useBlurButtonAfterPointerClick();
+  const midi = useMidiInput();
 
   const [view, setView] = useState<View>(readInitialView);
   const [data, setData] = useState<AppData | null>(null);
@@ -608,6 +610,7 @@ export function App(): JSX.Element {
         ) : null}
         {view === "practice" ? (
           <PracticeView
+            midi={midi}
             settings={data.settings}
             sessions={data.sessions}
             reviews={data.reviews}
@@ -615,6 +618,7 @@ export function App(): JSX.Element {
             onDataChanged={refresh}
             onNavigationExit={handleNavigationExit}
             onOpenStats={() => setView("stats")}
+            onOpenSettings={() => setView("settings")}
             onBeforePracticeStart={preflightBeforePracticeStart}
             onPracticeFinished={showBackupReminderAfterActivity}
             onRunningChange={setPracticeRunning}
@@ -644,6 +648,7 @@ export function App(): JSX.Element {
             backupState={data.backupState}
             hasBrowserData={hasBrowserData}
             settings={data.settings}
+            midi={midi}
             onDataChanged={refresh}
             onSettingsSaved={saveSettings}
           />

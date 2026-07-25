@@ -11,6 +11,7 @@ const settings: AppSettings = {
   createdAt: "2026-07-04T00:00:00.000+08:00",
   firstReviewAt: "2026-07-04T10:00:00.000+08:00",
   enabledGroupIds: ["G3-F4"],
+  answerPitchMode: "note-name",
   defaultMode: "open-ended",
   promptDisplayMode: "single-note",
   promptNoteDuration: "whole",

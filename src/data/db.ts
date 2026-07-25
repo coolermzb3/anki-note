@@ -1,4 +1,5 @@
 import Dexie, { type Table } from "dexie";
+import { normalizeAnswerPitchMode } from "../domain/answerInput";
 import { createUuid } from "../domain/id";
 import {
   DEFAULT_ENABLED_GROUPS,
@@ -75,6 +76,7 @@ export function makeDefaultSettings(): AppSettings {
     fixedDurationSeconds: 60,
     autoPlayTarget: false,
     playAnswerNote: true,
+    answerPitchMode: "note-name",
     includeInterStaffLedgerSpellings: false,
     answerKeyboardScale: DEFAULT_ANSWER_KEYBOARD_SCALE,
     pianoVolume: DEFAULT_PIANO_VOLUME,
@@ -117,6 +119,7 @@ export function normalizeAppSettings(existing: StoredAppSettings): AppSettings {
     fixedDurationSeconds: existing.fixedDurationSeconds ?? defaults.fixedDurationSeconds,
     autoPlayTarget: existing.autoPlayTarget ?? defaults.autoPlayTarget,
     playAnswerNote: existing.playAnswerNote ?? defaults.playAnswerNote,
+    answerPitchMode: normalizeAnswerPitchMode(existing.answerPitchMode),
     includeInterStaffLedgerSpellings:
       existing.schemaVersion === 2
         ? existing.includeInterStaffLedgerSpellings ?? defaults.includeInterStaffLedgerSpellings

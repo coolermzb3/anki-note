@@ -2,6 +2,7 @@ import { getNotesForGroups } from "./notes";
 import { buildTargetNoteSetKey } from "./targetNoteSet";
 import type {
   AppSettings,
+  AnswerPitchMode,
   EffectiveQueueAlgorithm,
   NoteName,
   PracticeQueueStrategy,
@@ -13,6 +14,7 @@ import type {
 } from "./types";
 
 export interface PracticeComparisonSnapshot {
+  answerPitchMode: AnswerPitchMode;
   effectiveQueueAlgorithm: EffectiveQueueAlgorithm;
   promptDisplayMode: PromptDisplayMode;
   promptNoteDuration: PromptNoteDuration;
@@ -24,6 +26,7 @@ export interface PracticeActivitySnapshot extends PracticeComparisonSnapshot {
 }
 
 export interface PracticeComparisonInput {
+  answerPitchMode?: AnswerPitchMode;
   drillNoteNames: readonly NoteName[];
   enabledGroupIds: AppSettings["enabledGroupIds"];
   includeInterStaffLedgerSpellings: boolean;
@@ -80,6 +83,7 @@ export function getEffectivePracticeNotes({
 }
 
 export function buildPracticeComparisonSnapshot({
+  answerPitchMode,
   drillNoteNames,
   enabledGroupIds,
   includeInterStaffLedgerSpellings,
@@ -89,6 +93,7 @@ export function buildPracticeComparisonSnapshot({
   staffNotationMode,
 }: PracticeComparisonInput): PracticeComparisonSnapshot | undefined {
   const activity = buildPracticeActivitySnapshot({
+    answerPitchMode,
     drillNoteNames,
     enabledGroupIds,
     includeInterStaffLedgerSpellings,
@@ -105,6 +110,7 @@ export function buildPracticeComparisonSnapshot({
 }
 
 export function buildPracticeActivitySnapshot({
+  answerPitchMode = "note-name",
   drillNoteNames,
   enabledGroupIds,
   includeInterStaffLedgerSpellings,
@@ -124,6 +130,7 @@ export function buildPracticeActivitySnapshot({
     return undefined;
   }
   return {
+    answerPitchMode,
     effectiveQueueAlgorithm: getEffectiveQueueAlgorithm(queueStrategy),
     notes,
     promptDisplayMode,

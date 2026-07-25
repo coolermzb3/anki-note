@@ -4,7 +4,7 @@ The statistics page first derives the target-note set from its global range and 
 
 ## Conditions and selection
 
-The statistics page's global range and staff controls define the effective target-note set. Within that set, exact groups form a sparse valid-combination cube over prompt display mode, effective queue algorithm, and prompt note duration. Three selectors expose these coordinates. A single selection is one occupied cell; a multi-selection is an axis-aligned slice with several values on at most one coordinate and occupied cells for every requested value.
+The statistics page's global range and staff controls define the effective target-note set. Within that set, exact groups form a sparse valid-combination cube over answer-pitch mode, prompt display mode, effective queue algorithm, and prompt note duration. Four selectors expose these coordinates. A single selection is one occupied cell; a multi-selection is an axis-aligned slice with several values on at most one coordinate and occupied cells for every requested value.
 
 The latest user edit is authoritative. The resolver changes the fewest other coordinates needed to reach a valid point or slice, then breaks ties with the candidate whose time-benchmark group has the most recent eligible session. An impossible slice is rejected with an explanation. Clicking an option body replaces the current selection and closes the menu; its separate checkbox adds or removes that value for comparison without closing the menu. Menus also close after an outside click, Escape, or opening another selector. When a new multi-selection dimension replaces an existing one, a temporary inline notice explains that only one dimension may be multi-selected.
 

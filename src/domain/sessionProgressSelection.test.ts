@@ -6,13 +6,14 @@ import {
   getSessionProgressComparisonDimension,
   resolveSessionProgressSelection,
 } from "./sessionProgressSelection";
-import type { PracticeSessionRecordV1, PromptDisplayMode, QueueComparisonFamily } from "./types";
+import type { AnswerPitchMode, PracticeSessionRecordV1, PromptDisplayMode, QueueComparisonFamily } from "./types";
 
 function group(
   id: string,
   promptDisplayMode: PromptDisplayMode,
   queueComparisonFamily: QueueComparisonFamily,
   startedAt: string,
+  answerPitchMode: AnswerPitchMode = "note-name",
 ): SessionProgressGroup {
   const latestSession: PracticeSessionRecordV1 = {
     completedCount: 5,
@@ -24,6 +25,7 @@ function group(
     startedAt,
   };
   const key = {
+    answerPitchMode,
     queueComparisonFamily,
     promptDisplayMode,
     promptNoteDuration: "quarter" as const,
@@ -31,7 +33,7 @@ function group(
   };
   return {
     key,
-    keyString: [key.targetNoteSetKey, promptDisplayMode, queueComparisonFamily, key.promptNoteDuration].join("\u001f"),
+    keyString: [key.targetNoteSetKey, key.answerPitchMode, promptDisplayMode, queueComparisonFamily, key.promptNoteDuration].join("\u001f"),
     latestSession,
     sessionCount: 1,
     sessionIds: [latestSession.id],
@@ -39,6 +41,28 @@ function group(
 }
 
 describe("session progress selection", () => {
+  it("keeps note-name and exact-pitch records in separate selectable groups", () => {
+    const noteName = group("note-name", "staff-page", "adaptive", "2026-07-01T10:00:00.000Z");
+    const exactPitch = group(
+      "exact-pitch",
+      "staff-page",
+      "adaptive",
+      "2026-07-02T10:00:00.000Z",
+      "exact-pitch",
+    );
+    const result = resolveSessionProgressSelection({
+      current: createSessionProgressSelection(noteName),
+      dimension: "answerPitchMode",
+      groups: [noteName, exactPitch],
+      preferredValue: "exact-pitch",
+      values: ["note-name", "exact-pitch"],
+    });
+
+    expect(result.rejected).toBe(false);
+    expect(getSessionProgressComparisonDimension(result.selection)).toBe("answerPitchMode");
+    expect(getSelectedSessionProgressGroups([noteName, exactPitch], result.selection)).toHaveLength(2);
+  });
+
   it("reconciles other dimensions to the nearest valid single group", () => {
     const single = group("single", "single-note", "adaptive", "2026-07-01T10:00:00.000Z");
     const staff = group("staff", "staff-page", "melody-v2", "2026-07-02T10:00:00.000Z");

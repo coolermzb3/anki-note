@@ -419,7 +419,7 @@ describe("stats", () => {
       makeReview({
         targetNoteId: "F3",
         activeMs: 800,
-        wrongAnswers: (["A", "D", "B", "C"] as const).map((noteName, index) => ({
+        wrongAnswers: (["A", "D", "B", "C", "F"] as const).map((noteName, index) => ({
           noteName,
           atActiveMs: 500 + index * 100,
         })),
@@ -449,7 +449,7 @@ describe("stats", () => {
 
     const f3 = buildNoteStats(reviews).find((stat) => stat.targetNoteId === "F3")!;
     expect(f3.reviewCount).toBe(4);
-    expect(f3.errorCount).toBe(10);
+    expect(f3.errorCount).toBe(11);
     expect(f3.commonConfusion).toBe("A");
     expect(f3.commonConfusions).toEqual([
       { noteName: "A", count: 4 },

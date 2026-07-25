@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getPracticeSessionComparisonSnapshot } from "./legacyPracticeSessionCompatibility";
-import type { PracticeSessionRecordV2, PracticeSessionRecordV3 } from "./types";
+import type { PracticeSessionRecordV2, PracticeSessionRecordV3, PracticeSessionRecordV4 } from "./types";
 
 const v2Session: PracticeSessionRecordV2 = {
   completedCount: 5,
@@ -54,9 +54,28 @@ const v3Session: PracticeSessionRecordV3 = {
   },
 };
 
+const v4Session: PracticeSessionRecordV4 = {
+  ...v3Session,
+  answerPitchMode: "absolute-pitch",
+  id: "v4",
+  schemaVersion: 4,
+  startSnapshot: {
+    ...v3Session.startSnapshot,
+    practiceConfig: {
+      ...v3Session.startSnapshot.practiceConfig,
+      answerPitchMode: "absolute-pitch",
+    },
+  },
+};
+
 describe("legacy practice session compatibility", () => {
   it("treats V1/V2 duration as quarter and reads the V3 snapshot duration", () => {
     expect(getPracticeSessionComparisonSnapshot(v2Session)?.promptNoteDuration).toBe("quarter");
     expect(getPracticeSessionComparisonSnapshot(v3Session)?.promptNoteDuration).toBe("sixteenth");
+  });
+
+  it("defaults pre-MIDI sessions to note-name matching and reads V4 pitch matching", () => {
+    expect(getPracticeSessionComparisonSnapshot(v3Session)?.answerPitchMode).toBe("note-name");
+    expect(getPracticeSessionComparisonSnapshot(v4Session)?.answerPitchMode).toBe("exact-pitch");
   });
 });

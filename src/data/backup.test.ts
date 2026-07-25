@@ -301,6 +301,23 @@ describe("file backup side effects", () => {
     await expect(db.settings.get("default")).resolves.toMatchObject({ dataSetId: "dataset-backup" });
   });
 
+  it("normalizes the legacy answer-pitch key without rewriting the imported backup", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBackupDirectory(directory);
+    const manifest = directory.readJson<BackupManifest>("manifest.json");
+    (manifest.settings as unknown as { answerPitchMode: string }).answerPitchMode = "absolute-pitch";
+    directory.writeText("manifest.json", JSON.stringify(manifest));
+    await rememberDirectory(directory);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({ result: "synced-up" });
+
+    await expect(db.settings.get("default")).resolves.toMatchObject({ answerPitchMode: "exact-pitch" });
+    expect(
+      (directory.readJson<BackupManifest>("manifest.json").settings as unknown as { answerPitchMode: string })
+        .answerPitchMode,
+    ).toBe("absolute-pitch");
+  });
+
   it("imports staff-recall history from a backup-only directory", async () => {
     const directory = new MemoryDirectoryHandle("backup");
     const settings = makeSettings({ dataSetId: "dataset-backup" });

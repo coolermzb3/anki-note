@@ -4,6 +4,12 @@ import { playPianoNote, playTargetNote, setPianoVolume, unlockAudio } from "../a
 import { db, deletePracticeSessionWithReviews, resolveDrillNoteNames, resolveQueueStrategy, saveReview } from "../data/db";
 import { writeBackupIfSafe, writeBackupNow } from "../data/backup";
 import { createUuid } from "../domain/id";
+import {
+  isPracticeAnswerCorrect,
+  normalizeAnswerPitchMode,
+  resolveAvailableAnswerPitchMode,
+  type PracticeAnswerInput,
+} from "../domain/answerInput";
 import { createMelodyGenerationState } from "../domain/melody";
 import {
   ANSWER_BUTTONS,
@@ -15,7 +21,7 @@ import {
 import { shouldIgnoreReviewForSession, shouldKeepPracticeSession } from "../domain/practiceSession";
 import { getEffectivePracticeNotes } from "../domain/practiceComparison";
 import {
-  buildPracticeSessionRecordV3,
+  buildPracticeSessionRecordV4,
   buildPracticeSessionStartSnapshot,
 } from "../domain/practiceSessionStartSnapshot";
 import { isCompletedReview } from "../domain/reviews";
@@ -34,9 +40,11 @@ import {
 } from "../domain/stats";
 import type {
   AppSettings,
+  AnswerPitchMode,
   FocusLoss,
   InterruptReason,
   NoteName,
+  Octave,
   PracticeGroupId,
   PracticeMode,
   PracticeQueueStrategy,
@@ -49,6 +57,8 @@ import type {
   TargetNote,
   WrongAnswer,
 } from "../domain/types";
+import { MIDI_START_NOTE_NUMBER } from "../midi/midiInput";
+import type { MidiInputController } from "../midi/useMidiInput";
 import { GlobalRangeControls } from "./GlobalRangeControls";
 import { isInteractiveShortcutTarget, shouldHandleGlobalEnter } from "./keyboardShortcuts";
 import {
@@ -80,6 +90,7 @@ import { useDelayedBusy } from "./useDelayedBusy";
 import { useRemainingNotePlayback } from "./useRemainingNotePlayback";
 
 interface PracticeViewProps {
+  midi: MidiInputController;
   settings: AppSettings;
   sessions: PracticeSessionRecord[];
   reviews: ReviewRecord[];
@@ -88,6 +99,7 @@ interface PracticeViewProps {
   onSettingsSaved: (settings: AppSettings) => void | Promise<void>;
   onDataChanged: () => Promise<void>;
   onOpenStats: () => void;
+  onOpenSettings: () => void;
   onBeforePracticeStart: () => Promise<PracticeStartPreflightResult>;
   onPracticeFinished: () => void;
   onRunningChange: (running: boolean) => void;
@@ -138,6 +150,7 @@ interface CompleteSessionOptions {
 }
 
 interface PracticeSetupUiPreferences {
+  answerPitchMode: AnswerPitchMode;
   autoPlayTarget: boolean;
   playAnswerNote: boolean;
   drillNoteNames: NoteName[];
@@ -245,6 +258,7 @@ function normalizeDrillNoteNames(value: unknown, fallback: NoteName[]): NoteName
 
 function makeDefaultPracticeSetupUiPreferences(settings: AppSettings): PracticeSetupUiPreferences {
   return {
+    answerPitchMode: settings.answerPitchMode,
     autoPlayTarget: settings.autoPlayTarget,
     playAnswerNote: settings.playAnswerNote,
     drillNoteNames: resolveDrillNoteNames(settings),
@@ -266,6 +280,7 @@ function parsePracticeSetupUiPreferences(
   }
 
   return {
+    answerPitchMode: normalizeAnswerPitchMode(value.answerPitchMode, fallback.answerPitchMode),
     autoPlayTarget: typeof value.autoPlayTarget === "boolean" ? value.autoPlayTarget : fallback.autoPlayTarget,
     playAnswerNote: typeof value.playAnswerNote === "boolean" ? value.playAnswerNote : fallback.playAnswerNote,
     drillNoteNames: normalizeDrillNoteNames(value.drillNoteNames, fallback.drillNoteNames),
@@ -281,6 +296,7 @@ function parsePracticeSetupUiPreferences(
 }
 
 export function PracticeView({
+  midi,
   settings,
   sessions,
   reviews,
@@ -289,6 +305,7 @@ export function PracticeView({
   onSettingsSaved,
   onDataChanged,
   onOpenStats,
+  onOpenSettings,
   onBeforePracticeStart,
   onPracticeFinished,
   onRunningChange,
@@ -317,8 +334,12 @@ export function PracticeView({
   const [currentNote, setCurrentNote] = useState<TargetNote | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
   const [wrongAnswerCount, setWrongAnswerCount] = useState(0);
-  const [feedback, setFeedback] = useState<{ type: "wrong" | "correct"; noteName?: NoteName } | null>(null);
-  const [heldHardwareAnswerKeys, setHeldHardwareAnswerKeys] = useState<ReadonlySet<PianoKeyName>>(() => new Set());
+  const [feedback, setFeedback] = useState<{
+    type: "wrong" | "correct";
+    noteName?: NoteName;
+  } | null>(null);
+  const [heldComputerAnswerKeys, setHeldComputerAnswerKeys] = useState<ReadonlySet<PianoKeyName>>(() => new Set());
+  const [heldMidiAnswerKeys, setHeldMidiAnswerKeys] = useState<ReadonlySet<PianoKeyName>>(() => new Set());
   const [tick, setTick] = useState(0);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
   const [staffPageNotes, setStaffPageNotes] = useState<TargetNote[]>([]);
@@ -330,7 +351,12 @@ export function PracticeView({
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
     typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false,
   );
-  const runningStartSnapshot = phase === "running" && session?.schemaVersion === 3 ? session.startSnapshot : undefined;
+  const runningStartSnapshot = phase === "running" && (session?.schemaVersion === 3 || session?.schemaVersion === 4)
+    ? session.startSnapshot
+    : undefined;
+  const answerPitchMode = runningStartSnapshot
+    ? normalizeAnswerPitchMode(runningStartSnapshot.practiceConfig.answerPitchMode)
+    : resolveAvailableAnswerPitchMode(practiceSetupPreferences.answerPitchMode, midi.isConnected);
   const mode = runningStartSnapshot?.practiceConfig.mode ?? practiceSetupPreferences.mode;
   const promptDisplayMode = runningStartSnapshot?.presentationConfig.promptDisplayMode ?? practiceSetupPreferences.promptDisplayMode;
   const promptNoteDuration = runningStartSnapshot?.presentationConfig.promptNoteDuration ?? practiceSetupPreferences.promptNoteDuration;
@@ -354,6 +380,9 @@ export function PracticeView({
   const summaryHistoryLimit = sessionProgressPreferences.historyLimit;
   const setMode = (nextMode: PracticeMode): void => {
     setPracticeSetupPreferences((current) => ({ ...current, mode: nextMode }));
+  };
+  const setAnswerPitchMode = (nextAnswerPitchMode: AnswerPitchMode): void => {
+    setPracticeSetupPreferences((current) => ({ ...current, answerPitchMode: nextAnswerPitchMode }));
   };
   const setPromptDisplayMode = (nextPromptDisplayMode: PromptDisplayMode): void => {
     setPracticeSetupPreferences((current) => ({ ...current, promptDisplayMode: nextPromptDisplayMode }));
@@ -411,6 +440,14 @@ export function PracticeView({
   const lastBackupCompletedRef = useRef(0);
   const lastBackupAtRef = useRef<number>(performance.now());
   const handledNavigationExitRequestIdRef = useRef<number | null>(null);
+  const heldMidiInputsRef = useRef(new Map<string, PianoKeyName>());
+  const startSessionRef = useRef<() => void>(() => undefined);
+  const submitAnswerRef = useRef<(answer: PracticeAnswerInput) => void>(() => undefined);
+
+  const pressedAnswerKeys = useMemo(
+    () => new Set<PianoKeyName>([...heldComputerAnswerKeys, ...heldMidiAnswerKeys]),
+    [heldComputerAnswerKeys, heldMidiAnswerKeys],
+  );
 
   function blurQueueStrategyAfterPointerClick(input: HTMLInputElement, clickCount: number): void {
     if (clickCount === 0) {
@@ -496,6 +533,7 @@ export function PracticeView({
   const setupSettings = useMemo<AppSettings>(
     () => ({
       ...settings,
+      answerPitchMode,
       autoPlayTarget,
       playAnswerNote,
       defaultMode: mode,
@@ -508,6 +546,7 @@ export function PracticeView({
       queueStrategy,
     }),
     [
+      answerPitchMode,
       autoPlayTarget,
       playAnswerNote,
       drillNoteNames,
@@ -615,6 +654,9 @@ export function PracticeView({
     if (!isPausedRef.current) {
       return;
     }
+    if (answerPitchMode === "exact-pitch" && !midi.isConnected) {
+      return;
+    }
     cancelRemainingPlayback();
     isPausedRef.current = false;
     setIsPaused(false);
@@ -630,7 +672,7 @@ export function PracticeView({
         void playTargetNote(promptRef.current.note).catch(() => undefined);
       }
     }
-  }, [autoPlayTarget, cancelRemainingPlayback, resumeActiveTimers]);
+  }, [answerPitchMode, autoPlayTarget, cancelRemainingPlayback, midi.isConnected, resumeActiveTimers]);
 
   const togglePause = useCallback((): void => {
     if (isPausedRef.current) {
@@ -654,9 +696,16 @@ export function PracticeView({
     pausePractice("focus-lost");
   }, [pausePractice]);
 
+  useEffect(() => {
+    if (phase === "running" && answerPitchMode === "exact-pitch" && !midi.isConnected) {
+      pausePractice("midi-disconnected");
+    }
+  }, [answerPitchMode, midi.isConnected, pausePractice, phase]);
+
   const persistConfig = useCallback(async (): Promise<AppSettings> => {
     const nextSettings: AppSettings = {
       ...settings,
+      answerPitchMode,
       defaultMode: mode,
       promptDisplayMode,
       promptNoteDuration,
@@ -671,6 +720,7 @@ export function PracticeView({
     await onSettingsSaved(nextSettings);
     return nextSettings;
   }, [
+    answerPitchMode,
     autoPlayTarget,
     playAnswerNote,
     fixedCount,
@@ -1082,7 +1132,7 @@ export function PracticeView({
   }, [completeSession, navigationExitRequest, onNavigationExit, phase]);
 
   const startSession = useCallback(async (): Promise<void> => {
-    if (queueNotes.length === 0) {
+    if (queueNotes.length === 0 || (answerPitchMode === "exact-pitch" && !midi.isConnected)) {
       return;
     }
     await runSessionStart(async () => {
@@ -1094,7 +1144,17 @@ export function PracticeView({
       if (preflightResult.settings) {
         applySettingsSnapshot(preflightResult.settings);
       }
-      const nextSettings = preflightResult.settings ?? (await persistConfig());
+      const preflightSettings = preflightResult.settings ?? (await persistConfig());
+      const availablePreflightAnswerPitchMode = resolveAvailableAnswerPitchMode(
+        preflightSettings.answerPitchMode,
+        midi.isConnected,
+      );
+      const nextSettings = preflightSettings.answerPitchMode === availablePreflightAnswerPitchMode
+        ? preflightSettings
+        : { ...preflightSettings, answerPitchMode: availablePreflightAnswerPitchMode };
+      if (nextSettings !== preflightSettings) {
+        await onSettingsSaved(nextSettings);
+      }
       const nextMode = nextSettings.defaultMode;
       const nextQueueStrategy = resolveQueueStrategy(nextSettings);
       const nextSchedulerReviews = preflightResult.reviews
@@ -1118,7 +1178,7 @@ export function PracticeView({
         presentationConfig.promptDisplayMode === "staff-page" && presentationConfig.startPausedReading;
       setPianoVolume(startSnapshot.interactionConfig.pianoVolume);
       const startedAt = new Date().toISOString();
-      const nextSession: PracticeSessionRecord = buildPracticeSessionRecordV3({
+      const nextSession: PracticeSessionRecord = buildPracticeSessionRecordV4({
         id: newSessionId(),
         snapshot: startSnapshot,
         startedAt,
@@ -1169,9 +1229,12 @@ export function PracticeView({
       }
     });
   }, [
+    answerPitchMode,
     applySettingsSnapshot,
     drawMelodyNote,
+    midi.isConnected,
     onBeforePracticeStart,
+    onSettingsSaved,
     persistConfig,
     queueNotes.length,
     runSessionStart,
@@ -1185,6 +1248,7 @@ export function PracticeView({
     startStaffPage,
     syncStaffPage,
   ]);
+  startSessionRef.current = () => void startSession();
 
   const replayTarget = useCallback(async (): Promise<void> => {
     const prompt = promptRef.current;
@@ -1197,25 +1261,33 @@ export function PracticeView({
   }, []);
 
   const submitAnswer = useCallback(
-    async (noteName: NoteName): Promise<void> => {
+    async (answer: PracticeAnswerInput): Promise<void> => {
       const prompt = promptRef.current;
       if (!prompt || isPausedRef.current || answerInputLockedRef.current) {
         return;
       }
       prompt.lastInputAt = performance.now();
       if (playAnswerNote) {
-        void playPianoNote(noteName, prompt.note.octave).catch(() => undefined);
+        const answerOctave = answer.octave;
+        if (answerOctave === undefined || (answerOctave >= 1 && answerOctave <= 6)) {
+          const playbackOctave = answerOctave === undefined ? prompt.note.octave : answerOctave as Octave;
+          void playPianoNote(answer.noteName, playbackOctave).catch(() => undefined);
+        }
       }
-      if (noteName !== prompt.note.noteName) {
-        prompt.wrongAnswers.push({ noteName, atActiveMs: getPromptActiveMs() });
+      if (!isPracticeAnswerCorrect(answer, prompt.note, answerPitchMode)) {
+        prompt.wrongAnswers.push({
+          noteName: answer.noteName,
+          atActiveMs: getPromptActiveMs(),
+          midiNoteNumber: answer.midiNoteNumber,
+        });
         setWrongAnswerCount((count) => count + 1);
-        setFeedback({ type: "wrong", noteName });
+        setFeedback({ type: "wrong", noteName: answer.noteName });
         window.setTimeout(() => setFeedback((current) => (current?.type === "wrong" ? null : current)), 450);
         return;
       }
 
       answerInputLockedRef.current = true;
-      setFeedback({ type: "correct", noteName });
+      setFeedback({ type: "correct", noteName: answer.noteName });
       const review = await finishCurrentReview(true);
       if (!review) {
         return;
@@ -1268,6 +1340,7 @@ export function PracticeView({
       }, sessionStartSnapshotRef.current?.interactionConfig.correctDelayMs ?? settings.correctDelayMs);
     },
     [
+      answerPitchMode,
       completeSession,
       completedCount,
       drillNoteNames,
@@ -1290,6 +1363,48 @@ export function PracticeView({
       startStaffPageIndex,
     ],
   );
+  submitAnswerRef.current = (answer) => void submitAnswer(answer);
+
+  useEffect(() => {
+    function syncHeldMidiKeys(): void {
+      setHeldMidiAnswerKeys(new Set(heldMidiInputsRef.current.values()));
+    }
+
+    const unsubscribe = midi.subscribe((event) => {
+      if (event.type === "reset") {
+        heldMidiInputsRef.current.clear();
+        syncHeldMidiKeys();
+        return;
+      }
+      if (!isNaturalPianoKey(event.note.keyName)) {
+        return;
+      }
+      if (event.type === "release") {
+        heldMidiInputsRef.current.delete(event.note.keyId);
+        syncHeldMidiKeys();
+        return;
+      }
+      heldMidiInputsRef.current.set(event.note.keyId, event.note.keyName);
+      syncHeldMidiKeys();
+      if (phase === "running") {
+        submitAnswerRef.current({
+          midiNoteNumber: event.note.midiNoteNumber,
+          noteName: event.note.keyName,
+          octave: event.note.octave,
+          source: "midi",
+        });
+        return;
+      }
+      if (event.note.midiNoteNumber === MIDI_START_NOTE_NUMBER) {
+        startSessionRef.current();
+      }
+    });
+    return () => {
+      unsubscribe();
+      heldMidiInputsRef.current.clear();
+      setHeldMidiAnswerKeys(new Set());
+    };
+  }, [midi.subscribe, phase]);
 
   useEffect(() => {
     if (phase !== "running") {
@@ -1338,10 +1453,10 @@ export function PracticeView({
         return;
       }
       const answer = ANSWER_BUTTONS.find((button) => event.key === button.key);
-      if (answer) {
+      if (answer && answerPitchMode === "note-name") {
         event.preventDefault();
-        setHeldHardwareAnswerKeys((current) => new Set(current).add(answer.noteName));
-        void submitAnswer(answer.noteName);
+        setHeldComputerAnswerKeys((current) => new Set(current).add(answer.noteName));
+        void submitAnswer({ noteName: answer.noteName, source: "computer-keyboard" });
       }
     }
 
@@ -1350,27 +1465,27 @@ export function PracticeView({
       if (!answer) {
         return;
       }
-      setHeldHardwareAnswerKeys((current) => {
+      setHeldComputerAnswerKeys((current) => {
         const next = new Set(current);
         next.delete(answer.noteName);
         return next;
       });
     }
 
-    function releaseHeldHardwareKeys(): void {
-      setHeldHardwareAnswerKeys(new Set());
+    function releaseHeldComputerKeys(): void {
+      setHeldComputerAnswerKeys(new Set());
     }
 
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", releaseHeldHardwareKeys);
+    window.addEventListener("blur", releaseHeldComputerKeys);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", releaseHeldHardwareKeys);
-      releaseHeldHardwareKeys();
+      window.removeEventListener("blur", releaseHeldComputerKeys);
+      releaseHeldComputerKeys();
     };
-  }, [completeSession, phase, promptDisplayMode, replayTarget, submitAnswer, togglePause, toggleRemainingPlayback]);
+  }, [answerPitchMode, completeSession, phase, promptDisplayMode, replayTarget, submitAnswer, togglePause, toggleRemainingPlayback]);
 
   useEffect(() => {
     if (phase !== "running") {
@@ -1506,7 +1621,14 @@ export function PracticeView({
           <div className="panel setup-panel">
             <div className="panel-heading">
               <h1>单音识谱</h1>
-              <p>1=C · 2=D · 3=E · 4=F · 5=G · 6=A · 7=B</p>
+              <div className="practice-setup-heading-meta">
+                <div className="practice-midi-heading-status">
+                  <span title={midi.selectedInput?.name}>
+                    {midi.isConnected ? `MIDI 已连接：${midi.selectedInput?.name}` : "MIDI 未连接 · 当前只认音名"}
+                  </span>
+                  <button onClick={onOpenSettings}>设备设置</button>
+                </div>
+              </div>
             </div>
 
             <div className="control-block">
@@ -1666,6 +1788,33 @@ export function PracticeView({
               </div>
             ) : null}
 
+            {midi.isConnected ? (
+              <div className="control-block">
+                <span className="control-label">答题判定</span>
+                <div className="display-options">
+                  <div className="segmented">
+                    <button
+                      className={answerPitchMode === "note-name" ? "active" : ""}
+                      onClick={() => setAnswerPitchMode("note-name")}
+                    >
+                      只认音名
+                    </button>
+                    <button
+                      className={answerPitchMode === "exact-pitch" ? "active" : ""}
+                      onClick={() => setAnswerPitchMode("exact-pitch")}
+                    >
+                      精确音高
+                    </button>
+                  </div>
+                  <span className="practice-answer-mode-description">
+                    {answerPitchMode === "note-name"
+                      ? "电脑键盘、屏幕琴键和 MIDI 可同时作答，不限八度"
+                      : "仅 MIDI 可作答，必须与谱面八度一致"}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
             <div className="control-block">
               <span className="control-label">声音</span>
               <div className="practice-checkbox-options">
@@ -1701,7 +1850,7 @@ export function PracticeView({
                   ) : (
                     <>
                       <Play size={18} />
-                      开始<kbd>Enter</kbd>
+                      开始<kbd>Enter</kbd>{midi.isConnected ? <kbd>C4</kbd> : null}
                     </>
                   )}
                 </button>
@@ -1802,7 +1951,7 @@ export function PracticeView({
               ) : (
                 <>
                   <RotateCcw size={18} />
-                  再来一次<kbd>Enter</kbd>
+                  再来一次<kbd>Enter</kbd>{midi.isConnected ? <kbd>C4</kbd> : null}
                 </>
               )}
             </button>
@@ -1893,15 +2042,15 @@ export function PracticeView({
       <PianoKeyboard
         ariaLabel="答案琴键"
         className="practice-piano-keyboard"
-        enabledKeys={NATURAL_PIANO_KEYS}
+        enabledKeys={answerPitchMode === "note-name" ? NATURAL_PIANO_KEYS : new Set<PianoKeyName>()}
         feedback={feedback?.noteName ? { keyName: feedback.noteName, type: feedback.type } : undefined}
         keyOctave={currentNote?.octave}
         onKeyPress={(key) => {
-          if (isNaturalPianoKey(key.keyName)) {
-            void submitAnswer(key.keyName);
+          if (answerPitchMode === "note-name" && isNaturalPianoKey(key.keyName)) {
+            void submitAnswer({ noteName: key.keyName, source: "screen-keyboard" });
           }
         }}
-        pressedKeys={heldHardwareAnswerKeys}
+        pressedKeys={pressedAnswerKeys}
         scale={effectiveAnswerKeyboardScale}
       />
       <span className="sr-only" aria-live="polite">
@@ -1912,6 +2061,11 @@ export function PracticeView({
           bpm={pausedPlaybackBpm}
           onBpmChange={setPausedPlaybackBpm}
           onResume={resumePractice}
+          resumeBlockedMessage={
+            answerPitchMode === "exact-pitch" && !midi.isConnected
+              ? "MIDI 连接已断开；重新连接后可继续练习"
+              : undefined
+          }
           onToggleRemainingPlayback={toggleRemainingPlayback}
           playbackState={remainingPlaybackState}
           showRemainingPlayback={promptDisplayMode === "staff-page"}

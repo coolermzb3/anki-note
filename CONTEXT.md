@@ -5,7 +5,7 @@ This context defines the language for a web app that trains piano staff note rec
 ## Language
 
 **Natural-note card**:
-A flashcard whose answer is one of the seven natural piano note names, without sharps or flats. The available range contains 37 natural pitches from F1 through G6 and two staff-specific target notes for each pitch, for 74 potential cards across all staff notation modes.
+A flashcard whose target is one of 37 natural piano pitches from F1 through G6, without sharps or flats; staff-specific spellings create 74 potential cards across all staff notation modes. The accepted answer identity is either its natural note name or its exact pitch, according to the answer-pitch mode.
 _Avoid_: Piano card, note card
 
 **Fixed-do number**:
@@ -13,7 +13,7 @@ The numeric fixed-do label paired with a natural note name: 1=C, 2=D, 3=E, 4=F, 
 _Avoid_: Scale degree, movable-do number, arbitrary answer number
 
 **Target note**:
-The exact card prompt shown to the learner, including its pitch, octave, and staff placement. A target note is the same learning and history identity wherever that pitch and staff placement appears; it determines staff position and audio pitch, but the learner answers only its natural note name.
+The exact card prompt shown to the learner, including its pitch, octave, and staff placement. A target note is the same learning and history identity wherever that pitch and staff placement appears.
 _Avoid_: Correct pitch
 
 **Effective target-note set**:
@@ -78,7 +78,7 @@ _Avoid_: Countdown, timed preview, queue strategy
 
 **Comparable practice session**:
 A fixed-count or fixed-duration practice session that can be compared with another session because it used the same
-effective target-note set, prompt display mode, queue comparison family, and prompt note duration.
+effective target-note set, answer-pitch mode, prompt display mode, queue comparison family, and prompt note duration.
 Direct comparability governs progress benchmarks and record claims. Fixed-count and fixed-duration sessions may be directly comparable because their review curves share the same underlying meaning, while open-ended sessions and automatic target-note playback do not enter this comparison.
 _Avoid_: Same round, identical UI state
 
@@ -139,12 +139,16 @@ _Avoid_: Target-note playback speed, practice difficulty, queue setting
 The note value used to draw each target note and set its onset interval and nominal sustain during paused remaining-note playback. It does not change ordinary target-note audio cues, recognition timing, scoring, or queue behavior; staff-page prompts prioritize aligned pairs of eighth notes and aligned groups of four sixteenth notes, then beam same-staff subsequences within each group.
 _Avoid_: Prompt display mode, playback duration, rhythm mode
 
+**Answer-pitch mode**:
+The practice condition that chooses between accepting the correct natural note name at any octave (`只认音名`) and requiring the exact MIDI pitch including octave (`精确音高`); exact-pitch mode is available only with a connected MIDI input. It is part of practice-session comparability because the two conditions have different scoring difficulty.
+_Avoid_: Absolute pitch, MIDI mode, answer source, display mode
+
 **Answer keyboard**:
-The piano-shaped answer control used to answer a card. Its seven white answer keys correspond to the absolute natural note names C, D, E, F, G, A, and B, while the five accidental keys remain unavailable until accidental-note answers are supported.
+The piano-shaped answer control used to answer a card in note-name mode. Its seven white answer keys correspond to C, D, E, F, G, A, and B, while the five accidental keys remain unavailable until accidental-note answers are supported.
 _Avoid_: Button row, virtual piano
 
 **Answer key**:
-One of the seven available white keys on the answer keyboard, labeled 1 through 7 for the corresponding fixed-do number. An answer key submits a natural note name without an octave.
+One of the seven available white keys on the answer keyboard, labeled 1 through 7 for the corresponding fixed-do number. It submits a natural note name without an octave and therefore cannot satisfy exact-pitch scoring.
 _Avoid_: Number button, scale-degree button, accidental key
 
 **Playable keyboard preview**:
@@ -152,15 +156,19 @@ The thirteen-key piano control in settings used to calibrate answer-keyboard siz
 _Avoid_: Answer keyboard, practice keyboard, size-only preview
 
 **Answer input**:
-The learner action that submits an answer note name, either by pressing an answer key on the answer keyboard or pressing the corresponding number key on a hardware keyboard. Both input methods have the same meaning.
-_Avoid_: Keyboard shortcut, button click
+The learner action that submits a natural-note answer from the answer keyboard, the corresponding computer number key, or the selected MIDI input. Every answer input carries a note name; MIDI answer input also carries exact pitch and octave.
+_Avoid_: Navigation shortcut, button click
 
 **Answer note name**:
-The natural note name submitted by the learner, independent of octave. A response is correct when the answer note name matches the target note's natural note name.
-_Avoid_: Pitch answer, octave answer
+The natural note-name component of an answer input, independent of octave. Matching it is sufficient only in note-name mode.
+_Avoid_: Exact pitch, target note
+
+**MIDI answer input**:
+An answer input from the selected MIDI device that preserves the exact MIDI pitch and octave. Natural notes may answer practice prompts, while accidental notes remain outside the current answer set.
+_Avoid_: Computer-keyboard input, MIDI shortcut, chord answer
 
 **Audio cue**:
-The piano sound played for a target note or answer input. When automatic target-note playback is enabled, a new prompt and every resume of a paused active prompt play the target note once; an answer input plays the corresponding natural note in the target note's octave.
+The piano sound played for a target note or answer input. Automatic target-note cues play for a new prompt and each resume, while an answer cue uses the submitted MIDI octave when supported or the target octave for an octave-less input.
 _Avoid_: Ear-training prompt, sound effect
 
 **Review**:
@@ -172,7 +180,7 @@ The active elapsed time from when a target-note prompt appears until the learner
 _Avoid_: Response time, click time
 
 **Interrupted review**:
-A review where the learner leaves or manually pauses the current prompt before answering correctly. The first version also treats a review as interrupted after 30 seconds of continuous inactivity or window unfocus, when a fixed-duration session ends, or when the learner stops an open-ended session with an unfinished prompt; interrupted reviews are excluded from default speed and error-rate statistics.
+A review whose active attempt is interrupted before the correct answer by leaving, pausing, inactivity, focus loss, session termination, or loss of a required MIDI input. Interrupted reviews are excluded from default speed and error-rate statistics.
 _Avoid_: Abandoned card, timeout
 
 **Statistical review**:
@@ -184,7 +192,7 @@ A statistical review containing at least three wrong answers before the correct 
 _Avoid_: Cheating review, difficult target note
 
 **Wrong answer**:
-An incorrect answer note name submitted during a review. Wrong answers belong to the review for the visible card and do not advance to the next card.
+An answer input that fails the active answer-pitch mode. In exact-pitch mode, the correct note name at the wrong octave is still a wrong answer; wrong answers remain on the visible review and do not advance it.
 _Avoid_: Failed card, incorrect review
 
 **Error rate**:
@@ -192,7 +200,7 @@ The share of reviews for a target note, practice group, or practice session that
 _Avoid_: Failure rate, miss rate
 
 **Common confusion**:
-The wrong answer note name most often submitted for a target note. Common confusions are used to identify notes that the learner repeatedly mistakes for another natural note name.
+The different wrong answer note name most often submitted for a target note. Exact-pitch mistakes that preserve the target note name count as errors but not as common confusions.
 _Avoid_: Easy mistake, wrong note
 
 **Eligible long-term review**:

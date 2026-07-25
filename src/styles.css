@@ -885,6 +885,45 @@ main.has-backup-reminder .setup-grid::after {
   font-weight: 700;
 }
 
+.practice-answer-mode-description,
+.practice-midi-heading-status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.practice-answer-mode-description {
+  align-self: center;
+}
+
+.practice-setup-heading-meta {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  min-width: 0;
+  max-width: calc(100% - 140px);
+  text-align: right;
+}
+
+.practice-midi-heading-status {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.practice-midi-heading-status button {
+  min-height: 30px;
+  padding: 4px 10px;
+}
+
+.practice-midi-heading-status span {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .note-name-options {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
@@ -2860,6 +2899,25 @@ button.primary kbd {
 }
 
 @media (max-width: 480px) {
+  .setup-panel > .panel-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .practice-setup-heading-meta {
+    justify-items: start;
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .practice-midi-heading-status {
+    justify-content: flex-start;
+  }
+
+  .practice-midi-heading-status span {
+    max-width: min(65vw, 280px);
+  }
+
   .prompt-note-duration-options {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

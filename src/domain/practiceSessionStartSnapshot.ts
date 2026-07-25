@@ -1,9 +1,10 @@
 import { applicableLedgerSetting } from "./staffNotation";
+import { normalizeAnswerPitchMode } from "./answerInput";
 import { buildPracticeActivitySnapshot } from "./practiceComparison";
 import type {
   AppSettings,
   PracticeMode,
-  PracticeSessionRecordV3,
+  PracticeSessionRecordV4,
   PracticeSessionStartSnapshot,
   TargetNote,
 } from "./types";
@@ -22,7 +23,7 @@ export interface BuiltPracticeSessionStartSnapshot {
   snapshot: PracticeSessionStartSnapshot;
 }
 
-export function buildPracticeSessionRecordV3({
+export function buildPracticeSessionRecordV4({
   id,
   snapshot,
   startedAt,
@@ -30,10 +31,11 @@ export function buildPracticeSessionRecordV3({
   id: string;
   snapshot: PracticeSessionStartSnapshot;
   startedAt: string;
-}): PracticeSessionRecordV3 {
+}): PracticeSessionRecordV4 {
   const { practiceConfig, presentationConfig } = snapshot;
   return {
     completedCount: 0,
+    answerPitchMode: normalizeAnswerPitchMode(practiceConfig.answerPitchMode),
     drillNoteNames: [...practiceConfig.drillNoteNames],
     effectiveQueueAlgorithm: practiceConfig.effectiveQueueAlgorithm,
     enabledGroupIds: [...practiceConfig.enabledGroupIds],
@@ -47,7 +49,7 @@ export function buildPracticeSessionRecordV3({
     promptDisplayMode: presentationConfig.promptDisplayMode,
     promptNoteDuration: presentationConfig.promptNoteDuration,
     queueStrategy: practiceConfig.queueStrategy,
-    schemaVersion: 3,
+    schemaVersion: 4,
     staffNotationMode: practiceConfig.staffNotationMode,
     startSnapshot: snapshot,
     startedAt,
@@ -64,6 +66,7 @@ export function buildPracticeSessionStartSnapshot({
   startPausedReading,
 }: BuildPracticeSessionStartSnapshotInput): BuiltPracticeSessionStartSnapshot | undefined {
   const activity = buildPracticeActivitySnapshot({
+    answerPitchMode: settings.answerPitchMode,
     drillNoteNames: settings.drillNoteNames,
     enabledGroupIds: settings.enabledGroupIds,
     includeInterStaffLedgerSpellings: settings.includeInterStaffLedgerSpellings,
@@ -80,6 +83,7 @@ export function buildPracticeSessionStartSnapshot({
     notes: activity.notes,
     snapshot: {
       practiceConfig: {
+        answerPitchMode: settings.answerPitchMode,
         drillNoteNames: [...settings.drillNoteNames],
         effectiveQueueAlgorithm: activity.effectiveQueueAlgorithm,
         enabledGroupIds: [...settings.enabledGroupIds],

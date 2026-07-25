@@ -188,6 +188,9 @@ function commonConfusions(reviews: ReviewRecord[]): NoteConfusionStat[] {
   const counts = new Map<NoteName, number>();
   for (const review of reviews) {
     for (const wrongAnswer of review.wrongAnswers) {
+      if (wrongAnswer.noteName === review.noteName) {
+        continue;
+      }
       counts.set(wrongAnswer.noteName, (counts.get(wrongAnswer.noteName) ?? 0) + 1);
     }
   }

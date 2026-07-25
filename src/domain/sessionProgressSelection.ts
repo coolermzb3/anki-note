@@ -1,12 +1,14 @@
-import type { PromptDisplayMode, PromptNoteDuration, QueueComparisonFamily } from "./types";
+import type { AnswerPitchMode, PromptDisplayMode, PromptNoteDuration, QueueComparisonFamily } from "./types";
 import type { SessionProgressGroup, SessionProgressGroupKey } from "./sessionProgress";
 
 export type SessionProgressConditionValue =
+  | AnswerPitchMode
   | PromptDisplayMode
   | QueueComparisonFamily
   | PromptNoteDuration;
 
 export interface SessionProgressSelection {
+  answerPitchModes: AnswerPitchMode[];
   chartBenchmarkGroupKey: string;
   queueComparisonFamilies: QueueComparisonFamily[];
   promptDisplayModes: PromptDisplayMode[];
@@ -21,6 +23,7 @@ type SessionProgressSelectionValueKey = {
 }[keyof SessionProgressSelection];
 
 const SESSION_PROGRESS_DIMENSION_DESCRIPTORS = {
+  answerPitchMode: { selectionKey: "answerPitchModes" },
   promptDisplayMode: { selectionKey: "promptDisplayModes" },
   queueComparisonFamily: { selectionKey: "queueComparisonFamilies" },
   promptNoteDuration: { selectionKey: "promptNoteDurations" },
@@ -167,6 +170,7 @@ export function resolveSessionProgressSelection({
     ) ?? selectedGroups[0];
     candidateSelection = { ...candidateSelection, chartBenchmarkGroupKey: preferredBenchmark.keyString };
     const signature = JSON.stringify({
+      answerPitchModes: candidateSelection.answerPitchModes,
       queueComparisonFamilies: candidateSelection.queueComparisonFamilies,
       promptDisplayModes: candidateSelection.promptDisplayModes,
       promptNoteDurations: candidateSelection.promptNoteDurations,

@@ -7,6 +7,8 @@ export type PitchId = `${NoteName}${Octave}`;
 export type TargetNoteId = PitchId | `${PitchId}-${Staff}`;
 
 export type PracticeMode = "open-ended" | "fixed-count" | "fixed-duration";
+export type AnswerPitchMode = "note-name" | "exact-pitch";
+export type StoredAnswerPitchMode = AnswerPitchMode | "absolute-pitch";
 export type PracticeQueueStrategy = "adaptive" | "focused" | "melody" | "note-drill";
 export type PromptDisplayMode = "single-note" | "staff-page";
 export type PromptNoteDuration = "whole" | "quarter" | "eighth" | "sixteenth";
@@ -17,6 +19,7 @@ export type InterruptReason =
   | "focus-lost"
   | "inactive-timeout"
   | "manual-pause"
+  | "midi-disconnected"
   | "manual-stop"
   | "duration-ended"
   | "session-abandoned";
@@ -42,6 +45,7 @@ export interface PracticeGroup {
 export interface WrongAnswer {
   noteName: NoteName;
   atActiveMs: number;
+  midiNoteNumber?: number;
 }
 
 export interface FocusLoss {
@@ -106,6 +110,7 @@ export interface PracticeSessionRecordV2 extends PracticeSessionRecordBase {
 
 export interface PracticeSessionStartSnapshot {
   practiceConfig: {
+    answerPitchMode?: StoredAnswerPitchMode;
     drillNoteNames: NoteName[];
     effectiveQueueAlgorithm: EffectiveQueueAlgorithm;
     enabledGroupIds: PracticeGroupId[];
@@ -142,7 +147,16 @@ export interface PracticeSessionRecordV3 extends Omit<PracticeSessionRecordV2, "
   startSnapshot: PracticeSessionStartSnapshot;
 }
 
-export type PracticeSessionRecord = PracticeSessionRecordV1 | PracticeSessionRecordV2 | PracticeSessionRecordV3;
+export interface PracticeSessionRecordV4 extends Omit<PracticeSessionRecordV3, "schemaVersion"> {
+  schemaVersion: 4;
+  answerPitchMode: StoredAnswerPitchMode;
+}
+
+export type PracticeSessionRecord =
+  | PracticeSessionRecordV1
+  | PracticeSessionRecordV2
+  | PracticeSessionRecordV3
+  | PracticeSessionRecordV4;
 
 interface StaffRecallRunRecordBase {
   id: string;
@@ -174,6 +188,7 @@ interface AppSettingsBase {
   createdAt: string;
   firstReviewAt?: string;
   enabledGroupIds: PracticeGroupId[];
+  answerPitchMode: AnswerPitchMode;
   defaultMode: PracticeMode;
   promptDisplayMode: PromptDisplayMode;
   promptNoteDuration: PromptNoteDuration;
@@ -206,7 +221,9 @@ export interface AppSettings extends AppSettingsBase {
   staffNotationMode: StaffNotationMode;
 }
 
-export type StoredAppSettings = AppSettingsV1 | AppSettings;
+export type StoredAppSettings =
+  | AppSettingsV1
+  | (Omit<AppSettings, "answerPitchMode"> & { answerPitchMode: StoredAnswerPitchMode });
 
 export interface BackupState {
   id: "default";

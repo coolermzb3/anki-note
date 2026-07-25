@@ -4,6 +4,7 @@ import { makeDefaultSettings, normalizeAppSettings } from "./db";
 describe("makeDefaultSettings", () => {
   it("uses the cold-start practice defaults", () => {
     expect(makeDefaultSettings()).toMatchObject({
+      answerPitchMode: "note-name",
       defaultMode: "fixed-duration",
       fixedDurationSeconds: 60,
       promptDisplayMode: "staff-page",
@@ -68,6 +69,20 @@ describe("makeDefaultSettings", () => {
       playAnswerNote: undefined,
     } as unknown as Parameters<typeof normalizeAppSettings>[0]).playAnswerNote).toBe(true);
     expect(normalizeAppSettings({ ...current, playAnswerNote: false }).playAnswerNote).toBe(false);
+  });
+
+  it("defaults legacy answer matching to note names while preserving strict pitch matching", () => {
+    const current = makeDefaultSettings();
+
+    expect(normalizeAppSettings({
+      ...current,
+      answerPitchMode: undefined,
+    } as unknown as Parameters<typeof normalizeAppSettings>[0]).answerPitchMode).toBe("note-name");
+    expect(normalizeAppSettings({ ...current, answerPitchMode: "exact-pitch" }).answerPitchMode).toBe("exact-pitch");
+    expect(normalizeAppSettings({
+      ...current,
+      answerPitchMode: "absolute-pitch",
+    } as Parameters<typeof normalizeAppSettings>[0]).answerPitchMode).toBe("exact-pitch");
   });
 
   it("migrates the retired focused preference to the adaptive queue", () => {

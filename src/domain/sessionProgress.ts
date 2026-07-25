@@ -3,6 +3,7 @@ import { getQueueComparisonFamily, type PracticeComparisonSnapshot } from "./pra
 import { isStatisticalReview } from "./reviews";
 import { isLongTermStatsEligible } from "./stats";
 import type {
+  AnswerPitchMode,
   PracticeSessionRecord,
   PromptDisplayMode,
   PromptNoteDuration,
@@ -27,6 +28,7 @@ export interface SessionProgressSeries {
 }
 
 export interface SessionProgressGroupKey {
+  answerPitchMode: AnswerPitchMode;
   queueComparisonFamily: QueueComparisonFamily;
   promptDisplayMode: PromptDisplayMode;
   promptNoteDuration: PromptNoteDuration;
@@ -92,6 +94,7 @@ function sameComparisonSnapshot(
   return Boolean(
     reference &&
       candidate &&
+      reference.answerPitchMode === candidate.answerPitchMode &&
       reference.targetNoteSetKey === candidate.targetNoteSetKey &&
       reference.promptDisplayMode === candidate.promptDisplayMode &&
       reference.promptNoteDuration === candidate.promptNoteDuration &&
@@ -103,6 +106,7 @@ function sameComparisonSnapshot(
 export function serializeSessionProgressGroupKey(key: SessionProgressGroupKey): string {
   return [
     key.targetNoteSetKey,
+    key.answerPitchMode,
     key.promptDisplayMode,
     key.queueComparisonFamily,
     key.promptNoteDuration,
@@ -115,6 +119,7 @@ export function getSessionProgressGroupKey(
   const snapshot = getPracticeSessionComparisonSnapshot(session);
   return snapshot
     ? {
+        answerPitchMode: snapshot.answerPitchMode,
         promptDisplayMode: snapshot.promptDisplayMode,
         promptNoteDuration: snapshot.promptNoteDuration,
         queueComparisonFamily: getQueueComparisonFamily(snapshot.effectiveQueueAlgorithm),

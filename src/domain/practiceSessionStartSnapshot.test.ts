@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { makeDefaultSettings } from "../data/db";
 import {
-  buildPracticeSessionRecordV3,
+  buildPracticeSessionRecordV4,
   buildPracticeSessionStartSnapshot,
 } from "./practiceSessionStartSnapshot";
 
@@ -28,6 +28,7 @@ describe("practice session start snapshot", () => {
     });
 
     expect(built?.snapshot.practiceConfig).toMatchObject({
+      answerPitchMode: "note-name",
       effectiveQueueAlgorithm: "melody-v2",
       fixedCount: settings.fixedCount,
       mode: "fixed-count",
@@ -68,7 +69,7 @@ describe("practice session start snapshot", () => {
       mode: "fixed-duration" as const,
       queueStrategy: "focused" as const,
     },
-  ])("projects every V3 compatibility field for $mode", ({
+  ])("projects every V4 compatibility field for $mode", ({
     effectiveQueueAlgorithm,
     fixedCount,
     fixedDurationSeconds,
@@ -95,13 +96,14 @@ describe("practice session start snapshot", () => {
       smoothStaffPageScroll: true,
       startPausedReading: true,
     })!;
-    const session = buildPracticeSessionRecordV3({
+    const session = buildPracticeSessionRecordV4({
       id: `session-${mode}`,
       snapshot: built.snapshot,
       startedAt: "2026-07-12T10:00:00.000Z",
     });
 
     expect(session).toEqual({
+      answerPitchMode: "note-name",
       completedCount: 0,
       drillNoteNames: ["C", "E"],
       effectiveQueueAlgorithm,
@@ -116,7 +118,7 @@ describe("practice session start snapshot", () => {
       promptDisplayMode: "staff-page",
       promptNoteDuration: "sixteenth",
       queueStrategy,
-      schemaVersion: 3,
+      schemaVersion: 4,
       staffNotationMode: "grand",
       startSnapshot: built.snapshot,
       startedAt: "2026-07-12T10:00:00.000Z",
