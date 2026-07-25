@@ -1541,7 +1541,7 @@ export function PracticeView({
                     谱页
                   </button>
                 </div>
-                <div className="segmented">
+                <div className="segmented prompt-note-duration-options">
                   {PROMPT_NOTE_DURATION_OPTIONS.map((option) => (
                     <button
                       aria-label={option.ariaLabel}
@@ -1598,7 +1598,7 @@ export function PracticeView({
             {mode === "fixed-duration" ? (
               <div className="control-block">
                 <span className="control-label">时长</span>
-                <div className="number-row">
+                <div className="number-row practice-duration-row">
                   {[60, 120, 180, 300].map((seconds) => (
                     <button
                       className={fixedDurationSeconds === seconds ? "active" : ""}
