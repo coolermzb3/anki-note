@@ -338,6 +338,7 @@ button.primary.backup-decision-button .backup-action-summary {
   width: min(1640px, calc(100vw - 86px));
   margin: 0 auto;
   padding: 28px;
+  padding-bottom: 20px;
 }
 
 .practice-setup-shell {
@@ -1951,12 +1952,13 @@ main.has-backup-reminder .setup-grid::after {
   --heatmap-cell: 16px;
   --heatmap-gap: 4px;
   --heatmap-grid-width: 1056px;
+  --heatmap-label-overhang: 8px;
   --heatmap-month-row: 14px;
   display: flex;
   align-items: flex-start;
   gap: 6px;
   max-width: 100%;
-  width: min(100%, calc(var(--heatmap-grid-width) + 42px));
+  width: min(100%, calc(var(--heatmap-grid-width) + 42px + var(--heatmap-label-overhang)));
   margin: 0 auto;
 }
 
@@ -2055,6 +2057,12 @@ main.has-backup-reminder .setup-grid::after {
 
 .stats-heatmap-panel {
   margin-bottom: 18px;
+}
+
+.stats-card-idle-placeholder {
+  background: rgba(255, 253, 250, 0.58);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .panel-heading .heatmap-daily-average {

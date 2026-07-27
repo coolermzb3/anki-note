@@ -121,12 +121,14 @@ function formatProgressValue(metric: "completed-count" | "elapsed-ms", value: nu
 
 export function useSessionProgressComparison({
   activeNotes,
+  enabled = true,
   historyLimit,
   mode,
   reviews,
   sessions,
 }: {
   activeNotes: TargetNote[];
+  enabled?: boolean;
   historyLimit: number;
   mode: SessionProgressMode;
   reviews: ReviewRecord[];
@@ -135,7 +137,10 @@ export function useSessionProgressComparison({
   const [storedSelection, setStoredSelection] = useState<SessionProgressSelection | null>(null);
   const [selectionAnnouncement, setSelectionAnnouncement] = useState("");
   const [transientNotice, setTransientNotice] = useState("");
-  const groups = useMemo(() => buildSessionProgressGroups(sessions, reviews), [reviews, sessions]);
+  const groups = useMemo(
+    () => enabled ? buildSessionProgressGroups(sessions, reviews) : [],
+    [enabled, reviews, sessions],
+  );
   const targetNoteSetKey = useMemo(
     () => buildTargetNoteSetKey(activeNotes.map((note) => note.id)),
     [activeNotes],

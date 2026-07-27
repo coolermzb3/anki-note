@@ -68,10 +68,16 @@ interface StatsViewProps {
 const STATS_CAROUSEL_CARD_LABELS = ["识别趋势", "答对进度", "音域分布"] as const;
 const STATS_CAROUSEL_PAIR_LABELS = ["识别趋势和答对进度", "答对进度和音域分布", "音域分布和识别趋势"] as const;
 const STATS_CAROUSEL_DRAG_THRESHOLD_PX = 48;
+const STATS_IDLE_RENDER_TIMEOUT_MS = 600;
+const STATS_IDLE_RENDER_FALLBACK_MS = 120;
 type StatsCarouselTrackStyle = CSSProperties & {
   "--stats-carousel-single-translate": string;
   "--stats-carousel-translate": string;
 };
+interface StatsIdleWindow {
+  cancelIdleCallback?: (handle: number) => void;
+  requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+}
 
 const EMPTY_SESSIONS: PracticeSessionRecord[] = [];
 
@@ -170,6 +176,50 @@ export function StatsView({
   const [statsCarouselOrder, setStatsCarouselOrder] = useState(() => getStatsCarouselOrder(statsCarouselIndex));
   const [statsCarouselOffset, setStatsCarouselOffset] = useState<0 | 1>(0);
   const [statsCarouselTransitionEnabled, setStatsCarouselTransitionEnabled] = useState(true);
+  const [primaryContentReady, setPrimaryContentReady] = useState(false);
+  const [idleContentReady, setIdleContentReady] = useState(false);
+
+  useEffect(() => {
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        setPrimaryContentReady(true);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!primaryContentReady) {
+      return undefined;
+    }
+    const idleWindow = window as unknown as StatsIdleWindow;
+    if (idleWindow.requestIdleCallback && idleWindow.cancelIdleCallback) {
+      const idleCallback = idleWindow.requestIdleCallback(
+        () => setIdleContentReady(true),
+        { timeout: STATS_IDLE_RENDER_TIMEOUT_MS },
+      );
+      return () => idleWindow.cancelIdleCallback?.(idleCallback);
+    }
+    const timeout = window.setTimeout(() => setIdleContentReady(true), STATS_IDLE_RENDER_FALLBACK_MS);
+    return () => window.clearTimeout(timeout);
+  }, [primaryContentReady]);
+
+  const visibleStatsCarouselCardIds = new Set([
+    STATS_CAROUSEL_CARD_IDS[statsCarouselIndex],
+    ...(singleCardCarousel ? [] : [STATS_CAROUSEL_CARD_IDS[normalizeStatsCarouselIndex(statsCarouselIndex + 1)]]),
+  ]);
+  const preparedStatsCarouselCardIds = idleContentReady
+    ? new Set<StatsCarouselCardId>(STATS_CAROUSEL_CARD_IDS)
+    : visibleStatsCarouselCardIds;
+  const recognitionStatsReady = primaryContentReady && preparedStatsCarouselCardIds.has("recognition-time");
+  const sessionProgressStatsReady = primaryContentReady && (
+    preparedStatsCarouselCardIds.has("session-progress") || preparedStatsCarouselCardIds.has("note-range")
+  );
+  const noteRangeStatsReady = primaryContentReady && preparedStatsCarouselCardIds.has("note-range");
   const range = statsUiPreferences.range;
   const recognitionTimeGrouping = statsUiPreferences.recognitionTimeGrouping;
   const recognitionTimeMetric = statsUiPreferences.recognitionTimeMetric;
@@ -273,7 +323,10 @@ export function StatsView({
     setSessionProgressPreferences((current) => ({ ...current, historyLimit: nextHistoryLimit }));
   };
 
-  const longTermReviews = useMemo(() => filterLongTermReviews(reviews), [reviews]);
+  const longTermReviews = useMemo(
+    () => primaryContentReady ? filterLongTermReviews(reviews) : [],
+    [primaryContentReady, reviews],
+  );
   const staffNotationMode = settings.staffNotationMode;
   const activeNotes = useMemo(
     () => getNotesForGroups(settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode),
@@ -284,15 +337,20 @@ export function StatsView({
     return longTermReviews.filter((review) => activeTargetNoteIds.has(review.targetNoteId));
   }, [activeTargetNoteIds, longTermReviews]);
   const filteredReviews = useMemo(() => filterByRange(groupScopedReviews, range), [groupScopedReviews, range]);
-  const dailyStats = useMemo(() => buildDailyStats(groupScopedReviews), [groupScopedReviews]);
+  const dailyStats = useMemo(
+    () => primaryContentReady ? buildDailyStats(groupScopedReviews) : [],
+    [groupScopedReviews, primaryContentReady],
+  );
   const recognitionTrendBySession = useMemo(
-    () => buildRecognitionTrend(
-      longTermReviews,
-      sessions,
-      activeNotes.map((note) => note.id),
-      "practice-session",
-    ),
-    [activeNotes, longTermReviews, sessions],
+    () => recognitionStatsReady
+      ? buildRecognitionTrend(
+          longTermReviews,
+          sessions,
+          activeNotes.map((note) => note.id),
+          "practice-session",
+        )
+      : [],
+    [activeNotes, longTermReviews, recognitionStatsReady, sessions],
   );
   const recognitionTrend = useMemo(
     () => recognitionTimeGrouping === "day"
@@ -335,6 +393,7 @@ export function StatsView({
   };
   const sessionProgressComparison = useSessionProgressComparison({
     activeNotes,
+    enabled: sessionProgressStatsReady,
     historyLimit: sessionProgressHistoryLimit,
     mode: sessionProgressMode,
     reviews,
@@ -345,6 +404,9 @@ export function StatsView({
     selectedSessionIds: sessionProgressSessionIds,
   } = sessionProgressComparison;
   const noteRangeReviews = useMemo(() => {
+    if (!noteRangeStatsReady) {
+      return [];
+    }
     if (!sessionProgressSelection) {
       return filteredReviews;
     }
@@ -352,16 +414,16 @@ export function StatsView({
       longTermReviews.filter((review) => sessionProgressSessionIds.has(review.sessionId)),
       range,
     );
-  }, [filteredReviews, longTermReviews, range, sessionProgressSelection, sessionProgressSessionIds]);
+  }, [filteredReviews, longTermReviews, noteRangeStatsReady, range, sessionProgressSelection, sessionProgressSessionIds]);
   const noteStats = useMemo(() => {
-    if (activeNotes.length === 0) {
+    if (!noteRangeStatsReady || activeNotes.length === 0) {
       return [];
     }
     const activeTargetNoteIds = new Set(activeNotes.map((note) => note.id));
     return buildNoteStats(noteRangeReviews).filter((stat) =>
       activeTargetNoteIds.has(stat.targetNoteId),
     );
-  }, [activeNotes, noteRangeReviews]);
+  }, [activeNotes, noteRangeReviews, noteRangeStatsReady]);
   const rangeStaffNotes = useMemo(() => {
     const statsByNoteId = new Map(noteStats.map((stat) => [stat.targetNoteId, stat]));
     return activeNotes.map((note) => ({ note, stat: statsByNoteId.get(note.id) }));
@@ -424,10 +486,6 @@ export function StatsView({
     return () => media.removeEventListener("change", updateSingleCardCarousel);
   }, []);
 
-  const visibleStatsCarouselCardIds = new Set([
-    STATS_CAROUSEL_CARD_IDS[statsCarouselIndex],
-    ...(singleCardCarousel ? [] : [STATS_CAROUSEL_CARD_IDS[normalizeStatsCarouselIndex(statsCarouselIndex + 1)]]),
-  ]);
   const statsCarouselTrackStyle = {
     "--stats-carousel-single-translate": `calc(-${statsCarouselOffset * 100}% - ${statsCarouselOffset * 18}px)`,
     "--stats-carousel-translate": `calc(-${statsCarouselOffset * 50}% - ${statsCarouselOffset * 9}px)`,
@@ -637,76 +695,86 @@ export function StatsView({
         </div>
       </div>
 
-      <PracticeHeatmap dailyStats={dailyStats} range={range} />
+      {primaryContentReady ? (
+        <PracticeHeatmap dailyStats={dailyStats} range={range} />
+      ) : (
+        <div className="sr-only" aria-label="正在生成统计内容" role="status" />
+      )}
 
-      <div
-        className={singleCardCarousel ? "stats-card-carousel stats-card-carousel-single" : "stats-card-carousel"}
-      >
+      {primaryContentReady ? (
         <div
-          className="stats-card-carousel-viewport"
-          onPointerCancel={cancelStatsCarouselDrag}
-          onPointerDown={beginStatsCarouselDrag}
-          onPointerMove={updateStatsCarouselDrag}
-          onPointerUp={endStatsCarouselDrag}
+          className={singleCardCarousel ? "stats-card-carousel stats-card-carousel-single" : "stats-card-carousel"}
         >
           <div
-            className={
-              statsCarouselTransitionEnabled
-                ? "stats-card-carousel-track"
-                : "stats-card-carousel-track stats-card-carousel-track-instant"
-            }
-            style={statsCarouselTrackStyle}
-            onTransitionEnd={finishStatsCarouselTransition}
+            className="stats-card-carousel-viewport"
+            onPointerCancel={cancelStatsCarouselDrag}
+            onPointerDown={beginStatsCarouselDrag}
+            onPointerMove={updateStatsCarouselDrag}
+            onPointerUp={endStatsCarouselDrag}
           >
-            {statsCarouselOrder.map((cardId) => {
-              const visible = visibleStatsCarouselCardIds.has(cardId);
-              return (
-                <div
-                  aria-hidden={!visible}
-                  className="stats-card-carousel-slide"
-                  inert={visible ? undefined : ""}
+            <div
+              className={
+                statsCarouselTransitionEnabled
+                  ? "stats-card-carousel-track"
+                  : "stats-card-carousel-track stats-card-carousel-track-instant"
+              }
+              style={statsCarouselTrackStyle}
+              onTransitionEnd={finishStatsCarouselTransition}
+            >
+              {statsCarouselOrder.map((cardId) => {
+                const visible = visibleStatsCarouselCardIds.has(cardId);
+                return (
+                  <div
+                    aria-hidden={!visible}
+                    className="stats-card-carousel-slide"
+                    inert={visible ? undefined : ""}
+                    key={cardId}
+                  >
+                    {preparedStatsCarouselCardIds.has(cardId) ? (
+                      renderStatsCard(cardId)
+                    ) : (
+                      <div className="panel stats-carousel-card stats-card-idle-placeholder" aria-hidden="true" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="chart-carousel-nav stats-card-carousel-nav" aria-label="统计卡片切换" role="group">
+            <button
+              aria-label="查看上一组统计卡片"
+              aria-keyshortcuts="ArrowLeft"
+              className="chart-carousel-arrow"
+              onClick={() => moveStatsCarousel(-1)}
+              type="button"
+            >
+              <kbd aria-hidden="true">←</kbd>
+            </button>
+            <div className="chart-carousel-dots" aria-label="统计卡片位置">
+              {STATS_CAROUSEL_CARD_IDS.map((cardId, index) => (
+                <button
+                  aria-label={`查看${
+                    singleCardCarousel ? STATS_CAROUSEL_CARD_LABELS[index] : STATS_CAROUSEL_PAIR_LABELS[index]
+                  }`}
+                  className={statsCarouselIndex === index ? "active" : ""}
                   key={cardId}
-                >
-                  {renderStatsCard(cardId)}
-                </div>
-              );
-            })}
+                  onClick={() => jumpStatsCarousel(index)}
+                  type="button"
+                />
+              ))}
+            </div>
+            <button
+              aria-label="查看下一组统计卡片"
+              aria-keyshortcuts="ArrowRight"
+              className="chart-carousel-arrow"
+              onClick={() => moveStatsCarousel(1)}
+              type="button"
+            >
+              <kbd aria-hidden="true">→</kbd>
+            </button>
           </div>
         </div>
-        <div className="chart-carousel-nav stats-card-carousel-nav" aria-label="统计卡片切换" role="group">
-          <button
-            aria-label="查看上一组统计卡片"
-            aria-keyshortcuts="ArrowLeft"
-            className="chart-carousel-arrow"
-            onClick={() => moveStatsCarousel(-1)}
-            type="button"
-          >
-            <kbd aria-hidden="true">←</kbd>
-          </button>
-          <div className="chart-carousel-dots" aria-label="统计卡片位置">
-            {STATS_CAROUSEL_CARD_IDS.map((cardId, index) => (
-              <button
-                aria-label={`查看${
-                  singleCardCarousel ? STATS_CAROUSEL_CARD_LABELS[index] : STATS_CAROUSEL_PAIR_LABELS[index]
-                }`}
-                className={statsCarouselIndex === index ? "active" : ""}
-                key={cardId}
-                onClick={() => jumpStatsCarousel(index)}
-                type="button"
-              />
-            ))}
-          </div>
-          <button
-            aria-label="查看下一组统计卡片"
-            aria-keyshortcuts="ArrowRight"
-            className="chart-carousel-arrow"
-            onClick={() => moveStatsCarousel(1)}
-            type="button"
-          >
-            <kbd aria-hidden="true">→</kbd>
-          </button>
-        </div>
-      </div>
+      ) : null}
     </section>
   );
 }
