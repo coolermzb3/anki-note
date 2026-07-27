@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getInitialMidiAccessStatus,
+  isMidiPermissionGranted,
   makeMidiKeyId,
   MIDI_START_NOTE_NUMBER,
   registerMidiPress,
@@ -11,6 +12,27 @@ describe("MIDI environment detection", () => {
     expect(getInitialMidiAccessStatus(false, false)).toBe("insecure-context");
     expect(getInitialMidiAccessStatus(true, false)).toBe("unsupported");
     expect(getInitialMidiAccessStatus(true, true)).toBe("idle");
+  });
+
+  it("only auto-connects after MIDI permission has already been granted", async () => {
+    const permissions = (state: PermissionState): Pick<Permissions, "query"> => ({
+      query: async () => ({ state }) as PermissionStatus,
+    });
+
+    await expect(isMidiPermissionGranted(permissions("granted"))).resolves.toBe(true);
+    await expect(isMidiPermissionGranted(permissions("prompt"))).resolves.toBe(false);
+    await expect(isMidiPermissionGranted(permissions("denied"))).resolves.toBe(false);
+    await expect(isMidiPermissionGranted(undefined)).resolves.toBe(false);
+  });
+
+  it("silently skips auto-connect when the Permissions API rejects MIDI queries", async () => {
+    const permissions: Pick<Permissions, "query"> = {
+      query: async () => {
+        throw new TypeError("MIDI permission queries are unsupported");
+      },
+    };
+
+    await expect(isMidiPermissionGranted(permissions)).resolves.toBe(false);
   });
 });
 

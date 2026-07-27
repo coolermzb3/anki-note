@@ -7,6 +7,7 @@ import {
 } from "../diagnostics/midiLatencyDiagnostics";
 import {
   getInitialMidiAccessStatus,
+  isMidiPermissionGranted,
   isPianoKeyName,
   makeMidiKeyId,
   registerMidiPress,
@@ -85,6 +86,7 @@ export function useMidiInput(): MidiInputController {
   const [selectedInputId, setSelectedInputId] = useState<string | undefined>(readStoredInputId);
   const [lastNote, setLastNote] = useState<MidiNoteInput>();
   const selectedInputIdRef = useRef(selectedInputId);
+  const statusRef = useRef(status);
   const initialSelectionResolvedRef = useRef(false);
   const pressedNotesRef = useRef(new Map<string, MidiNoteInput>());
   const subscribersRef = useRef(new Set<(event: MidiNoteInputEvent) => void>());
@@ -92,6 +94,7 @@ export function useMidiInput(): MidiInputController {
   const webMidiListenersRef = useRef<Listener[]>([]);
 
   selectedInputIdRef.current = selectedInputId;
+  statusRef.current = status;
 
   const publish = useCallback((event: MidiNoteInputEvent): void => {
     if (event.type === "press") {
@@ -212,28 +215,39 @@ export function useMidiInput(): MidiInputController {
     ];
   }, [refreshInputs]);
 
-  const connect = useCallback(async (): Promise<void> => {
+  const enableMidi = useCallback(async (silentFailure: boolean): Promise<void> => {
     if (!isSecureMidiContext) {
-      setStatus("insecure-context");
+      if (!silentFailure) {
+        setStatus("insecure-context");
+      }
       return;
     }
     if (!hasNativeMidiAccess) {
-      setStatus("unsupported");
+      if (!silentFailure) {
+        setStatus("unsupported");
+      }
       return;
     }
-    setStatus("requesting");
-    setErrorMessage(undefined);
+    if (!silentFailure) {
+      setStatus("requesting");
+      setErrorMessage(undefined);
+    }
     try {
       await WebMidi.enable({ sysex: false });
       attachWebMidiListeners();
       refreshInputs(true);
       setStatus("ready");
     } catch (error) {
+      if (silentFailure) {
+        return;
+      }
       const described = describeMidiError(error);
       setErrorMessage(described.message);
       setStatus(described.status);
     }
   }, [attachWebMidiListeners, hasNativeMidiAccess, isSecureMidiContext, refreshInputs]);
+
+  const connect = useCallback((): Promise<void> => enableMidi(false), [enableMidi]);
 
   const selectInput = useCallback((inputId: string): void => {
     setLastNote(undefined);
@@ -256,6 +270,23 @@ export function useMidiInput(): MidiInputController {
     refreshInputs(true);
     setStatus("ready");
   }, [attachWebMidiListeners, refreshInputs]);
+
+  useEffect(() => {
+    if (status !== "idle" || WebMidi.enabled) {
+      return;
+    }
+    let cancelled = false;
+    void isMidiPermissionGranted(typeof navigator === "undefined" ? undefined : navigator.permissions).then(
+      (granted) => {
+        if (!cancelled && granted && statusRef.current === "idle") {
+          void enableMidi(true);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [enableMidi, status]);
 
   useEffect(() => () => {
     detachInputListeners();

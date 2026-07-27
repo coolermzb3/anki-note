@@ -63,3 +63,17 @@ export function getInitialMidiAccessStatus(
   }
   return hasNativeMidiAccess ? "idle" : "unsupported";
 }
+
+export async function isMidiPermissionGranted(
+  permissions: Pick<Permissions, "query"> | undefined,
+): Promise<boolean> {
+  if (!permissions) {
+    return false;
+  }
+  try {
+    const descriptor: PermissionDescriptor & { sysex: boolean } = { name: "midi", sysex: false };
+    return (await permissions.query(descriptor)).state === "granted";
+  } catch {
+    return false;
+  }
+}
