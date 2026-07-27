@@ -9,6 +9,7 @@ import {
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type TransitionEvent as ReactTransitionEvent,
 } from "react";
 import type { NoteName, PianoKeyName } from "../domain/types";
 
@@ -97,6 +98,7 @@ interface PianoKeyboardProps {
   keyOctave?: number;
   onKeyPress: (key: PianoKeyboardKey, inputId: PianoKeyInputId) => void;
   onKeyRelease?: (key: PianoKeyboardKey, inputId: PianoKeyInputId) => void;
+  onFeedbackTransitionEnd?: (keyName: PianoKeyName, type: PianoKeyFeedback["type"], propertyName: string) => void;
   pressedKeys?: ReadonlySet<PianoKeyId>;
   scale: number;
 }
@@ -137,6 +139,7 @@ export function PianoKeyboard({
   keyOctave,
   onKeyPress,
   onKeyRelease,
+  onFeedbackTransitionEnd,
   pressedKeys,
   scale,
 }: PianoKeyboardProps): JSX.Element {
@@ -418,6 +421,12 @@ export function PianoKeyboard({
                 onPointerCancel={handleKeyPointerEnd}
                 onPointerDown={(event) => handleKeyPointerDown(event, key)}
                 onPointerUp={handleKeyPointerEnd}
+                onTransitionEnd={
+                  feedbackType && onFeedbackTransitionEnd
+                    ? (event: ReactTransitionEvent<HTMLButtonElement>) =>
+                        onFeedbackTransitionEnd(definition.keyName, feedbackType, event.propertyName)
+                    : undefined
+                }
                 style={keyStyle}
                 type="button"
               >

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WebMidi, type Input, type Listener, type NoteMessageEvent } from "webmidi";
 import {
+  markMidiLatencyStage,
+  MIDI_LATENCY_DIAGNOSTICS_ENABLED,
+  startMidiLatencySample,
+} from "../diagnostics/midiLatencyDiagnostics";
+import {
   getInitialMidiAccessStatus,
   isPianoKeyName,
   makeMidiKeyId,
@@ -89,6 +94,9 @@ export function useMidiInput(): MidiInputController {
   selectedInputIdRef.current = selectedInputId;
 
   const publish = useCallback((event: MidiNoteInputEvent): void => {
+    if (event.type === "press") {
+      markMidiLatencyStage(event.note.diagnosticSampleId, "published");
+    }
     for (const listener of subscribersRef.current) {
       listener(event);
     }
@@ -126,12 +134,24 @@ export function useMidiInput(): MidiInputController {
   }, []);
 
   const handleNoteOn = useCallback((event: NoteMessageEvent): void => {
+    const handlerAt = MIDI_LATENCY_DIAGNOSTICS_ENABLED ? performance.now() : undefined;
     const note = makeNote(event);
     if (!note || !registerMidiPress(pressedNotesRef.current, note.keyId, note)) {
       return;
     }
-    setLastNote(note);
-    publish({ note, type: "press" });
+    const diagnosticSampleId = handlerAt === undefined
+      ? undefined
+      : startMidiLatencySample({
+          handlerAt,
+          midiNoteNumber: note.midiNoteNumber,
+          nativeEventAt: event.timestamp,
+          noteName: note.keyName,
+          octave: note.octave,
+        });
+    const trackedNote = diagnosticSampleId === undefined ? note : { ...note, diagnosticSampleId };
+    pressedNotesRef.current.set(note.keyId, trackedNote);
+    setLastNote(trackedNote);
+    publish({ note: trackedNote, type: "press" });
   }, [makeNote, publish]);
 
   const handleNoteOff = useCallback((event: NoteMessageEvent): void => {

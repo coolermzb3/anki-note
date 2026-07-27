@@ -15,6 +15,8 @@ import { IndexedDbMaintenancePanel } from "./debug/IndexedDbMaintenancePanel";
 import { installIndexedDbMaintenanceDebug } from "./debug/indexedDbMaintenance";
 import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "./domain/backupText";
 import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord, StaffRecallRunRecord } from "./domain/types";
+import { MidiLatencyDiagnosticsPanel } from "./diagnostics/MidiLatencyDiagnosticsPanel";
+import { MIDI_LATENCY_DIAGNOSTICS_ENABLED } from "./diagnostics/midiLatencyDiagnostics";
 import { BackupConflictActionContent } from "./components/BackupConflictActionContent";
 import {
   PracticeView,
@@ -654,6 +656,9 @@ export function App(): JSX.Element {
           />
         ) : null}
       </main>
+      {MIDI_LATENCY_DIAGNOSTICS_ENABLED ? (
+        <MidiLatencyDiagnosticsPanel correctDelayMs={data.settings.correctDelayMs} />
+      ) : null}
     </div>
   );
 }

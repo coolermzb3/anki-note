@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { Beam, Formatter, GhostNote, Stave, StaveNote, Stem, Voice } from "vexflow";
+import { markMidiLatencyStage } from "../diagnostics/midiLatencyDiagnostics";
 import { noteToVexKey } from "../domain/notes";
 import type { PromptNoteDuration, StaffNotationMode, TargetNote } from "../domain/types";
 import { PRACTICE_PAGE_STAFF_LAYOUT } from "./staffLayoutProfiles";
@@ -21,6 +22,7 @@ import {
 } from "./staffPageNotation";
 
 interface StaffPagePromptProps {
+  diagnosticSampleId?: number;
   notes: TargetNote[];
   completedCount: number;
   isScrolling?: boolean;
@@ -36,7 +38,12 @@ const NEUTRAL_COLOR = "#211c18";
 const COMPLETE_COLOR = "#2f8f5f";
 const WRONG_COLOR = "#c84c3d";
 const BARLINE_COLOR = "#211c18";
+const STAFF_PAGE_NOTE_COLORS = new Set([NEUTRAL_COLOR, COMPLETE_COLOR, WRONG_COLOR]);
 type StaffPageTickable = GhostNote | StaveNote;
+interface RenderedStaffPageNote {
+  color: string;
+  element: SVGElement;
+}
 
 function chunkNotes(notes: TargetNote[]): TargetNote[][] {
   const rows: TargetNote[][] = [];
@@ -68,6 +75,22 @@ function colorForIndex(index: number, completedCount: number, wrongIndex: number
     return COMPLETE_COLOR;
   }
   return NEUTRAL_COLOR;
+}
+
+function updateRenderedNoteColor(renderedNote: RenderedStaffPageNote, color: string): void {
+  if (renderedNote.color === color) {
+    return;
+  }
+  const elements = [renderedNote.element, ...renderedNote.element.querySelectorAll<SVGElement>("*")];
+  for (const element of elements) {
+    for (const attribute of ["fill", "stroke"] as const) {
+      const value = element.getAttribute(attribute);
+      if (value && STAFF_PAGE_NOTE_COLORS.has(value.toLowerCase())) {
+        element.setAttribute(attribute, color);
+      }
+    }
+  }
+  renderedNote.color = color;
 }
 
 function makeStaffPageBeams(
@@ -130,6 +153,7 @@ function getBarlineX(
 }
 
 export function StaffPagePrompt({
+  diagnosticSampleId,
   notes,
   completedCount,
   isScrolling = false,
@@ -142,6 +166,13 @@ export function StaffPagePrompt({
 }: StaffPagePromptProps): JSX.Element {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const rendererTargetRef = useRef<HTMLDivElement | null>(null);
+  const diagnosticSampleIdRef = useRef(diagnosticSampleId);
+  const completedCountRef = useRef(completedCount);
+  const renderedNotesRef = useRef<Array<RenderedStaffPageNote | undefined>>([]);
+  const wrongIndexRef = useRef(wrongIndex);
+  diagnosticSampleIdRef.current = diagnosticSampleId;
+  completedCountRef.current = completedCount;
+  wrongIndexRef.current = wrongIndex;
   const rows = useMemo(() => chunkNotes(notes), [notes]);
 
   useLayoutEffect(() => {
@@ -156,6 +187,9 @@ export function StaffPagePrompt({
         return;
       }
 
+      const renderedDiagnosticSampleId = diagnosticSampleIdRef.current;
+      markMidiLatencyStage(renderedDiagnosticSampleId, "staffRenderStarted");
+      renderedNotesRef.current = [];
       rendererTarget.innerHTML = "";
       const rowCount = Math.max(1, rows.length);
       const containerWidth = frame.clientWidth || 920;
@@ -234,7 +268,7 @@ export function StaffPagePrompt({
             }
             return makeStaveNote(
               note,
-              colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex),
+              colorForIndex(rowStartIndex + slotIndex, completedCountRef.current, wrongIndexRef.current),
               noteDuration,
             ).setStave(note.staff === "treble" ? treble : bass);
           });
@@ -264,7 +298,7 @@ export function StaffPagePrompt({
             note
               ? makeStaveNote(
                   note,
-                  colorForIndex(rowStartIndex + slotIndex, completedCount, wrongIndex),
+                  colorForIndex(rowStartIndex + slotIndex, completedCountRef.current, wrongIndexRef.current),
                   noteDuration,
                 ).setStave(stave)
               : new GhostNote(vexDuration).setStave(stave),
@@ -282,6 +316,18 @@ export function StaffPagePrompt({
           barlineTopY = stave.getYForLine(0);
           barlineBottomY = stave.getYForLine(4);
         }
+
+        visibleTickables.forEach((staveNote, slotIndex) => {
+          const element = staveNote?.getSVGElement();
+          if (!staveNote || !element) {
+            return;
+          }
+          const index = rowStartIndex + slotIndex;
+          renderedNotesRef.current[index] = {
+            color: colorForIndex(index, completedCountRef.current, wrongIndexRef.current),
+            element,
+          };
+        });
 
         beams.forEach((beam) => beam.setContext(context).drawWithStyle());
 
@@ -303,13 +349,25 @@ export function StaffPagePrompt({
         }
         context.closeGroup();
       });
+      markMidiLatencyStage(renderedDiagnosticSampleId, "staffRenderEnded");
     }
 
     render();
     const observer = new ResizeObserver(render);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [completedCount, noteDuration, rows, scrollDurationMs, staffNotationMode, useLedgerGap, visibleRowCount, wrongIndex]);
+  }, [noteDuration, rows, scrollDurationMs, staffNotationMode, useLedgerGap, visibleRowCount]);
+
+  useLayoutEffect(() => {
+    const renderedDiagnosticSampleId = diagnosticSampleIdRef.current;
+    markMidiLatencyStage(renderedDiagnosticSampleId, "staffColorStarted");
+    renderedNotesRef.current.forEach((renderedNote, index) => {
+      if (renderedNote) {
+        updateRenderedNoteColor(renderedNote, colorForIndex(index, completedCount, wrongIndex));
+      }
+    });
+    markMidiLatencyStage(renderedDiagnosticSampleId, "staffColorEnded");
+  }, [completedCount, wrongIndex]);
 
   return (
     <div ref={frameRef} className="staff-page" aria-label="谱页">

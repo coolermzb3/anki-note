@@ -1,9 +1,16 @@
 import { BarChart3, Pause, Play, RotateCcw, SlidersHorizontal, Square, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { playPianoNote, playTargetNote, setPianoVolume, unlockAudio } from "../audio/piano";
 import { db, deletePracticeSessionWithReviews, resolveDrillNoteNames, resolveQueueStrategy, saveReview } from "../data/db";
 import { writeBackupIfSafe, writeBackupNow } from "../data/backup";
 import { createUuid } from "../domain/id";
+import {
+  completeMidiLatencySample,
+  markMidiLatencyStage,
+  MIDI_LATENCY_DIAGNOSTICS_ENABLED,
+  setMidiLatencyCondition,
+  type MidiLatencyStage,
+} from "../diagnostics/midiLatencyDiagnostics";
 import {
   isPracticeAnswerCorrect,
   normalizeAnswerPitchMode,
@@ -164,6 +171,21 @@ interface PracticeSetupUiPreferences {
 
 function newSessionId(): string {
   return createUuid();
+}
+
+function markMidiLatencyAfterPaint(diagnosticSampleId: number, stage: MidiLatencyStage): () => void {
+  let secondFrame: number | undefined;
+  const firstFrame = window.requestAnimationFrame(() => {
+    secondFrame = window.requestAnimationFrame(() => {
+      markMidiLatencyStage(diagnosticSampleId, stage);
+    });
+  });
+  return () => {
+    window.cancelAnimationFrame(firstFrame);
+    if (secondFrame !== undefined) {
+      window.cancelAnimationFrame(secondFrame);
+    }
+  };
 }
 
 function formatDuration(ms: number): string {
@@ -335,6 +357,7 @@ export function PracticeView({
   const [completedCount, setCompletedCount] = useState(0);
   const [wrongAnswerCount, setWrongAnswerCount] = useState(0);
   const [feedback, setFeedback] = useState<{
+    diagnosticSampleId?: number;
     type: "wrong" | "correct";
     noteName?: NoteName;
   } | null>(null);
@@ -441,8 +464,28 @@ export function PracticeView({
   const lastBackupAtRef = useRef<number>(performance.now());
   const handledNavigationExitRequestIdRef = useRef<number | null>(null);
   const heldMidiInputsRef = useRef(new Map<string, PianoKeyName>());
+  const pendingMidiPressDiagnosticSampleIdRef = useRef<number | undefined>(undefined);
   const startSessionRef = useRef<() => void>(() => undefined);
   const submitAnswerRef = useRef<(answer: PracticeAnswerInput) => void>(() => undefined);
+
+  useLayoutEffect(() => {
+    const diagnosticSampleId = feedback?.diagnosticSampleId;
+    if (diagnosticSampleId === undefined) {
+      return undefined;
+    }
+    markMidiLatencyStage(diagnosticSampleId, "reactCommit");
+    return markMidiLatencyAfterPaint(diagnosticSampleId, "paintApprox");
+  }, [feedback]);
+
+  useLayoutEffect(() => {
+    const diagnosticSampleId = pendingMidiPressDiagnosticSampleIdRef.current;
+    pendingMidiPressDiagnosticSampleIdRef.current = undefined;
+    if (diagnosticSampleId === undefined) {
+      return undefined;
+    }
+    markMidiLatencyStage(diagnosticSampleId, "pressedReactCommit");
+    return markMidiLatencyAfterPaint(diagnosticSampleId, "pressedPaintApprox");
+  }, [heldMidiAnswerKeys]);
 
   const pressedAnswerKeys = useMemo(
     () => new Set<PianoKeyName>([...heldComputerAnswerKeys, ...heldMidiAnswerKeys]),
@@ -1266,29 +1309,52 @@ export function PracticeView({
       if (!prompt || isPausedRef.current || answerInputLockedRef.current) {
         return;
       }
+      const diagnosticSampleId = answer.diagnosticSampleId;
+      const correctDelayMs = sessionStartSnapshotRef.current?.interactionConfig.correctDelayMs ?? settings.correctDelayMs;
+      markMidiLatencyStage(diagnosticSampleId, "submitStarted");
+      if (MIDI_LATENCY_DIAGNOSTICS_ENABLED) {
+        setMidiLatencyCondition(diagnosticSampleId, {
+          answerPitchMode,
+          correctDelayMs,
+          playAnswerNote,
+          promptDisplayMode,
+        });
+      }
       prompt.lastInputAt = performance.now();
       if (playAnswerNote) {
         const answerOctave = answer.octave;
         if (answerOctave === undefined || (answerOctave >= 1 && answerOctave <= 6)) {
           const playbackOctave = answerOctave === undefined ? prompt.note.octave : answerOctave as Octave;
-          void playPianoNote(answer.noteName, playbackOctave).catch(() => undefined);
+          markMidiLatencyStage(diagnosticSampleId, "audioRequested");
+          void playPianoNote(answer.noteName, playbackOctave).then(
+            () => markMidiLatencyStage(diagnosticSampleId, "audioReady"),
+            () => markMidiLatencyStage(diagnosticSampleId, "audioReady"),
+          );
         }
       }
-      if (!isPracticeAnswerCorrect(answer, prompt.note, answerPitchMode)) {
+      const answeredCorrectly = isPracticeAnswerCorrect(answer, prompt.note, answerPitchMode);
+      markMidiLatencyStage(diagnosticSampleId, "verdict");
+      if (!answeredCorrectly) {
+        completeMidiLatencySample(diagnosticSampleId, "wrong");
         prompt.wrongAnswers.push({
           noteName: answer.noteName,
           atActiveMs: getPromptActiveMs(),
           midiNoteNumber: answer.midiNoteNumber,
         });
         setWrongAnswerCount((count) => count + 1);
-        setFeedback({ type: "wrong", noteName: answer.noteName });
+        markMidiLatencyStage(diagnosticSampleId, "feedbackRequested");
+        setFeedback({ diagnosticSampleId, type: "wrong", noteName: answer.noteName });
         window.setTimeout(() => setFeedback((current) => (current?.type === "wrong" ? null : current)), 450);
         return;
       }
 
       answerInputLockedRef.current = true;
-      setFeedback({ type: "correct", noteName: answer.noteName });
+      completeMidiLatencySample(diagnosticSampleId, "correct");
+      markMidiLatencyStage(diagnosticSampleId, "feedbackRequested");
+      setFeedback({ diagnosticSampleId, type: "correct", noteName: answer.noteName });
+      markMidiLatencyStage(diagnosticSampleId, "reviewFinalizeStarted");
       const review = await finishCurrentReview(true);
+      markMidiLatencyStage(diagnosticSampleId, "reviewFinalizeEnded");
       if (!review) {
         return;
       }
@@ -1337,7 +1403,7 @@ export function PracticeView({
           return;
         }
         continueAfterCorrectDelay();
-      }, sessionStartSnapshotRef.current?.interactionConfig.correctDelayMs ?? settings.correctDelayMs);
+      }, correctDelayMs);
     },
     [
       answerPitchMode,
@@ -1372,6 +1438,7 @@ export function PracticeView({
 
     const unsubscribe = midi.subscribe((event) => {
       if (event.type === "reset") {
+        pendingMidiPressDiagnosticSampleIdRef.current = undefined;
         heldMidiInputsRef.current.clear();
         syncHeldMidiKeys();
         return;
@@ -1380,14 +1447,18 @@ export function PracticeView({
         return;
       }
       if (event.type === "release") {
+        pendingMidiPressDiagnosticSampleIdRef.current = undefined;
         heldMidiInputsRef.current.delete(event.note.keyId);
         syncHeldMidiKeys();
         return;
       }
       heldMidiInputsRef.current.set(event.note.keyId, event.note.keyName);
+      pendingMidiPressDiagnosticSampleIdRef.current = event.note.diagnosticSampleId;
       syncHeldMidiKeys();
       if (phase === "running") {
+        markMidiLatencyStage(event.note.diagnosticSampleId, "practiceSubscriber");
         submitAnswerRef.current({
+          diagnosticSampleId: event.note.diagnosticSampleId,
           midiNoteNumber: event.note.midiNoteNumber,
           noteName: event.note.keyName,
           octave: event.note.octave,
@@ -1401,6 +1472,7 @@ export function PracticeView({
     });
     return () => {
       unsubscribe();
+      pendingMidiPressDiagnosticSampleIdRef.current = undefined;
       heldMidiInputsRef.current.clear();
       setHeldMidiAnswerKeys(new Set());
     };
@@ -2019,6 +2091,7 @@ export function PracticeView({
           <StaffPagePrompt
             notes={staffPageNotes}
             completedCount={staffPageCompletedCount}
+            diagnosticSampleId={feedback?.diagnosticSampleId}
             isScrolling={isStaffPageScrolling}
             noteDuration={effectivePromptNoteDuration}
             scrollDurationMs={staffPageScrollDurationMs}
@@ -2050,6 +2123,20 @@ export function PracticeView({
             void submitAnswer({ noteName: key.keyName, source: "screen-keyboard" });
           }
         }}
+        onFeedbackTransitionEnd={
+          MIDI_LATENCY_DIAGNOSTICS_ENABLED
+            ? (keyName, type, propertyName) => {
+                if (
+                  type === feedback?.type &&
+                  feedback?.noteName === keyName &&
+                  propertyName.startsWith("border-") &&
+                  propertyName.endsWith("-color")
+                ) {
+                  markMidiLatencyStage(feedback.diagnosticSampleId, "transitionEnd");
+                }
+              }
+            : undefined
+        }
         pressedKeys={pressedAnswerKeys}
         scale={effectiveAnswerKeyboardScale}
       />

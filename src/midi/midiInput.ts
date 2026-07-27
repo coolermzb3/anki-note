@@ -27,6 +27,7 @@ export type MidiAccessStatus =
   | "unsupported";
 
 export interface MidiNoteInput {
+  diagnosticSampleId?: number;
   keyId: string;
   keyName: PianoKeyName;
   midiNoteNumber: number;

@@ -13,6 +13,7 @@ const NOTE_NAME_SEMITONES: Record<NoteName, number> = {
 export type AnswerInputSource = "computer-keyboard" | "midi" | "screen-keyboard";
 
 export interface PracticeAnswerInput {
+  diagnosticSampleId?: number;
   midiNoteNumber?: number;
   noteName: NoteName;
   octave?: number;
