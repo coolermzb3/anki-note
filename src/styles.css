@@ -206,6 +206,13 @@ h3 {
   color: white;
 }
 
+.app-nav button.active:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: white;
+  box-shadow: none;
+}
+
 main {
   min-width: 0;
 }
@@ -1008,6 +1015,12 @@ main.has-backup-reminder .setup-grid::after {
 }
 
 .choice-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.global-range-group-choice.choice-active:hover {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent-strong);
