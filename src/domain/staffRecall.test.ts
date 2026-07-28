@@ -10,6 +10,7 @@ import {
   formatStaffRecallPerNoteDeltaMs,
   formatStaffRecallPerNoteMs,
   getStaffRecallTargetNoteSetKey,
+  sortNoteNamesByActiveMs,
   totalStaffRecallActiveMs,
 } from "./staffRecall";
 import type { NoteName, StaffRecallRunRecordV1 } from "./types";
@@ -76,5 +77,19 @@ describe("staff recall", () => {
     expect(formatStaffRecallPerNoteMs(10150, 14)).toBe("725ms");
     expect(formatStaffRecallPerNoteDeltaMs(-420, 14)).toEqual({ direction: "faster", text: "(−30ms)" });
     expect(formatStaffRecallPerNoteDeltaMs(6, 14)).toBeUndefined();
+  });
+
+  it("orders completed columns from longest to shortest while preserving ties", () => {
+    expect(
+      sortNoteNamesByActiveMs(["F", "C", "G", "D", "A", "E", "B"], {
+        C: 900,
+        D: 1200,
+        E: 700,
+        F: 1200,
+        G: 500,
+        A: 900,
+        B: 300,
+      }),
+    ).toEqual(["F", "D", "C", "A", "E", "G", "B"]);
   });
 });

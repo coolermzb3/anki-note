@@ -63,6 +63,13 @@ export function shuffleNoteNames(random: () => number = Math.random): NoteName[]
   return noteNames;
 }
 
+export function sortNoteNamesByActiveMs(
+  noteNames: readonly NoteName[],
+  activeMsByNoteName: Readonly<Record<NoteName, number>>,
+): NoteName[] {
+  return [...noteNames].sort((left, right) => activeMsByNoteName[right] - activeMsByNoteName[left]);
+}
+
 export function columnDefinitionsForNoteNames(noteNames: readonly NoteName[]): NoteNameColumnDefinition[] {
   return noteNames.map((noteName) => {
     const column = NOTE_NAME_COLUMNS.find((candidate) => candidate.noteName === noteName);

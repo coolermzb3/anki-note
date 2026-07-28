@@ -14,6 +14,7 @@ import {
   formatStaffRecallPerNoteDeltaMs,
   formatStaffRecallPerNoteMs,
   shuffleNoteNames,
+  sortNoteNamesByActiveMs,
   totalStaffRecallActiveMs,
 } from "../domain/staffRecall";
 import { applicableLedgerSetting } from "../domain/staffNotation";
@@ -287,6 +288,7 @@ export function StaffRecallView({
       }
       savingRef.current = true;
       const endedAt = new Date().toISOString();
+      const columnActiveMs = completeColumnActiveMs(nextStates);
       const run: StaffRecallRunRecord = {
         id: createUuid(),
         schemaVersion: 2,
@@ -299,10 +301,11 @@ export function StaffRecallView({
         ),
         staffNotationMode,
         columnOrder,
-        columnActiveMs: completeColumnActiveMs(nextStates),
+        columnActiveMs,
         startedAt: runStartedAtRef.current ?? endedAt,
         endedAt,
       };
+      setColumnOrder(sortNoteNamesByActiveMs(columnOrder, columnActiveMs));
       setCompletedRun(run);
       onRangeLockedChange(false);
       try {
