@@ -22,6 +22,7 @@ import type {
   ReviewRecord,
 } from "../../domain/types";
 import { GlobalRangeControls } from "../GlobalRangeControls";
+import { resolveHistoryLimit } from "../HistoryLimitControl";
 import {
   DEFAULT_SESSION_PROGRESS_UI_PREFERENCES,
   parseSessionProgressUiPreferences,
@@ -231,7 +232,13 @@ export function StatsView({
     [statsUiPreferences.hiddenRecognitionSeries],
   );
   const sessionProgressMode = sessionProgressPreferences.mode;
+  const sessionProgressAllHistory = sessionProgressPreferences.allHistory;
   const sessionProgressHistoryLimit = sessionProgressPreferences.historyLimit;
+  const sessionProgressEffectiveHistoryLimit = resolveHistoryLimit(
+    sessionProgressHistoryLimit,
+    sessionProgressAllHistory,
+    sessions.length,
+  );
   const commitStatsCarouselIndex = (nextIndex: number): void => {
     const normalizedIndex = normalizeStatsCarouselIndex(nextIndex);
     setStatsUiPreferences((current) => {
@@ -322,6 +329,9 @@ export function StatsView({
   const setSessionProgressHistoryLimit = (nextHistoryLimit: number): void => {
     setSessionProgressPreferences((current) => ({ ...current, historyLimit: nextHistoryLimit }));
   };
+  const setSessionProgressAllHistory = (allHistory: boolean): void => {
+    setSessionProgressPreferences((current) => ({ ...current, allHistory }));
+  };
 
   const longTermReviews = useMemo(
     () => primaryContentReady ? filterLongTermReviews(reviews) : [],
@@ -394,7 +404,7 @@ export function StatsView({
   const sessionProgressComparison = useSessionProgressComparison({
     activeNotes,
     enabled: sessionProgressStatsReady,
-    historyLimit: sessionProgressHistoryLimit,
+    historyLimit: sessionProgressEffectiveHistoryLimit,
     mode: sessionProgressMode,
     reviews,
     sessions,
@@ -587,9 +597,11 @@ export function StatsView({
     if (cardId === "session-progress") {
       return (
         <SessionProgressCard
+          allHistory={sessionProgressAllHistory}
           historyLimit={sessionProgressHistoryLimit}
           mode={sessionProgressMode}
           model={sessionProgressComparison}
+          onAllHistoryChange={setSessionProgressAllHistory}
           onHistoryLimitChange={setSessionProgressHistoryLimit}
           onModeChange={setSessionProgressMode}
         />

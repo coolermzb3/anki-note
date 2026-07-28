@@ -1763,10 +1763,30 @@ main.has-backup-reminder .setup-grid::after {
   font-weight: 400;
 }
 
-.session-progress-history-limit input {
-  width: 74px;
+.session-progress-history-limit input[type="number"] {
+  width: 64px;
   min-height: 30px;
   padding: 0 8px;
+}
+
+.session-progress-history-limit input[type="number"]:disabled {
+  opacity: 0.55;
+}
+
+.session-progress-history-all {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.session-progress-history-all input {
+  accent-color: var(--accent);
+  height: 15px;
+  margin: 0;
+  min-height: 0;
+  width: 15px;
 }
 
 .session-progress-chart-wrap {

@@ -21,7 +21,7 @@ import { applicableLedgerSetting } from "../domain/staffNotation";
 import { buildTargetNoteSetKey } from "../domain/targetNoteSet";
 import { formatMs, percentile } from "../domain/stats";
 import type { AppSettings, NoteName, StaffRecallRunRecord, TargetNote, TargetNoteId } from "../domain/types";
-import { HistoryLimitControl } from "./HistoryLimitControl";
+import { HistoryLimitControl, resolveHistoryLimit } from "./HistoryLimitControl";
 import { isInteractiveShortcutTarget, shouldHandleGlobalEnter } from "./keyboardShortcuts";
 import { PauseOverlay } from "./PauseOverlay";
 import { StaffRecallMap, type StaffRecallColumnState } from "./StaffRecallMap";
@@ -128,12 +128,17 @@ export function StaffRecallView({
     () => comparableStaffRecallRuns(localRuns, targetNoteSetKey),
     [localRuns, targetNoteSetKey],
   );
+  const comparisonHistoryLimit = resolveHistoryLimit(
+    uiPreferences.historyLimit,
+    uiPreferences.allHistory,
+    comparableRuns.length,
+  );
   const comparisonRuns = useMemo(
     () =>
       comparableRuns
         .filter((run) => run.id !== completedRun?.id)
-        .slice(-uiPreferences.historyLimit),
-    [comparableRuns, completedRun?.id, uiPreferences.historyLimit],
+        .slice(-comparisonHistoryLimit),
+    [comparableRuns, comparisonHistoryLimit, completedRun?.id],
   );
   const comparisonColumnMedianMs = useMemo(
     () => medianColumnActiveMs(comparisonRuns),
@@ -426,7 +431,12 @@ export function StaffRecallView({
     currentTotalMs !== undefined &&
     previousBestTotalMs !== undefined &&
     currentTotalMs < previousBestTotalMs;
-  const visibleTrendRuns = completedComparableRuns.slice(-uiPreferences.historyLimit);
+  const trendHistoryLimit = resolveHistoryLimit(
+    uiPreferences.historyLimit,
+    uiPreferences.allHistory,
+    completedComparableRuns.length,
+  );
+  const visibleTrendRuns = completedComparableRuns.slice(-trendHistoryLimit);
 
   return (
     <>
@@ -508,9 +518,14 @@ export function StaffRecallView({
           <div className="staff-recall-trend-heading">
             <h2>最近成绩</h2>
             <HistoryLimitControl
+              allHistory={uiPreferences.allHistory}
+              allHistoryCount={completedComparableRuns.length}
               ariaLabel="默写历史次数"
               historyLimit={uiPreferences.historyLimit}
-              onHistoryLimitChange={(historyLimit) => setUiPreferences({ historyLimit })}
+              onAllHistoryChange={(allHistory) => setUiPreferences((current) => ({ ...current, allHistory }))}
+              onHistoryLimitChange={(historyLimit) =>
+                setUiPreferences((current) => ({ ...current, historyLimit }))
+              }
             />
           </div>
           {completedComparableRuns.length >= 2 ? (

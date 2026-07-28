@@ -3,10 +3,12 @@ import { DEFAULT_HISTORY_LIMIT, normalizeHistoryLimit } from "./HistoryLimitCont
 export const STAFF_RECALL_UI_PREFERENCES_KEY = "anki-note.staffRecallUiPreferences";
 
 export interface StaffRecallUiPreferences {
+  allHistory: boolean;
   historyLimit: number;
 }
 
 export const DEFAULT_STAFF_RECALL_UI_PREFERENCES: StaffRecallUiPreferences = {
+  allHistory: false,
   historyLimit: DEFAULT_HISTORY_LIMIT,
 };
 
@@ -22,6 +24,7 @@ export function parseStaffRecallUiPreferences(
     return fallback;
   }
   return {
+    allHistory: typeof value.allHistory === "boolean" ? value.allHistory : fallback.allHistory,
     historyLimit:
       typeof value.historyLimit === "number" || typeof value.historyLimit === "string"
         ? normalizeHistoryLimit(String(value.historyLimit))

@@ -86,6 +86,7 @@ export interface SessionProgressConditionOption {
 }
 
 export interface SessionProgressComparisonModel {
+  allHistoryCount: number;
   applyCondition: (
     dimension: SessionProgressConditionDimension,
     value: SessionProgressConditionValue,
@@ -358,8 +359,10 @@ export function useSessionProgressComparison({
     () => new Set(selectedGroups.flatMap((group) => group.sessionIds)),
     [selectedGroups],
   );
+  const allHistoryCount = Math.max(0, ...selectedGroups.map((group) => group.sessionCount));
 
   return {
+    allHistoryCount,
     applyCondition,
     benchmark,
     chartGroups,

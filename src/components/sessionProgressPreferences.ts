@@ -6,11 +6,13 @@ const SESSION_PROGRESS_MODES: readonly SessionProgressMode[] = ["actual-order", 
 export const SESSION_PROGRESS_UI_PREFERENCES_KEY = "anki-note.sessionProgressUiPreferences";
 
 export interface SessionProgressUiPreferences {
+  allHistory: boolean;
   historyLimit: number;
   mode: SessionProgressMode;
 }
 
 export const DEFAULT_SESSION_PROGRESS_UI_PREFERENCES: SessionProgressUiPreferences = {
+  allHistory: false,
   historyLimit: DEFAULT_SESSION_PROGRESS_HISTORY_LIMIT,
   mode: "actual-order",
 };
@@ -32,6 +34,7 @@ export function parseSessionProgressUiPreferences(
   }
 
   return {
+    allHistory: typeof value.allHistory === "boolean" ? value.allHistory : fallback.allHistory,
     historyLimit:
       typeof value.historyLimit === "number" || typeof value.historyLimit === "string"
         ? normalizeSessionProgressHistoryLimit(String(value.historyLimit))

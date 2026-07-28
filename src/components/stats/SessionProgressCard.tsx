@@ -100,15 +100,19 @@ function SessionProgressConditionSelector({
 }
 
 export function SessionProgressCard({
+  allHistory,
   historyLimit,
   mode,
   model,
+  onAllHistoryChange,
   onHistoryLimitChange,
   onModeChange,
 }: {
+  allHistory: boolean;
   historyLimit: number;
   mode: SessionProgressMode;
   model: SessionProgressComparisonModel;
+  onAllHistoryChange: (allHistory: boolean) => void;
   onHistoryLimitChange: (historyLimit: number) => void;
   onModeChange: (mode: SessionProgressMode) => void;
 }): JSX.Element {
@@ -149,12 +153,15 @@ export function SessionProgressCard({
         <h2>答对进度</h2>
         <div className="chart-panel-actions">
           <SessionProgressControls
+            allHistory={allHistory}
+            allHistoryCount={model.allHistoryCount}
             benchmark={model.benchmark}
             currentLabel="最近"
             historyLeadingLabel="每组最近"
             historyLimit={historyLimit}
             historyTrailingLabel="条"
             mode={mode}
+            onAllHistoryChange={onAllHistoryChange}
             onHistoryLimitChange={onHistoryLimitChange}
             onModeChange={onModeChange}
           />

@@ -67,6 +67,7 @@ import type {
 import { MIDI_START_NOTE_NUMBER } from "../midi/midiInput";
 import type { MidiInputController } from "../midi/useMidiInput";
 import { GlobalRangeControls } from "./GlobalRangeControls";
+import { resolveHistoryLimit } from "./HistoryLimitControl";
 import { isInteractiveShortcutTarget, shouldHandleGlobalEnter } from "./keyboardShortcuts";
 import {
   SessionProgressChart,
@@ -400,7 +401,9 @@ export function PracticeView({
       ? STAFF_PAGE_SCROLL_DURATION_MS
       : 0;
   const summaryProgressMode = sessionProgressPreferences.mode;
+  const summaryAllHistory = sessionProgressPreferences.allHistory;
   const summaryHistoryLimit = sessionProgressPreferences.historyLimit;
+  const summaryEffectiveHistoryLimit = resolveHistoryLimit(summaryHistoryLimit, summaryAllHistory, sessions.length);
   const setMode = (nextMode: PracticeMode): void => {
     setPracticeSetupPreferences((current) => ({ ...current, mode: nextMode }));
   };
@@ -442,6 +445,9 @@ export function PracticeView({
   };
   const setSummaryHistoryLimit = (nextHistoryLimit: number): void => {
     setSessionProgressPreferences((current) => ({ ...current, historyLimit: nextHistoryLimit }));
+  };
+  const setSummaryAllHistory = (allHistory: boolean): void => {
+    setSessionProgressPreferences((current) => ({ ...current, allHistory }));
   };
 
   const promptRef = useRef<PromptRuntime | null>(null);
@@ -1666,12 +1672,13 @@ export function PracticeView({
             currentReviews: summary.reviews,
             sessions,
             reviews,
-            historyLimit: summaryHistoryLimit,
+            historyLimit: summaryEffectiveHistoryLimit,
             mode: summaryProgressMode,
           })
         : [],
-    [reviews, sessions, summary, summaryHistoryLimit, summaryProgressMode],
+    [reviews, sessions, summary, summaryEffectiveHistoryLimit, summaryProgressMode],
   );
+  const summaryAllHistoryCount = summaryProgressSeries.filter((series) => !series.isCurrent).length;
   const summaryProgressBenchmark = useMemo(
     () =>
       summary
@@ -2000,9 +2007,12 @@ export function PracticeView({
               <div className="summary-section-heading session-progress-heading">
                 <h2>答对进度</h2>
                 <SessionProgressControls
+                  allHistory={summaryAllHistory}
+                  allHistoryCount={summaryAllHistoryCount}
                   benchmark={summaryProgressBenchmark}
                   historyLimit={summaryHistoryLimit}
                   mode={summaryProgressMode}
+                  onAllHistoryChange={setSummaryAllHistory}
                   onHistoryLimitChange={setSummaryHistoryLimit}
                   onModeChange={setSummaryProgressMode}
                 />

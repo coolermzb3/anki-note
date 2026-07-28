@@ -18,12 +18,15 @@ export const DEFAULT_SESSION_PROGRESS_HISTORY_LIMIT = DEFAULT_HISTORY_LIMIT;
 const DEFAULT_SESSION_PROGRESS_HEIGHT = 260;
 
 interface SessionProgressControlsProps {
+  allHistory: boolean;
+  allHistoryCount: number;
   benchmark?: SessionProgressBenchmark;
   currentLabel?: string;
   historyLeadingLabel?: string;
   historyLimit: number;
   historyTrailingLabel?: string;
   mode: SessionProgressMode;
+  onAllHistoryChange: (allHistory: boolean) => void;
   onHistoryLimitChange: (historyLimit: number) => void;
   onModeChange: (mode: SessionProgressMode) => void;
 }
@@ -75,12 +78,15 @@ function formatBenchmarkValue(benchmark: SessionProgressBenchmark, value: number
 }
 
 export function SessionProgressControls({
+  allHistory,
+  allHistoryCount,
   benchmark,
   currentLabel = "本次",
   historyLeadingLabel,
   historyLimit,
   historyTrailingLabel,
   mode,
+  onAllHistoryChange,
   onHistoryLimitChange,
   onModeChange,
 }: SessionProgressControlsProps): JSX.Element {
@@ -109,9 +115,12 @@ export function SessionProgressControls({
         </button>
       </div>
       <HistoryLimitControl
+        allHistory={allHistory}
+        allHistoryCount={allHistoryCount}
         ariaLabel="答对进度曲线数量"
         historyLimit={historyLimit}
         leadingLabel={historyLeadingLabel}
+        onAllHistoryChange={onAllHistoryChange}
         onHistoryLimitChange={onHistoryLimitChange}
         trailingLabel={historyTrailingLabel}
       />
