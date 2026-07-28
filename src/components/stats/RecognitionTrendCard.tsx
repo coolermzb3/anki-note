@@ -161,6 +161,20 @@ export function makeRecognitionTimeChartOption(
   const metricData = metric === "speed" ? makeRecognitionSpeedData(data) : data;
   const displayedData = valueMode === "relative" ? makeRelativeRecognitionTimeData(metricData) : metricData;
   const visibleSeriesSet = new Set(visibleSeries);
+  const dataZoomPreviewOption = RECOGNITION_SERIES_OPTIONS.find((option) => visibleSeriesSet.has(option.key));
+  const dataZoomPreviewSeries: LineSeriesOption[] = dataZoomPreviewOption
+    ? [{
+        data: displayedData.map((stat) => stat[dataZoomPreviewOption.key] ?? null),
+        id: "recognition-data-zoom-preview",
+        itemStyle: { opacity: 0 },
+        lineStyle: { opacity: 0 },
+        showSymbol: false,
+        silent: true,
+        tooltip: { show: false },
+        type: "line",
+        yAxisIndex: dataZoomPreviewOption.yAxisIndex ?? 0,
+      }]
+    : [];
   const markLineSeriesKey = (["median", "p10", "p90", "errorRate"] as const)
     .find((seriesKey) => visibleSeriesSet.has(seriesKey));
   const boundaryMarkers = data.flatMap((stat, dataIndex) =>
@@ -224,7 +238,6 @@ export function makeRecognitionTimeChartOption(
     right: 72,
     top: 46,
   };
-
   return {
     animation: false,
     color: [
@@ -261,18 +274,21 @@ export function makeRecognitionTimeChartOption(
     ],
     grid: chartGrid,
     legend: { show: false },
-    series: RECOGNITION_SERIES_OPTIONS.flatMap((option) => visibleSeriesSet.has(option.key)
-      ? makeRecognitionLineSeries({
-          color: option.color,
-          data: displayedData,
-          markLine: markLineSeriesKey === option.key ? boundaryMarkLine : undefined,
-          metric: option.key,
-          name: option.label,
-          opacity: option.opacity,
-          width: option.width,
-          yAxisIndex: option.yAxisIndex,
-        })
-      : []),
+    series: [
+      ...dataZoomPreviewSeries,
+      ...RECOGNITION_SERIES_OPTIONS.flatMap((option) => visibleSeriesSet.has(option.key)
+        ? makeRecognitionLineSeries({
+            color: option.color,
+            data: displayedData,
+            markLine: markLineSeriesKey === option.key ? boundaryMarkLine : undefined,
+            metric: option.key,
+            name: option.label,
+            opacity: option.opacity,
+            width: option.width,
+            yAxisIndex: option.yAxisIndex,
+          })
+        : []),
+    ],
     tooltip: {
       axisPointer: { animation: false, type: "line" },
       enterable: false,

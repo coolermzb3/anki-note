@@ -51,6 +51,25 @@ describe("recognition trend chart", () => {
     expect(dataZoom.slice(0, 2).map((zoom) => zoom.filterMode)).toEqual(["filter", "filter"]);
   });
 
+  it("uses a complete series for the native data zoom preview across range breaks", () => {
+    const option = makeRecognitionTimeChartOption(makeChartData(), "duration", "absolute", ["median", "p90"]);
+    const previewSeries = (option.series as Array<{
+      data: Array<number | null>;
+      id?: string;
+      lineStyle?: { opacity?: number };
+      silent?: boolean;
+      tooltip?: { show?: boolean };
+    }>)[0];
+
+    expect(previewSeries).toMatchObject({
+      data: [1, 2, 3, 4],
+      id: "recognition-data-zoom-preview",
+      lineStyle: { opacity: 0 },
+      silent: true,
+      tooltip: { show: false },
+    });
+  });
+
   it("rebases relative changes at each range boundary", () => {
     const option = makeRecognitionTimeChartOption(makeChartData(), "duration", "relative");
     const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
@@ -130,7 +149,8 @@ describe("recognition trend chart", () => {
   it("renders only selected custom-legend series and keeps range markers visible", () => {
     const option = makeRecognitionTimeChartOption(makeChartData(), "duration", "absolute", ["p10", "errorRate"]);
     const withoutErrorRate = makeRecognitionTimeChartOption(makeChartData(), "duration", "absolute", ["p10"]);
-    const series = option.series as Array<{ markLine?: unknown; name: string }>;
+    const series = (option.series as Array<{ id?: string; markLine?: unknown; name: string }>)
+      .filter((item) => item.id !== "recognition-data-zoom-preview");
     const yAxis = option.yAxis as Array<{ show?: boolean }>;
     const yAxisWithoutErrorRate = withoutErrorRate.yAxis as Array<{ show?: boolean }>;
 
