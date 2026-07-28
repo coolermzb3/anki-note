@@ -13,3 +13,9 @@ repos:
         language: system
         files: ^analysis/.*\.py$
         types: [python]
+      - id: frontend-build
+        name: pnpm run build
+        entry: pwsh.exe -NoProfile -File scripts/pre-commit-build.ps1
+        language: system
+        pass_filenames: false
+        always_run: true

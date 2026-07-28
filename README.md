@@ -35,6 +35,15 @@ pnpm install
 pnpm run dev
 ```
 
+首次配置开发环境时，安装提交钩子：
+
+```bash
+uv sync --project analysis
+uv run --project analysis pre-commit install
+```
+
+提交钩子会检查并格式化 `analysis/` 下的 Python 代码，并在每次提交前执行前端生产构建。
+
 ## MIDI 键盘
 
 首次使用时在“设置 → MIDI 键盘”中授权并选择输入设备。浏览器已有 MIDI 权限时，后续打开页面会静默尝试恢复连接；未授权或自动连接失败时仍可手动连接。连接后可在练习前选择：
