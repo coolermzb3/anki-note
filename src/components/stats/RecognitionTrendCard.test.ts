@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { makeRecognitionTimeChartOption } from "./RecognitionTrendCard";
+import type { RecognitionTimeChartStat } from "./recognitionTrend";
 
-function makeChartData() {
+function makeChartData(): RecognitionTimeChartStat[] {
   return [1, 2, 3, 4].map((value, index) => ({
-    addedNoteLabels: index === 2 ? ["E4"] : [],
+    boundaryLabel: index === 2 ? "新范围已纳入" : undefined,
     breakBefore: index === 2,
     coveredNoteCount: index < 2 ? 1 : 2,
     errorRate: value,
@@ -14,6 +15,7 @@ function makeChartData() {
     p90: value,
     tooltipLabel: String(value),
     totalNoteCount: 2,
+    transition: false,
   }));
 }
 
@@ -49,7 +51,7 @@ describe("recognition trend chart", () => {
     expect(dataZoom.slice(0, 2).map((zoom) => zoom.filterMode)).toEqual(["filter", "filter"]);
   });
 
-  it("rebases relative changes at each inclusion boundary", () => {
+  it("rebases relative changes at each range boundary", () => {
     const option = makeRecognitionTimeChartOption(makeChartData(), "duration", "relative");
     const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
       .filter((series) => series.name === "中位");
@@ -73,6 +75,47 @@ describe("recognition trend chart", () => {
     expect(firstValue("P90")).toBe(0.25);
   });
 
+  it("uses one faded segment between range-start and range-ready boundaries", () => {
+    const data: RecognitionTimeChartStat[] = makeChartData()
+      .map((point) => ({ ...point, boundaryLabel: undefined }));
+    data[1] = { ...data[1], boundaryLabel: "开始扩展 1→2", breakBefore: true, transition: true };
+    data[2] = { ...data[2], breakBefore: false, transition: true };
+    data[3] = { ...data[3], boundaryLabel: "新范围已纳入", breakBefore: true, transition: false };
+    const option = makeRecognitionTimeChartOption(data);
+    const medianSeries = (option.series as Array<{
+      data: Array<number | null>;
+      lineStyle?: { opacity?: number; type?: string };
+      markLine?: { data: Array<{ label: { formatter: string }; xAxis: number }> };
+      name: string;
+    }>).filter((series) => series.name === "中位");
+
+    expect(medianSeries.map((series) => series.data)).toEqual([
+      [1, null, null, null],
+      [null, 2, 3, null],
+      [null, null, null, 4],
+    ]);
+    expect(medianSeries.map((series) => series.lineStyle?.type)).toEqual([undefined, undefined, undefined]);
+    expect(medianSeries.map((series) => series.lineStyle?.opacity)).toEqual([1, 0.45, 1]);
+    expect(medianSeries[0].markLine?.data).toEqual([
+      { label: { formatter: "开始扩展 1→2" }, xAxis: 1 },
+      { label: { formatter: "新范围已纳入" }, xAxis: 3 },
+    ]);
+  });
+
+  it("starts a relative segment at its first point with metrics", () => {
+    const data = makeChartData().map((point) => ({
+      ...point,
+      boundaryLabel: undefined,
+      breakBefore: false,
+    }));
+    data[0] = { ...data[0], median: undefined, p10: undefined, p90: undefined };
+    const option = makeRecognitionTimeChartOption(data, "duration", "relative");
+    const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
+      .find((series) => series.name === "中位");
+
+    expect(medianSeries?.data).toEqual([null, 0, 50, 100]);
+  });
+
   it("calculates relative changes from the selected speed metric", () => {
     const data = makeChartData().slice(0, 2);
     data[0] = { ...data[0], median: 2 };
@@ -84,7 +127,7 @@ describe("recognition trend chart", () => {
     expect(medianSeries?.data).toEqual([0, 100]);
   });
 
-  it("renders only selected custom-legend series and keeps inclusion markers visible", () => {
+  it("renders only selected custom-legend series and keeps range markers visible", () => {
     const option = makeRecognitionTimeChartOption(makeChartData(), "duration", "absolute", ["p10", "errorRate"]);
     const withoutErrorRate = makeRecognitionTimeChartOption(makeChartData(), "duration", "absolute", ["p10"]);
     const series = option.series as Array<{ markLine?: unknown; name: string }>;

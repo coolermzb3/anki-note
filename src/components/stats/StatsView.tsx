@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type TransitionEvent as ReactTransitionEvent,
 } from "react";
-import { formatTargetNoteLabel, getNotesForGroups } from "../../domain/notes";
+import { getNotesForGroups } from "../../domain/notes";
 import {
   buildDailyStats,
   buildNoteStats,
@@ -32,6 +32,8 @@ import { useLocalStorageState } from "../useLocalStorageState";
 import { PracticeHeatmap } from "./PracticeHeatmap";
 import { RecognitionTrendCard } from "./RecognitionTrendCard";
 import {
+  applyRecognitionRangeTransitions,
+  findRecognitionRangeTransitions,
   RECOGNITION_SERIES_KEYS,
   type RecognitionSeriesKey,
   type RecognitionTimeChartStat,
@@ -362,31 +364,60 @@ export function StatsView({
       : [],
     [activeNotes, longTermReviews, recognitionStatsReady, sessions],
   );
+  const recognitionRangeTransitions = useMemo(
+    () => findRecognitionRangeTransitions(sessions, activeNotes, recognitionTrendBySession),
+    [activeNotes, recognitionTrendBySession, sessions],
+  );
+  const recognitionTransitionBaselinesBySession = useMemo(
+    () => recognitionRangeTransitions.map((transition) => ({
+      transition,
+      trend: transition.baselineNoteIds.length
+        ? buildRecognitionTrend(
+            longTermReviews,
+            sessions,
+            transition.baselineNoteIds,
+            "practice-session",
+          )
+        : [],
+    })),
+    [longTermReviews, recognitionRangeTransitions, sessions],
+  );
   const recognitionTrend = useMemo(
-    () => recognitionTimeGrouping === "day"
-      ? groupRecognitionTrendByDay(recognitionTrendBySession)
-      : recognitionTrendBySession,
-    [recognitionTimeGrouping, recognitionTrendBySession],
+    () => {
+      const trend = recognitionTimeGrouping === "day"
+        ? groupRecognitionTrendByDay(recognitionTrendBySession)
+        : recognitionTrendBySession;
+      const baselines = recognitionTransitionBaselinesBySession.map(({ transition, trend: baselineTrend }) => ({
+        transition,
+        trend: recognitionTimeGrouping === "day"
+          ? groupRecognitionTrendByDay(baselineTrend)
+          : baselineTrend,
+      }));
+      return applyRecognitionRangeTransitions(
+        trend,
+        baselines,
+        recognitionTimeGrouping,
+      );
+    },
+    [
+      recognitionTimeGrouping,
+      recognitionTransitionBaselinesBySession,
+      recognitionTrendBySession,
+    ],
   );
   const recognitionTimeStats = useMemo<RecognitionTimeChartStat[]>(() => {
     const cutoff = getStatsRangeCutoff(range);
     const visible = cutoff
       ? recognitionTrend.filter((point) => new Date(point.boundaryAt) >= cutoff)
       : recognitionTrend;
-    return visible.map((stat, index) => {
+    return visible.map((stat) => {
       const formatted = recognitionTimeGrouping === "day"
         ? { label: formatShortDate(stat.key), tooltipLabel: formatShortDate(stat.key) }
         : formatShortDateTime(stat.boundaryAt);
-      const previousCoveredNoteIds = new Set(visible[index - 1]?.coveredNoteIds ?? []);
-      const addedNoteLabels = index === 0
-        ? []
-        : activeNotes
-            .filter((note) => stat.coveredNoteIds.includes(note.id) && !previousCoveredNoteIds.has(note.id))
-            .map((note) => formatTargetNoteLabel(note, activeTargetNoteIds));
       return {
         ...formatted,
-        addedNoteLabels,
-        breakBefore: addedNoteLabels.length > 0,
+        boundaryLabel: stat.boundaryLabel,
+        breakBefore: stat.breakBefore,
         coveredNoteCount: stat.coveredNoteCount,
         errorRate: stat.errorRate === undefined ? undefined : stat.errorRate * 100,
         key: stat.key,
@@ -394,9 +425,11 @@ export function StatsView({
         p10: stat.p10Ms === undefined ? undefined : stat.p10Ms / 1000,
         p90: stat.p90Ms === undefined ? undefined : stat.p90Ms / 1000,
         totalNoteCount: stat.totalNoteCount,
+        transition: stat.transition,
+        transitionKind: stat.transitionKind,
       };
     });
-  }, [activeNotes, activeTargetNoteIds, range, recognitionTimeGrouping, recognitionTrend]);
+  }, [range, recognitionTimeGrouping, recognitionTrend]);
   const recognitionCoverage = recognitionTrend[recognitionTrend.length - 1] ?? {
     coveredNoteCount: 0,
     totalNoteCount: activeNotes.length,

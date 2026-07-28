@@ -14,6 +14,7 @@ import { STATS_COLORS } from "./statsColors";
 
 const RECOGNITION_CHART_COLORS = STATS_COLORS.recognitionChart;
 const RECOGNITION_ERROR_RATE_OPACITY = 0.5;
+const RECOGNITION_TRANSITION_OPACITY = 0.45;
 const RECOGNITION_SERIES_OPTIONS: Array<{
   color: string;
   key: RecognitionSeriesKey;
@@ -56,29 +57,36 @@ function makeRecognitionLineSeries({
   width?: number;
   yAxisIndex?: number;
 }): LineSeriesOption[] {
-  const segments: Array<Array<number | null>> = [Array(data.length).fill(null)];
+  const segments: Array<{ data: Array<number | null>; transition: boolean }> = [{
+    data: Array(data.length).fill(null),
+    transition: data[0]?.transition ?? false,
+  }];
   for (const [index, stat] of data.entries()) {
-    if (index > 0 && stat.breakBefore) {
-      segments.push(Array(data.length).fill(null));
+    const current = segments[segments.length - 1];
+    if (index > 0 && (stat.breakBefore || stat.transition !== current.transition)) {
+      segments.push({ data: Array(data.length).fill(null), transition: stat.transition });
     }
-    segments[segments.length - 1][index] = stat[metric] ?? null;
+    segments[segments.length - 1].data[index] = stat[metric] ?? null;
   }
 
   return segments
-    .filter((segment) => segment.some((value) => value !== null))
-    .map((segment, index) => ({
-      connectNulls: false,
-      data: segment,
-      itemStyle: { color, opacity },
-      lineStyle: { color, opacity, width },
-      markLine: index === 0 ? markLine : undefined,
-      name,
-      showSymbol: segment.filter((value) => value !== null).length === 1,
-      smooth: true,
-      symbolSize: 7,
-      type: "line",
-      yAxisIndex,
-    }));
+    .filter((segment) => segment.data.some((value) => value !== null))
+    .map((segment, index) => {
+      const segmentOpacity = opacity * (segment.transition ? RECOGNITION_TRANSITION_OPACITY : 1);
+      return {
+        connectNulls: false,
+        data: segment.data,
+        itemStyle: { color, opacity: segmentOpacity },
+        lineStyle: { color, opacity: segmentOpacity, width },
+        markLine: index === 0 ? markLine : undefined,
+        name,
+        showSymbol: segment.data.filter((value) => value !== null).length === 1,
+        smooth: true,
+        symbolSize: 7,
+        type: "line",
+        yAxisIndex,
+      } satisfies LineSeriesOption;
+    });
 }
 
 function relativeChange(value: number | undefined, baseline: number | undefined): number | undefined {
@@ -117,16 +125,29 @@ function makeRecognitionSpeedData(data: RecognitionTimeChartStat[]): Recognition
 }
 
 function makeRelativeRecognitionTimeData(data: RecognitionTimeChartStat[]): RecognitionTimeChartStat[] {
-  let baseline: RecognitionTimeChartStat | undefined;
+  let medianBaseline: number | undefined;
+  let p10Baseline: number | undefined;
+  let p90Baseline: number | undefined;
   return data.map((stat) => {
-    if (!baseline || stat.breakBefore) {
-      baseline = stat;
+    if (stat.breakBefore) {
+      medianBaseline = undefined;
+      p10Baseline = undefined;
+      p90Baseline = undefined;
+    }
+    if (medianBaseline === undefined && stat.median !== undefined) {
+      medianBaseline = stat.median;
+    }
+    if (p10Baseline === undefined && stat.p10 !== undefined) {
+      p10Baseline = stat.p10;
+    }
+    if (p90Baseline === undefined && stat.p90 !== undefined) {
+      p90Baseline = stat.p90;
     }
     return {
       ...stat,
-      median: relativeChange(stat.median, baseline.median),
-      p10: relativeChange(stat.p10, baseline.p10),
-      p90: relativeChange(stat.p90, baseline.p90),
+      median: relativeChange(stat.median, medianBaseline),
+      p10: relativeChange(stat.p10, p10Baseline),
+      p90: relativeChange(stat.p90, p90Baseline),
     };
   });
 }
@@ -142,12 +163,11 @@ export function makeRecognitionTimeChartOption(
   const visibleSeriesSet = new Set(visibleSeries);
   const markLineSeriesKey = (["median", "p10", "p90", "errorRate"] as const)
     .find((seriesKey) => visibleSeriesSet.has(seriesKey));
-  const inclusionMarkers = data.flatMap((stat, dataIndex) => stat.addedNoteLabels.length > 0
-    ? [{ dataIndex, label: `新纳入 ${stat.addedNoteLabels.length} 个音` }]
-    : []);
-  const inclusionMarkLine: LineSeriesOption["markLine"] = inclusionMarkers.length > 0
+  const boundaryMarkers = data.flatMap((stat, dataIndex) =>
+    stat.boundaryLabel ? [{ dataIndex, label: stat.boundaryLabel }] : []);
+  const boundaryMarkLine: LineSeriesOption["markLine"] = boundaryMarkers.length > 0
     ? {
-        data: inclusionMarkers.map((marker) => ({
+        data: boundaryMarkers.map((marker) => ({
           label: { formatter: marker.label },
           xAxis: marker.dataIndex,
         })),
@@ -245,7 +265,7 @@ export function makeRecognitionTimeChartOption(
       ? makeRecognitionLineSeries({
           color: option.color,
           data: displayedData,
-          markLine: markLineSeriesKey === option.key ? inclusionMarkLine : undefined,
+          markLine: markLineSeriesKey === option.key ? boundaryMarkLine : undefined,
           metric: option.key,
           name: option.label,
           opacity: option.opacity,
@@ -267,8 +287,13 @@ export function makeRecognitionTimeChartOption(
         const coverage = stat?.tooltipLabel
           ? `<div style="color:${RECOGNITION_CHART_COLORS.muted}">已纳入 ${stat.coveredNoteCount}/${stat.totalNoteCount} 个音</div>`
           : "";
-        const inclusion = stat?.addedNoteLabels.length
-          ? `<div style="color:${RECOGNITION_CHART_COLORS.muted}">新纳入：${stat.addedNoteLabels.join("、")}</div>`
+        const boundary = stat?.boundaryLabel
+          ? `<div style="color:${RECOGNITION_CHART_COLORS.muted}">${stat.boundaryLabel}</div>`
+          : "";
+        const transition = stat?.transition
+          ? `<div style="color:${RECOGNITION_CHART_COLORS.muted}">${stat.transitionKind === "cold-start"
+              ? "初始范围积累中，曲线暂按已达到门槛的音计算"
+              : "新范围积累中，曲线沿用扩展前已成熟音"}</div>`
           : "";
         const rows = items
           .map((item) => {
@@ -302,7 +327,7 @@ export function makeRecognitionTimeChartOption(
           })
           .filter(Boolean)
           .join("");
-        return title ? `<div><strong>${title}</strong>${coverage}${inclusion}${rows}</div>` : "";
+        return title ? `<div><strong>${title}</strong>${coverage}${boundary}${transition}${rows}</div>` : "";
       },
       transitionDuration: 0,
       trigger: "axis",
@@ -472,6 +497,7 @@ export function RecognitionTrendCard({
   valueMode: RecognitionTimeValueMode;
   visibleSeries: readonly RecognitionSeriesKey[];
 }): JSX.Element {
+  const hasTransitionData = data.some((stat) => stat.transition);
   return (
     <div className="panel chart-panel stats-carousel-card">
       <div className="panel-heading">
@@ -528,6 +554,7 @@ export function RecognitionTrendCard({
               {valueMode === "relative"
                 ? `每段首点为 0%，${metric === "speed" ? "正值" : "负值"}表示更快；`
                 : ""}
+              {hasTransitionData ? "淡色曲线为新范围积累期；" : ""}
               已纳入 {coverage.coveredNoteCount}/{coverage.totalNoteCount} 个音
               {coverage.coveredNoteCount < coverage.totalNoteCount ? "，其余数据积累中" : ""}
             </small>
