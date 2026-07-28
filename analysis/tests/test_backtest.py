@@ -4,6 +4,7 @@ from pandas.testing import assert_frame_equal
 
 import anki_note_analysis.backtest as backtest
 from anki_note_analysis.backtest import (
+    audit_adaptive_v2_maintenance,
     historical_queue_replay,
     observed_unseen_gaps,
     queue_replay_at_state,
@@ -238,6 +239,140 @@ def test_observed_gaps_count_each_notes_eligible_opportunities() -> None:
 
     assert gaps["current_unseen_gap"].to_dict() == {"C4": 2, "D4": 2, "E4": 0}
     assert gaps["historical_max_unseen_gap"].to_dict() == {"C4": 2, "D4": 2, "E4": 0}
+
+
+def test_observed_gaps_use_completion_order() -> None:
+    reviews = pd.DataFrame(
+        [
+            {
+                "completed_at": "2026-07-01T00:00:02Z",
+                "session_targetNoteSetKey": "C4|D4",
+                "started_at": "2026-07-01T00:00:00Z",
+                "targetNoteId": "C4",
+            },
+            {
+                "completed_at": "2026-07-01T00:00:01Z",
+                "session_targetNoteSetKey": "C4|D4",
+                "started_at": "2026-07-01T00:00:01Z",
+                "targetNoteId": "D4",
+            },
+        ]
+    )
+
+    gaps = observed_unseen_gaps(reviews, ["C4", "D4"]).set_index("target_note_id")
+
+    assert gaps["current_unseen_gap"].to_dict() == {"C4": 0, "D4": 1}
+
+
+@pytest.mark.parametrize(
+    ("selected_note_id", "expected_violation_count", "expected_compliance_rate"),
+    [("D4", 0, 1), ("C4", 1, 0)],
+)
+def test_adaptive_v2_maintenance_audit_checks_the_oldest_overdue_note(
+    selected_note_id: str,
+    expected_violation_count: int,
+    expected_compliance_rate: int,
+) -> None:
+    rows = []
+    for index in range(5):
+        timestamp = pd.Timestamp("2026-07-01", tz="UTC") + pd.Timedelta(seconds=index)
+        rows.append(
+            {
+                "completed_at": timestamp,
+                "session_effectiveQueueAlgorithm": "adaptive-v1",
+                "session_targetNoteSetKey": "C4|D4",
+                "sessionId": "history",
+                "started_at": timestamp,
+                "targetNoteId": "D4",
+            }
+        )
+    for index in range(90):
+        timestamp = pd.Timestamp("2026-07-01", tz="UTC") + pd.Timedelta(minutes=1, seconds=index)
+        rows.append(
+            {
+                "completed_at": timestamp,
+                "session_effectiveQueueAlgorithm": "adaptive-v1",
+                "session_targetNoteSetKey": "C4|D4",
+                "sessionId": "history",
+                "started_at": timestamp,
+                "targetNoteId": "C4",
+            }
+        )
+    deployed_at = pd.Timestamp("2026-07-02", tz="UTC")
+    rows.append(
+        {
+            "completed_at": deployed_at,
+            "session_effectiveQueueAlgorithm": "adaptive-v2",
+            "session_targetNoteSetKey": "C4|D4",
+            "sessionId": "v2",
+            "started_at": deployed_at,
+            "targetNoteId": selected_note_id,
+        }
+    )
+
+    audit = audit_adaptive_v2_maintenance(
+        pd.DataFrame(rows),
+        deployed_at=deployed_at,
+        eligible_session_ids={"history"},
+        first_session_id="v2",
+    )
+
+    assert audit["activation_count"] == 1
+    assert audit["compliance_rate"] == expected_compliance_rate
+    assert audit["max_selected_gap"] == (90 if selected_note_id == "D4" else 0)
+    assert audit["violation_count"] == expected_violation_count
+
+
+def test_adaptive_v2_maintenance_audit_does_not_carry_short_sessions_forward() -> None:
+    rows = []
+    for index in range(5):
+        timestamp = pd.Timestamp("2026-07-01", tz="UTC") + pd.Timedelta(seconds=index)
+        rows.append(
+            {
+                "completed_at": timestamp,
+                "session_effectiveQueueAlgorithm": "adaptive-v1",
+                "session_targetNoteSetKey": "C4|D4",
+                "sessionId": "history",
+                "started_at": timestamp,
+                "targetNoteId": "D4",
+            }
+        )
+    for index in range(90):
+        timestamp = pd.Timestamp("2026-07-01", tz="UTC") + pd.Timedelta(minutes=1, seconds=index)
+        rows.append(
+            {
+                "completed_at": timestamp,
+                "session_effectiveQueueAlgorithm": "adaptive-v1",
+                "session_targetNoteSetKey": "C4|D4",
+                "sessionId": "history",
+                "started_at": timestamp,
+                "targetNoteId": "C4",
+            }
+        )
+    deployed_at = pd.Timestamp("2026-07-02", tz="UTC")
+    for session_index in range(2):
+        timestamp = deployed_at + pd.Timedelta(minutes=session_index)
+        rows.append(
+            {
+                "completed_at": timestamp,
+                "session_effectiveQueueAlgorithm": "adaptive-v2",
+                "session_targetNoteSetKey": "C4|D4",
+                "sessionId": f"short-v2-{session_index}",
+                "started_at": timestamp,
+                "targetNoteId": "D4",
+            }
+        )
+
+    audit = audit_adaptive_v2_maintenance(
+        pd.DataFrame(rows),
+        deployed_at=deployed_at,
+        eligible_session_ids={"history"},
+        first_session_id="short-v2-0",
+    )
+
+    assert audit["activation_count"] == 2
+    assert audit["compliance_rate"] == 1
+    assert audit["violation_count"] == 0
 
 
 def test_adaptive_v2_replay_inherits_the_observed_maintenance_gap() -> None:

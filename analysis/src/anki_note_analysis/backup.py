@@ -10,6 +10,7 @@ import pandas as pd
 
 LOCAL_TIMEZONE = "Asia/Shanghai"
 MIN_SESSION_STAT_REVIEWS = 5
+HEAVY_ERROR_WRONG_ANSWER_COUNT = 3
 
 
 @dataclass(frozen=True)
@@ -138,6 +139,7 @@ def enriched_reviews(snapshot: BackupSnapshot) -> pd.DataFrame:
         "staffNotationMode",
         "promptNoteDuration",
         "targetNoteSetKey",
+        "effectiveQueueAlgorithm",
     ]
     available = [field for field in session_fields if field in sessions]
     session_data = sessions[available].rename(
@@ -153,9 +155,19 @@ def qualified_reviews(snapshot: BackupSnapshot, *, scheduler_history_only: bool 
     qualified = reviews.loc[reviews["qualified"]].copy()
     if not scheduler_history_only or qualified.empty:
         return qualified
-    eligible_session_ids = (
-        qualified.groupby("sessionId").size().loc[lambda counts: counts >= MIN_SESSION_STAT_REVIEWS].index
+    session_eligibility = qualified.groupby("sessionId").agg(
+        statistical_review_count=("id", "size"),
+        error_review_count=("wrong_count", lambda values: values.gt(0).sum()),
+        heavy_error_review_count=(
+            "wrong_count",
+            lambda values: values.ge(HEAVY_ERROR_WRONG_ANSWER_COUNT).sum(),
+        ),
     )
+    eligible_session_ids = session_eligibility.index[
+        session_eligibility["statistical_review_count"].ge(MIN_SESSION_STAT_REVIEWS)
+        & session_eligibility["heavy_error_review_count"].mul(2).le(session_eligibility["statistical_review_count"])
+        & session_eligibility["error_review_count"].mul(3).le(session_eligibility["statistical_review_count"].mul(2))
+    ]
     return qualified.loc[qualified["sessionId"].isin(eligible_session_ids)].copy()
 
 

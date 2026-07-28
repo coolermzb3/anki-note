@@ -525,9 +525,7 @@ def historical_queue_replay(
             policy=policy,
             draw_count=draw_count,
             repetitions=repetitions,
-            seed=20260713
-            + state_index * len(POLICY_NAMES) * repetitions
-            + POLICY_NAMES.index(policy) * repetitions,
+            seed=20260713 + state_index * len(POLICY_NAMES) * repetitions + POLICY_NAMES.index(policy) * repetitions,
         )
         for state_index, (state_date, _, _) in enumerate(raw_states)
         for policy in policy_names
@@ -657,7 +655,8 @@ def observed_unseen_gaps(reviews: pd.DataFrame, note_ids: Iterable[str]) -> pd.D
             }
         )
 
-    for review in reviews.sort_values("started_at").itertuples(index=False):
+    order_columns = [column for column in ("completed_at", "started_at") if column in reviews]
+    for review in reviews.sort_values(order_columns).itertuples(index=False):
         target_set_key = getattr(review, target_set_column)
         if not isinstance(target_set_key, str):
             continue
@@ -675,6 +674,85 @@ def observed_unseen_gaps(reviews: pd.DataFrame, note_ids: Iterable[str]) -> pd.D
             "historical_max_unseen_gap": [historical_max_gaps[note_id] for note_id in note_ids],
         }
     )
+
+
+def audit_adaptive_v2_maintenance(
+    reviews: pd.DataFrame,
+    *,
+    deployed_at: pd.Timestamp,
+    eligible_session_ids: Iterable[str],
+    first_session_id: str,
+) -> dict[str, float | int]:
+    eligible_session_ids = set(eligible_session_ids)
+    base_counts: dict[str, int] = {}
+    base_gaps: dict[str, int] = {}
+    session_counts: dict[str, int] = {}
+    session_gaps: dict[str, int] = {}
+    current_session_id: str | None = None
+    previous_note_id: str | None = None
+    selected_gaps: list[int] = []
+    selected_gaps_after_first_session: list[int] = []
+    activation_count = 0
+    first_session_activation_count = 0
+    violation_count = 0
+    max_simultaneous_overdue_notes = 0
+    order_columns = [column for column in ("completed_at", "started_at") if column in reviews]
+
+    for review in reviews.sort_values(order_columns).itertuples(index=False):
+        if review.sessionId != current_session_id:
+            if current_session_id in eligible_session_ids:
+                base_counts = session_counts
+                base_gaps = session_gaps
+            current_session_id = review.sessionId
+            session_counts = base_counts.copy()
+            session_gaps = base_gaps.copy()
+            previous_note_id = None
+        target_set_key = getattr(review, "session_targetNoteSetKey", None)
+        if not isinstance(target_set_key, str):
+            continue
+        note_ids = target_set_key.split("|")
+        selected_note_id = review.targetNoteId
+        eligible_note_ids = [note_id for note_id in note_ids if len(note_ids) == 1 or note_id != previous_note_id]
+        overdue_note_ids = [
+            note_id
+            for note_id in eligible_note_ids
+            if session_counts.get(note_id, 0) >= ADAPTIVE_V2_SPEC["coldStartReviewCount"]
+            and session_gaps.get(note_id, 0) >= ADAPTIVE_V2_SPEC["maintenanceGap"]
+        ]
+        is_deployed_v2 = (
+            review.completed_at >= deployed_at
+            and getattr(review, "session_effectiveQueueAlgorithm", None) == "adaptive-v2"
+        )
+        if is_deployed_v2 and overdue_note_ids:
+            activation_count += 1
+            if review.sessionId == first_session_id:
+                first_session_activation_count += 1
+            oldest_gap = max(session_gaps.get(note_id, 0) for note_id in overdue_note_ids)
+            selected_gap = session_gaps.get(selected_note_id, 0)
+            selected_gaps.append(selected_gap)
+            if review.sessionId != first_session_id:
+                selected_gaps_after_first_session.append(selected_gap)
+            max_simultaneous_overdue_notes = max(max_simultaneous_overdue_notes, len(overdue_note_ids))
+            if selected_note_id not in overdue_note_ids or selected_gap != oldest_gap:
+                violation_count += 1
+
+        for note_id in note_ids:
+            session_gaps[note_id] = 0 if note_id == selected_note_id else session_gaps.get(note_id, 0) + 1
+        session_counts[selected_note_id] = session_counts.get(selected_note_id, 0) + 1
+        previous_note_id = selected_note_id
+
+    return {
+        "activation_count": activation_count,
+        "compliance_rate": 1.0 if activation_count == 0 else (activation_count - violation_count) / activation_count,
+        "first_session_activation_count": first_session_activation_count,
+        "max_selected_gap": max(selected_gaps, default=0),
+        "max_selected_gap_after_first_session": max(selected_gaps_after_first_session, default=0),
+        "max_simultaneous_overdue_notes": max_simultaneous_overdue_notes,
+        "p95_selected_gap_after_first_session": float(np.quantile(selected_gaps_after_first_session, 0.95))
+        if selected_gaps_after_first_session
+        else 0.0,
+        "violation_count": violation_count,
+    }
 
 
 def hyperparameter_sensitivity(

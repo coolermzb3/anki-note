@@ -22,6 +22,17 @@ The default command is the routine audit: it replays the production `adaptive_v2
 distribution. Pass `--full` to additionally run all candidate-policy comparisons, bootstrap window analysis, cross-day
 diagnostics, and hyperparameter, maintenance-gap, and cold-start sensitivity experiments.
 
+The routine audit also anchors a deployment review to the first default `adaptive-v2` target set. It reports the actual
+distribution for sessions that keep that exact stable target set, checks every observed activation of the 90-review
+maintenance guard, and tracks the fixed deployment cohort with equal-note rolling metrics. This remains separate from the
+latest-target replay, so adding new notes does not rewrite the stable deployment comparison. If the latest target set still
+has notes below the learning-metric evidence threshold, `latest_learning_progress` is `null` until that range matures.
+Maintenance replay includes each session's own statistical reviews while it is active, then carries the session into later
+history only when the completed session meets the long-term eligibility rules, matching the production call path.
+The fixed-cohort details are written to `output/adaptive_v2_observed_distribution.csv`,
+`output/adaptive_v2_observed_summary.csv`, and `output/adaptive_v2_learning_progress.csv`, with the compact result in
+`output/summary.json` under `adaptive_v2_post_deployment`.
+
 Historical queue replay uses up to eight worker processes by default, while full-mode sensitivity experiments use up to
 three. Use `--jobs 1` for a serial run, or pass another positive worker count when resource usage needs to be limited.
 Deterministic replay arrays are cached under

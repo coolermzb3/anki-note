@@ -5,7 +5,10 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+import pandas as pd
+
 from .backtest import (
+    audit_adaptive_v2_maintenance,
     candidate_policy_distributions,
     cold_start_sensitivity,
     cross_day_policy_alignment,
@@ -16,6 +19,8 @@ from .backtest import (
     observed_unseen_gaps,
 )
 from .backup import (
+    LOCAL_TIMEZONE,
+    BackupSnapshot,
     backup_content_fingerprint,
     latest_target_note_ids,
     load_backup,
@@ -34,7 +39,6 @@ from .metrics import (
     rolling_equal_note_metrics,
 )
 from .reporting import plot_daily_speed, plot_policy_allocations, plot_queue_replay, plot_recent_notes, write_json
-
 
 FULL_ONLY_OUTPUTS = (
     "recent_metric_stability.csv",
@@ -67,6 +71,78 @@ def parse_args() -> argparse.Namespace:
         help="run bootstrap, candidate-policy comparisons, and sensitivity experiments",
     )
     return parser.parse_args()
+
+
+def _adaptive_v2_post_deployment(
+    snapshot: BackupSnapshot,
+    qualified_history: pd.DataFrame,
+    scheduler_history: pd.DataFrame,
+    review_window: int,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, object] | None]:
+    sessions = snapshot.sessions.copy()
+    if sessions.empty or "effectiveQueueAlgorithm" not in sessions or "targetNoteSetKey" not in sessions:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None
+    sessions["started_at"] = pd.to_datetime(sessions["startedAt"], utc=True)
+    strategy = sessions.get("queueStrategy", pd.Series(index=sessions.index, dtype="object")).fillna("adaptive")
+    v2_default_sessions = sessions.loc[
+        sessions["effectiveQueueAlgorithm"].eq("adaptive-v2") & strategy.eq("adaptive")
+    ].sort_values("started_at")
+    if v2_default_sessions.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), None
+
+    first_session = v2_default_sessions.iloc[0]
+    deployment_key = str(first_session["targetNoteSetKey"])
+    deployment_note_ids = deployment_key.split("|")
+    stable_sessions = v2_default_sessions.loc[v2_default_sessions["targetNoteSetKey"].eq(deployment_key)]
+    stable_reviews = scheduler_history.loc[scheduler_history["sessionId"].isin(stable_sessions["id"])]
+    observed_distribution, observed_summary = observed_strategy_distribution(stable_reviews, deployment_note_ids)
+    learning_progress = rolling_equal_note_metrics(
+        scheduler_history,
+        deployment_note_ids,
+        review_window=review_window,
+    )
+    deployment_local_date = first_session["started_at"].tz_convert(LOCAL_TIMEZONE).date().isoformat()
+    post_deployment_learning = learning_progress.loc[learning_progress["local_date"].ge(deployment_local_date)].copy()
+    maintenance = audit_adaptive_v2_maintenance(
+        qualified_history,
+        deployed_at=first_session["started_at"],
+        eligible_session_ids=scheduler_history["sessionId"].unique(),
+        first_session_id=str(first_session["id"]),
+    )
+    latest_distribution = observed_summary.iloc[-1].to_dict() if not observed_summary.empty else None
+    first_learning = post_deployment_learning.iloc[0].to_dict() if not post_deployment_learning.empty else None
+    latest_learning = post_deployment_learning.iloc[-1].to_dict() if not post_deployment_learning.empty else None
+    learning_change = None
+    if first_learning is not None and latest_learning is not None:
+        learning_change = {
+            "macro_error_rate_percentage_points": (
+                float(latest_learning["macro_error_rate"]) - float(first_learning["macro_error_rate"])
+            )
+            * 100,
+            "macro_p50_percent": (float(latest_learning["macro_p50_ms"]) / float(first_learning["macro_p50_ms"]) - 1)
+            * 100,
+            "macro_p90_percent": (float(latest_learning["macro_p90_ms"]) / float(first_learning["macro_p90_ms"]) - 1)
+            * 100,
+        }
+    zero_draw_note_count = 0
+    if not observed_distribution.empty:
+        zero_draw_note_count = int(observed_distribution.groupby("targetNoteId")["review_count"].sum().eq(0).sum())
+    summary = {
+        "deployment_local_date": deployment_local_date,
+        "deployment_session_started_at": first_session["startedAt"],
+        "deployment_target_note_count": len(deployment_note_ids),
+        "deployment_target_note_ids": deployment_note_ids,
+        "learning_change": learning_change,
+        "learning_first": first_learning,
+        "learning_latest": latest_learning,
+        "maintenance": maintenance,
+        "observed_distribution": latest_distribution,
+        "stable_review_count": len(stable_reviews),
+        "stable_session_count": len(stable_sessions),
+        "stable_through_session_started_at": stable_sessions.iloc[-1]["startedAt"],
+        "zero_draw_note_count": zero_draw_note_count,
+    }
+    return observed_distribution, observed_summary, post_deployment_learning, summary
 
 
 def run(
@@ -123,6 +199,12 @@ def run(
     observed_distribution, observed_summary = observed_strategy_distribution(target_reviews, note_ids)
     observed_gaps = observed_unseen_gaps(target_scheduler_history, note_ids)
     error_summary = error_signal_summary(recent, note_ids)
+    (
+        adaptive_v2_observed_distribution,
+        adaptive_v2_observed_summary,
+        adaptive_v2_learning_progress,
+        adaptive_v2_post_deployment,
+    ) = _adaptive_v2_post_deployment(snapshot, all_qualified, scheduler_history, recent_review_count)
 
     if full:
         active_day_recent = recent_active_window(target_scheduler_history, note_ids, active_days)
@@ -182,6 +264,15 @@ def run(
     observed_distribution.to_csv(output_dir / "observed_strategy_distribution.csv", index=False, encoding="utf-8-sig")
     observed_summary.to_csv(output_dir / "observed_strategy_summary.csv", index=False, encoding="utf-8-sig")
     observed_gaps.to_csv(output_dir / "observed_unseen_gaps.csv", index=False, encoding="utf-8-sig")
+    adaptive_v2_observed_distribution.to_csv(
+        output_dir / "adaptive_v2_observed_distribution.csv", index=False, encoding="utf-8-sig"
+    )
+    adaptive_v2_observed_summary.to_csv(
+        output_dir / "adaptive_v2_observed_summary.csv", index=False, encoding="utf-8-sig"
+    )
+    adaptive_v2_learning_progress.to_csv(
+        output_dir / "adaptive_v2_learning_progress.csv", index=False, encoding="utf-8-sig"
+    )
     if full:
         stability.to_csv(output_dir / "recent_metric_stability.csv", encoding="utf-8-sig")
         window_comparison.to_csv(output_dir / "metric_window_comparison.csv", index=False, encoding="utf-8-sig")
@@ -215,7 +306,8 @@ def run(
             "recent_metric_window": f"last_{recent_review_count}_reviews_per_note",
             "recent_review_count": len(recent),
         },
-        "latest_learning_progress": learning_progress.iloc[-1].to_dict(),
+        "adaptive_v2_post_deployment": adaptive_v2_post_deployment,
+        "latest_learning_progress": learning_progress.iloc[-1].to_dict() if not learning_progress.empty else None,
         "latest_queue_replay": latest_replay.to_dict(orient="index"),
         "historical_queue_replay_mean": replay_summary.groupby("policy")
         .mean(numeric_only=True)

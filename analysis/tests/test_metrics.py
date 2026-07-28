@@ -21,9 +21,7 @@ def test_vectorized_tier_codes_match_policy_tiers() -> None:
         dtype=float,
     )
     label_codes = {"weak": 0, "middle": 1, "strong": 2}
-    expected = np.vstack(
-        [tier_labels(pd.Series(row)).map(label_codes).to_numpy(dtype=int) for row in values]
-    )
+    expected = np.vstack([tier_labels(pd.Series(row)).map(label_codes).to_numpy(dtype=int) for row in values])
 
     np.testing.assert_array_equal(_tier_codes_by_row(values), expected)
 
