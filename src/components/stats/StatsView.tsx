@@ -226,6 +226,7 @@ export function StatsView({
   const range = statsUiPreferences.range;
   const recognitionTimeGrouping = statsUiPreferences.recognitionTimeGrouping;
   const recognitionTimeMetric = statsUiPreferences.recognitionTimeMetric;
+  const recognitionTimeResetNewRangeAtFirstPoint = statsUiPreferences.recognitionTimeResetNewRangeAtFirstPoint;
   const recognitionTimeValueMode = statsUiPreferences.recognitionTimeValueMode;
   const recognitionVisibleSeries = useMemo(
     () => RECOGNITION_SERIES_KEYS.filter(
@@ -295,6 +296,9 @@ export function StatsView({
   };
   const setRecognitionTimeMetric = (nextMetric: RecognitionTimeMetric): void => {
     setStatsUiPreferences((current) => ({ ...current, recognitionTimeMetric: nextMetric }));
+  };
+  const setRecognitionTimeResetNewRangeAtFirstPoint = (enabled: boolean): void => {
+    setStatsUiPreferences((current) => ({ ...current, recognitionTimeResetNewRangeAtFirstPoint: enabled }));
   };
   const setRecognitionTimeValueMode = (nextValueMode: RecognitionTimeValueMode): void => {
     setStatsUiPreferences((current) => ({ ...current, recognitionTimeValueMode: nextValueMode }));
@@ -424,6 +428,15 @@ export function StatsView({
         median: stat.medianMs === undefined ? undefined : stat.medianMs / 1000,
         p10: stat.p10Ms === undefined ? undefined : stat.p10Ms / 1000,
         p90: stat.p90Ms === undefined ? undefined : stat.p90Ms / 1000,
+        relativeBaseline: stat.relativeBaseline
+          ? {
+              median: stat.relativeBaseline.medianMs === undefined
+                ? undefined
+                : stat.relativeBaseline.medianMs / 1000,
+              p10: stat.relativeBaseline.p10Ms === undefined ? undefined : stat.relativeBaseline.p10Ms / 1000,
+              p90: stat.relativeBaseline.p90Ms === undefined ? undefined : stat.relativeBaseline.p90Ms / 1000,
+            }
+          : undefined,
         totalNoteCount: stat.totalNoteCount,
         transition: stat.transition,
         transitionKind: stat.transitionKind,
@@ -620,7 +633,9 @@ export function StatsView({
           onSelectAllSeries={selectAllRecognitionSeries}
           onSelectOnlySeries={selectOnlyRecognitionSeries}
           onToggleSeries={toggleRecognitionSeries}
+          onResetNewRangeAtFirstPointChange={setRecognitionTimeResetNewRangeAtFirstPoint}
           onValueModeChange={setRecognitionTimeValueMode}
+          resetNewRangeAtFirstPoint={recognitionTimeResetNewRangeAtFirstPoint}
           valueMode={recognitionTimeValueMode}
           visibleSeries={recognitionVisibleSeries}
         />

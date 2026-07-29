@@ -70,16 +70,49 @@ describe("recognition trend chart", () => {
     });
   });
 
-  it("rebases relative changes at each range boundary", () => {
+  it("keeps the relative baseline across a visual range break", () => {
     const option = makeRecognitionTimeChartOption(makeChartData(), "duration", "relative");
     const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
       .filter((series) => series.name === "中位");
     const yAxis = option.yAxis as Array<{ axisLabel: { formatter: string } }>;
 
     expect(medianSeries[0].data).toEqual([0, 100, null, null]);
+    expect(medianSeries[1].data).toEqual([null, null, 200, 300]);
+    expect(yAxis[0].axisLabel.formatter).toBe("{value}%");
+  });
+
+  it("uses the supplied old-cohort endpoint as the next formal baseline", () => {
+    const data = makeChartData();
+    const relativeBaseline = { median: 2, p10: 2, p90: 2 };
+    data[2] = { ...data[2], relativeBaseline };
+    const option = makeRecognitionTimeChartOption(data, "duration", "relative");
+    const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
+      .filter((series) => series.name === "中位");
+
+    expect(medianSeries[0].data).toEqual([0, 100, null, null]);
+    expect(medianSeries[1].data).toEqual([null, null, 50, 100]);
+  });
+
+  it("can reset the next formal range at its own first point", () => {
+    const data = makeChartData();
+    data[2] = { ...data[2], relativeBaseline: { median: 2, p10: 2, p90: 2 } };
+    const option = makeRecognitionTimeChartOption(data, "duration", "relative", ["median"], true);
+    const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
+      .filter((series) => series.name === "中位");
+
+    expect(medianSeries[0].data).toEqual([0, 100, null, null]);
     expect(medianSeries[1].data.slice(0, 3)).toEqual([null, null, 0]);
     expect(medianSeries[1].data[3]).toBeCloseTo(100 / 3);
-    expect(yAxis[0].axisLabel.formatter).toBe("{value}%");
+  });
+
+  it("rebases at the visible window start when the expansion boundary is outside it", () => {
+    const data = makeChartData();
+    data[2] = { ...data[2], relativeBaseline: { median: 2, p10: 2, p90: 2 } };
+    const option = makeRecognitionTimeChartOption(data.slice(3), "duration", "relative");
+    const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
+      .find((series) => series.name === "中位");
+
+    expect(medianSeries?.data).toEqual([0]);
   });
 
   it("preserves coverage labels when converting duration thresholds into speed", () => {
@@ -137,8 +170,8 @@ describe("recognition trend chart", () => {
 
   it("calculates relative changes from the selected speed metric", () => {
     const data = makeChartData().slice(0, 2);
-    data[0] = { ...data[0], median: 2 };
-    data[1] = { ...data[1], median: 1 };
+    data[0] = { ...data[0], median: 2, relativeBaseline: { median: 2 } };
+    data[1] = { ...data[1], median: 1, relativeBaseline: { median: 2 } };
     const option = makeRecognitionTimeChartOption(data, "speed", "relative");
     const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
       .find((series) => series.name === "中位");

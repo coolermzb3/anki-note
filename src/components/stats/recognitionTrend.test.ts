@@ -139,6 +139,7 @@ describe("recognition range transitions", () => {
     );
 
     expect(result.map((point) => point.medianMs)).toEqual([1000, 1100, 1200, 3000]);
+    expect(result.map((point) => point.relativeBaseline?.medianMs)).toEqual([undefined, undefined, undefined, 1000]);
     expect(result.map((point) => point.transition)).toEqual([false, true, true, false]);
     expect(result.map((point) => point.breakBefore)).toEqual([false, true, false, true]);
     expect(result.map((point) => point.boundaryLabel)).toEqual([
@@ -147,6 +148,38 @@ describe("recognition range transitions", () => {
       undefined,
       "新范围已纳入",
     ]);
+  });
+
+  it("anchors the completed range to the last formal point before the transition", () => {
+    const rangeTrend = [
+      makePoint("formal-start", "2026-07-01T10:05:00.000+08:00", originalIds, 1000),
+      makePoint("formal-end", "2026-07-02T10:05:00.000+08:00", originalIds, 800),
+      makePoint("transition", "2026-07-03T10:05:00.000+08:00", [...originalIds, addedIds[0]], 900),
+      makePoint("complete", "2026-07-04T10:05:00.000+08:00", expandedIds, 1200),
+    ];
+    const transition: RecognitionRangeTransition = {
+      baselineNoteIds: originalIds,
+      completedAt: rangeTrend[3].boundaryAt,
+      fromNoteCount: originalIds.length,
+      kind: "expansion",
+      startedAt: rangeTrend[2].boundaryAt,
+      toNoteCount: expandedIds.length,
+    };
+    const baselineTrend = rangeTrend.map((point, index) => ({
+      ...point,
+      coveredNoteCount: originalIds.length,
+      coveredNoteIds: originalIds,
+      medianMs: [1000, 800, 850, 900][index],
+    }));
+
+    const result = applyRecognitionRangeTransitions(
+      rangeTrend,
+      [{ transition, trend: baselineTrend }],
+      "practice-session",
+    );
+
+    expect(result.map((point) => point.medianMs)).toEqual([1000, 800, 850, 1200]);
+    expect(result.map((point) => point.relativeBaseline?.medianMs)).toEqual([undefined, undefined, undefined, 800]);
   });
 
   it("does not start a new transition when restoring an already mature range", () => {
@@ -246,6 +279,7 @@ describe("recognition range transitions", () => {
       "初始范围已纳入",
     ]);
     expect(result.map((point) => point.medianMs)).toEqual([undefined, 1100, 1200]);
+    expect(result.map((point) => point.relativeBaseline?.medianMs)).toEqual([undefined, undefined, undefined]);
   });
 
   it("uses the actual mature cohort when early range changes mature extra notes", () => {
@@ -302,6 +336,7 @@ describe("recognition range transitions", () => {
     expect(result[1]).toMatchObject({
       boundaryLabel: "新范围已纳入",
       breakBefore: true,
+      relativeBaseline: { medianMs: 1000 },
       transition: false,
     });
   });
@@ -359,5 +394,6 @@ describe("recognition range transitions", () => {
       `开始扩展 ${expandedIds.length}→${fullIds.length}`,
     ]);
     expect(result.map((point) => point.medianMs)).toEqual([1000, 910, 1300, 1130]);
+    expect(result.map((point) => point.relativeBaseline?.medianMs)).toEqual([undefined, undefined, 1000, undefined]);
   });
 });

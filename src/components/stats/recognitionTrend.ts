@@ -12,6 +12,12 @@ export type RecognitionTimeValueMode = (typeof RECOGNITION_TIME_VALUE_MODES)[num
 export const RECOGNITION_SERIES_KEYS = ["p10", "median", "p90", "errorRate"] as const;
 export type RecognitionSeriesKey = (typeof RECOGNITION_SERIES_KEYS)[number];
 
+export interface RecognitionTimeRelativeBaseline {
+  median?: number;
+  p10?: number;
+  p90?: number;
+}
+
 export interface RecognitionTimeChartStat {
   boundaryLabel?: string;
   breakBefore: boolean;
@@ -24,6 +30,7 @@ export interface RecognitionTimeChartStat {
   p10?: number;
   median?: number;
   p90?: number;
+  relativeBaseline?: RecognitionTimeRelativeBaseline;
   transition: boolean;
   transitionKind?: RecognitionTransitionKind;
 }
@@ -44,9 +51,16 @@ export interface RecognitionRangeTransitionBaseline {
   trend: readonly RecognitionTrendPoint[];
 }
 
+export interface RecognitionTrendRelativeBaseline {
+  medianMs?: number;
+  p10Ms?: number;
+  p90Ms?: number;
+}
+
 export interface RecognitionTrendPhasePoint extends RecognitionTrendPoint {
   boundaryLabel?: string;
   breakBefore: boolean;
+  relativeBaseline?: RecognitionTrendRelativeBaseline;
   transition: boolean;
   transitionKind?: RecognitionTransitionKind;
 }
@@ -243,24 +257,54 @@ function latestMetricPoint(
   return undefined;
 }
 
+function hasRecognitionTimeMetrics(baseline: RecognitionTrendRelativeBaseline): boolean {
+  return baseline.medianMs !== undefined || baseline.p10Ms !== undefined || baseline.p90Ms !== undefined;
+}
+
+function fillMissingRecognitionTimeMetrics(
+  baseline: RecognitionTrendRelativeBaseline,
+  point: RecognitionTrendPoint,
+): RecognitionTrendRelativeBaseline {
+  return {
+    medianMs: baseline.medianMs ?? point.medianMs,
+    p10Ms: baseline.p10Ms ?? point.p10Ms,
+    p90Ms: baseline.p90Ms ?? point.p90Ms,
+  };
+}
+
+function latestRecognitionTimeMetricsBefore(
+  trend: readonly RecognitionTrendPoint[],
+  position: number,
+  grouping: RecognitionTimeGrouping,
+): RecognitionTrendRelativeBaseline | undefined {
+  let baseline: RecognitionTrendRelativeBaseline = {};
+  for (let index = trend.length - 1; index >= 0; index -= 1) {
+    const point = trend[index];
+    if (bucketPosition(point.boundaryAt, grouping) >= position) {
+      continue;
+    }
+    baseline = fillMissingRecognitionTimeMetrics(baseline, point);
+    if (baseline.medianMs !== undefined && baseline.p10Ms !== undefined && baseline.p90Ms !== undefined) {
+      break;
+    }
+  }
+  return hasRecognitionTimeMetrics(baseline) ? baseline : undefined;
+}
+
 export function applyRecognitionRangeTransitions(
   trend: readonly RecognitionTrendPoint[],
   baselines: readonly RecognitionRangeTransitionBaseline[],
   grouping: RecognitionTimeGrouping,
 ): RecognitionTrendPhasePoint[] {
-  if (baselines.length === 0) {
-    return trend.map((point) => ({
-      ...point,
-      breakBefore: false,
-      transition: false,
-      transitionKind: undefined,
-    }));
-  }
-  const phases = baselines.map(({ transition, trend: baselineTrend }) => ({
-    baselineTrend,
-    transition,
-    ...transitionBucket(transition, grouping),
-  }));
+  const phases = baselines.map(({ transition, trend: baselineTrend }) => {
+    const bucket = transitionBucket(transition, grouping);
+    return {
+      ...bucket,
+      baselineTrend,
+      preTransitionBaseline: latestRecognitionTimeMetricsBefore(trend, bucket.startPosition, grouping),
+      transition,
+    };
+  });
 
   return trend.map((point) => {
     const pointKey = bucketKey(point.boundaryAt, grouping);
@@ -274,6 +318,7 @@ export function applyRecognitionRangeTransitions(
     const metricPoint = activePhase
       ? copyRecognitionMetrics(point, latestMetricPoint(activePhase.baselineTrend, point.boundaryAt))
       : point;
+    const completedPhase = completions[completions.length - 1];
     return {
       ...metricPoint,
       boundaryLabel: activeStart
@@ -286,6 +331,9 @@ export function applyRecognitionRangeTransitions(
             : "新范围已纳入"
           : undefined,
       breakBefore: starts.length > 0 || completions.length > 0,
+      relativeBaseline: completedPhase?.transition.kind === "expansion"
+        ? completedPhase.preTransitionBaseline
+        : undefined,
       transition: activePhase !== undefined,
       transitionKind: activePhase?.transition.kind,
     };

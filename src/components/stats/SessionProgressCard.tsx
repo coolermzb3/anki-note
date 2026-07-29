@@ -149,7 +149,7 @@ export function SessionProgressCard({
   const hasSeries = model.chartGroups.length > 0 && model.chartGroups.some((group) => group.series.length > 0);
   return (
     <div className="panel chart-panel stats-carousel-card">
-      <div className="panel-heading">
+      <div className="panel-heading session-progress-card-heading">
         <h2>答对进度</h2>
         <div className="chart-panel-actions">
           <SessionProgressControls

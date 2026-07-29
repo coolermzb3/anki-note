@@ -121,19 +121,28 @@ function makeRecognitionSpeedData(data: RecognitionTimeChartStat[]): Recognition
     median: reciprocal(stat.median),
     p10: reciprocal(stat.p10),
     p90: reciprocal(stat.p90),
+    relativeBaseline: stat.relativeBaseline
+      ? {
+          median: reciprocal(stat.relativeBaseline.median),
+          p10: reciprocal(stat.relativeBaseline.p10),
+          p90: reciprocal(stat.relativeBaseline.p90),
+        }
+      : undefined,
   }));
 }
 
-function makeRelativeRecognitionTimeData(data: RecognitionTimeChartStat[]): RecognitionTimeChartStat[] {
+function makeRelativeRecognitionTimeData(
+  data: RecognitionTimeChartStat[],
+  resetNewRangeAtFirstPoint: boolean,
+): RecognitionTimeChartStat[] {
   let medianBaseline: number | undefined;
   let p10Baseline: number | undefined;
   let p90Baseline: number | undefined;
   return data.map((stat) => {
-    if (stat.breakBefore) {
-      medianBaseline = undefined;
-      p10Baseline = undefined;
-      p90Baseline = undefined;
-    }
+    const nextBaseline = resetNewRangeAtFirstPoint && stat.relativeBaseline ? stat : stat.relativeBaseline;
+    medianBaseline = nextBaseline?.median ?? medianBaseline;
+    p10Baseline = nextBaseline?.p10 ?? p10Baseline;
+    p90Baseline = nextBaseline?.p90 ?? p90Baseline;
     if (medianBaseline === undefined && stat.median !== undefined) {
       medianBaseline = stat.median;
     }
@@ -157,9 +166,12 @@ export function makeRecognitionTimeChartOption(
   metric: RecognitionTimeMetric = "duration",
   valueMode: RecognitionTimeValueMode = "absolute",
   visibleSeries: readonly RecognitionSeriesKey[] = DEFAULT_RECOGNITION_VISIBLE_SERIES,
+  resetNewRangeAtFirstPoint = false,
 ): EChartsOption {
   const metricData = metric === "speed" ? makeRecognitionSpeedData(data) : data;
-  const displayedData = valueMode === "relative" ? makeRelativeRecognitionTimeData(metricData) : metricData;
+  const displayedData = valueMode === "relative"
+    ? makeRelativeRecognitionTimeData(metricData, resetNewRangeAtFirstPoint)
+    : metricData;
   const visibleSeriesSet = new Set(visibleSeries);
   const dataZoomPreviewOption = RECOGNITION_SERIES_OPTIONS.find((option) => visibleSeriesSet.has(option.key));
   const dataZoomPreviewSeries: LineSeriesOption[] = dataZoomPreviewOption
@@ -395,6 +407,7 @@ function RecognitionTrendChart({
   onSelectAllSeries,
   onSelectOnlySeries,
   onToggleSeries,
+  resetNewRangeAtFirstPoint,
   valueMode,
   visibleSeries,
 }: {
@@ -403,6 +416,7 @@ function RecognitionTrendChart({
   onSelectAllSeries: () => void;
   onSelectOnlySeries: (seriesKey: RecognitionSeriesKey) => void;
   onToggleSeries: (seriesKey: RecognitionSeriesKey) => void;
+  resetNewRangeAtFirstPoint: boolean;
   valueMode: RecognitionTimeValueMode;
   visibleSeries: readonly RecognitionSeriesKey[];
 }): JSX.Element {
@@ -439,8 +453,11 @@ function RecognitionTrendChart({
   }, []);
 
   useEffect(() => {
-    chartRef.current?.setOption(makeRecognitionTimeChartOption(data, metric, valueMode, visibleSeries), true);
-  }, [data, metric, valueMode, visibleSeries]);
+    chartRef.current?.setOption(
+      makeRecognitionTimeChartOption(data, metric, valueMode, visibleSeries, resetNewRangeAtFirstPoint),
+      true,
+    );
+  }, [data, metric, resetNewRangeAtFirstPoint, valueMode, visibleSeries]);
 
   return (
     <div className="recognition-time-chart-shell">
@@ -496,7 +513,9 @@ export function RecognitionTrendCard({
   onSelectAllSeries,
   onSelectOnlySeries,
   onToggleSeries,
+  onResetNewRangeAtFirstPointChange,
   onValueModeChange,
+  resetNewRangeAtFirstPoint,
   valueMode,
   visibleSeries,
 }: {
@@ -509,11 +528,14 @@ export function RecognitionTrendCard({
   onSelectAllSeries: () => void;
   onSelectOnlySeries: (seriesKey: RecognitionSeriesKey) => void;
   onToggleSeries: (seriesKey: RecognitionSeriesKey) => void;
+  onResetNewRangeAtFirstPointChange: (enabled: boolean) => void;
   onValueModeChange: (valueMode: RecognitionTimeValueMode) => void;
+  resetNewRangeAtFirstPoint: boolean;
   valueMode: RecognitionTimeValueMode;
   visibleSeries: readonly RecognitionSeriesKey[];
 }): JSX.Element {
   const hasTransitionData = data.some((stat) => stat.transition);
+  const hasVisibleExpansionBaseline = data.some((stat) => stat.relativeBaseline !== undefined);
   return (
     <div className="panel chart-panel stats-carousel-card">
       <div className="panel-heading">
@@ -563,13 +585,40 @@ export function RecognitionTrendCard({
               onSelectAllSeries={onSelectAllSeries}
               onSelectOnlySeries={onSelectOnlySeries}
               onToggleSeries={onToggleSeries}
+              resetNewRangeAtFirstPoint={resetNewRangeAtFirstPoint}
               valueMode={valueMode}
               visibleSeries={visibleSeries}
             />
             <small className="note-range-filter-note">
-              {valueMode === "relative"
-                ? `每段首点为 0%，${metric === "speed" ? "正值" : "负值"}表示更快；`
-                : ""}
+              {valueMode === "relative" ? (
+                <>
+                  {hasVisibleExpansionBaseline ? (
+                    <span aria-label="新范围零点" className="recognition-relative-baseline-control" role="group">
+                      新范围 0%：
+                      <span className="recognition-relative-baseline-options">
+                        <button
+                          aria-pressed={!resetNewRangeAtFirstPoint}
+                          className={!resetNewRangeAtFirstPoint ? "active" : ""}
+                          onClick={() => onResetNewRangeAtFirstPointChange(false)}
+                          type="button"
+                        >
+                          扩展前末点
+                        </button>
+                        <button
+                          aria-pressed={resetNewRangeAtFirstPoint}
+                          className={resetNewRangeAtFirstPoint ? "active" : ""}
+                          onClick={() => onResetNewRangeAtFirstPointChange(true)}
+                          type="button"
+                        >
+                          自身首点
+                        </button>
+                      </span>
+                      ；
+                    </span>
+                  ) : null}
+                  {metric === "speed" ? "正值" : "负值"}表示更快；
+                </>
+              ) : null}
               {hasTransitionData ? "淡色曲线为新范围积累期；" : ""}
               已纳入 {coverage.coveredNoteCount}/{coverage.totalNoteCount} 个音
               {coverage.coveredNoteCount < coverage.totalNoteCount ? "，其余数据积累中" : ""}

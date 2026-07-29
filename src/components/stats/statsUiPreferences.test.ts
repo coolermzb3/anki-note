@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseHiddenRecognitionSeries } from "./statsUiPreferences";
+import {
+  DEFAULT_STATS_UI_PREFERENCES,
+  parseHiddenRecognitionSeries,
+  parseStatsUiPreferences,
+} from "./statsUiPreferences";
 
 describe("recognition trend preferences", () => {
   it("defaults old preferences without legend state to showing every series", () => {
@@ -15,5 +19,14 @@ describe("recognition trend preferences", () => {
 
   it("recovers corrupted preferences that hide every series", () => {
     expect(parseHiddenRecognitionSeries(["p10", "median", "p90", "errorRate"])).toEqual([]);
+  });
+
+  it("persists the new-range first-point reset with an off default for old preferences", () => {
+    expect(parseStatsUiPreferences({}, DEFAULT_STATS_UI_PREFERENCES).recognitionTimeResetNewRangeAtFirstPoint)
+      .toBe(false);
+    expect(parseStatsUiPreferences(
+      { recognitionTimeResetNewRangeAtFirstPoint: true },
+      DEFAULT_STATS_UI_PREFERENCES,
+    ).recognitionTimeResetNewRangeAtFirstPoint).toBe(true);
   });
 });

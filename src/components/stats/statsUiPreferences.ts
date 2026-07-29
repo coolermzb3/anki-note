@@ -19,6 +19,7 @@ export interface StatsUiPreferences {
   range: StatsRange;
   recognitionTimeGrouping: RecognitionTimeGrouping;
   recognitionTimeMetric: RecognitionTimeMetric;
+  recognitionTimeResetNewRangeAtFirstPoint: boolean;
   recognitionTimeValueMode: RecognitionTimeValueMode;
 }
 
@@ -29,6 +30,7 @@ export const DEFAULT_STATS_UI_PREFERENCES: StatsUiPreferences = {
   range: "30",
   recognitionTimeGrouping: "practice-session",
   recognitionTimeMetric: "duration",
+  recognitionTimeResetNewRangeAtFirstPoint: false,
   recognitionTimeValueMode: "absolute",
 };
 
@@ -86,6 +88,9 @@ export function parseStatsUiPreferences(value: unknown, fallback: StatsUiPrefere
     recognitionTimeMetric: isRecognitionTimeMetric(value.recognitionTimeMetric)
       ? value.recognitionTimeMetric
       : fallback.recognitionTimeMetric,
+    recognitionTimeResetNewRangeAtFirstPoint: typeof value.recognitionTimeResetNewRangeAtFirstPoint === "boolean"
+      ? value.recognitionTimeResetNewRangeAtFirstPoint
+      : fallback.recognitionTimeResetNewRangeAtFirstPoint,
     recognitionTimeValueMode: isRecognitionTimeValueMode(value.recognitionTimeValueMode)
       ? value.recognitionTimeValueMode
       : fallback.recognitionTimeValueMode,

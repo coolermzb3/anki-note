@@ -1558,6 +1558,41 @@ main.has-backup-reminder .setup-grid::after {
   gap: 8px;
 }
 
+@media (min-width: 821px) {
+  .session-progress-card-heading > h2 {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .session-progress-card-heading .chart-panel-actions {
+    flex: 1 1 auto;
+  }
+
+  .session-progress-card-heading .session-progress-benchmark {
+    gap: 8px;
+    padding-inline: 8px;
+  }
+
+  .session-progress-card-heading .session-progress-controls .segmented {
+    gap: 4px;
+  }
+
+  .session-progress-card-heading .session-progress-controls .segmented button {
+    min-width: 80px;
+    padding-inline: 10px;
+  }
+
+  .session-progress-card-heading .session-progress-history-limit {
+    gap: 4px;
+    padding-inline: 6px;
+  }
+
+  .session-progress-card-heading .session-progress-history-limit input[type="number"] {
+    width: 56px;
+    padding-inline: 6px;
+  }
+}
+
 .session-progress-condition-bar {
   position: relative;
   z-index: 3;
@@ -1954,6 +1989,51 @@ main.has-backup-reminder .setup-grid::after {
 .recognition-trend-actions .segmented button {
   min-width: 64px;
   padding-inline: 10px;
+}
+
+.recognition-relative-baseline-control {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.recognition-relative-baseline-options {
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  display: inline-flex;
+  overflow: hidden;
+}
+
+.recognition-relative-baseline-options button {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.5;
+  min-height: 0;
+  padding: 2px 8px;
+}
+
+.recognition-relative-baseline-options button + button {
+  border-left: 1px solid var(--accent);
+}
+
+.recognition-relative-baseline-options button.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.recognition-relative-baseline-options button:hover:not(:disabled) {
+  background: var(--surface-soft);
+  box-shadow: none;
+}
+
+.recognition-relative-baseline-options button.active:hover:not(:disabled) {
+  background: var(--accent-soft);
 }
 
 .stats-carousel-card > .panel-heading {
