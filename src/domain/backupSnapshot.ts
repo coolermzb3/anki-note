@@ -21,6 +21,15 @@ function latestTimestamp(values: Array<string | undefined>): string | undefined 
   return values.filter((value): value is string => Boolean(value)).sort((a, b) => b.localeCompare(a))[0];
 }
 
+function appendByDate<T>(recordsByDate: Map<string, T[]>, date: string, record: T): void {
+  const records = recordsByDate.get(date);
+  if (records) {
+    records.push(record);
+    return;
+  }
+  recordsByDate.set(date, [record]);
+}
+
 export function getBackupDataModifiedAt(
   settings: AppSettings,
   sessions: PracticeSessionRecord[],
@@ -52,17 +61,17 @@ export function buildBackupSnapshot(
 
   for (const session of sessions) {
     const date = localDateKey(session.startedAt);
-    sessionsByDate.set(date, [...(sessionsByDate.get(date) ?? []), session]);
+    appendByDate(sessionsByDate, date, session);
   }
 
   for (const review of reviews) {
     const date = localDateKey(review.startedAt);
-    reviewsByDate.set(date, [...(reviewsByDate.get(date) ?? []), review]);
+    appendByDate(reviewsByDate, date, review);
   }
 
   for (const run of staffRecallRuns) {
     const date = localDateKey(run.startedAt);
-    staffRecallRunsByDate.set(date, [...(staffRecallRunsByDate.get(date) ?? []), run]);
+    appendByDate(staffRecallRunsByDate, date, run);
   }
 
   const dates = new Set([...sessionsByDate.keys(), ...reviewsByDate.keys(), ...staffRecallRunsByDate.keys()]);

@@ -229,6 +229,25 @@ export async function replaceAllData(
   });
 }
 
+export async function applyBackupDataChanges(
+  settings: AppSettings,
+  changes: {
+    sessions: { deletes: string[]; puts: PracticeSessionRecord[] };
+    reviews: { deletes: string[]; puts: ReviewRecord[] };
+    staffRecallRuns: { deletes: string[]; puts: StaffRecallRunRecord[] };
+  },
+): Promise<void> {
+  await db.transaction("rw", db.settings, db.practiceSessions, db.reviews, db.staffRecallRuns, async () => {
+    await db.settings.put(settings);
+    await db.practiceSessions.bulkDelete(changes.sessions.deletes);
+    await db.reviews.bulkDelete(changes.reviews.deletes);
+    await db.staffRecallRuns.bulkDelete(changes.staffRecallRuns.deletes);
+    await db.practiceSessions.bulkPut(changes.sessions.puts);
+    await db.reviews.bulkPut(changes.reviews.puts);
+    await db.staffRecallRuns.bulkPut(changes.staffRecallRuns.puts);
+  });
+}
+
 export async function loadAllData(): Promise<{
   settings: AppSettings;
   sessions: PracticeSessionRecord[];

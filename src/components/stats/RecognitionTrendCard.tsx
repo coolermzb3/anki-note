@@ -594,7 +594,7 @@ export function RecognitionTrendCard({
                 <>
                   {hasVisibleExpansionBaseline ? (
                     <span aria-label="新范围零点" className="recognition-relative-baseline-control" role="group">
-                      新范围 0%：
+                      新范围 0% 参照
                       <span className="recognition-relative-baseline-options">
                         <button
                           aria-pressed={!resetNewRangeAtFirstPoint}

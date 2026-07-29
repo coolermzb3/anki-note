@@ -333,7 +333,7 @@ export function App(): JSX.Element {
             return { proceed: false, result };
           }
           if (result === "synced-up") {
-            const latestData = await loadFreshAppData();
+            const latestData = outcome.importedData ?? (await loadFreshAppData());
             setData(latestData);
             showBackupReminderMessage(backupText.titles.importSuccess, backupText.messages.backupDirectoryAutoImported, true);
             return { latestData, proceed: true, result };

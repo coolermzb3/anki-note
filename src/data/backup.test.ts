@@ -52,6 +52,7 @@ class MemoryDirectoryHandle {
   private readonly files = new Map<string, { text: string; lastModified: number }>();
   private readonly directories = new Map<string, MemoryDirectoryHandle>();
   private readonly readCounts = new Map<string, number>();
+  private readonly writeCounts = new Map<string, number>();
   private nextLastModified = 1;
 
   constructor(readonly name: string) {}
@@ -116,6 +117,10 @@ class MemoryDirectoryHandle {
     return this.readCounts.get(name) ?? 0;
   }
 
+  writeCount(name: string): number {
+    return this.writeCounts.get(name) ?? 0;
+  }
+
   totalReadCount(): number {
     return (
       [...this.readCounts.values()].reduce((total, count) => total + count, 0) +
@@ -128,8 +133,14 @@ class MemoryDirectoryHandle {
     this.directories.forEach((directory) => directory.resetReadCounts());
   }
 
+  resetWriteCounts(): void {
+    this.writeCounts.clear();
+    this.directories.forEach((directory) => directory.resetWriteCounts());
+  }
+
   writeText(name: string, text: string): void {
     this.files.set(name, { text, lastModified: this.nextLastModified++ });
+    this.writeCounts.set(name, (this.writeCounts.get(name) ?? 0) + 1);
   }
 
   handle(): FileSystemDirectoryHandle {
@@ -210,10 +221,12 @@ async function seedBrowserData({
 async function seedBackupDirectory(
   directory: MemoryDirectoryHandle,
   {
+    backupAt,
     dataSetId = "dataset-backup",
     reviewId = "review-backup",
     reviewEndedAt = "2026-07-05T10:00:02.000+08:00",
   }: {
+    backupAt?: string;
     dataSetId?: string;
     reviewEndedAt?: string;
     reviewId?: string;
@@ -240,7 +253,7 @@ async function seedBackupDirectory(
       answeredAt: reviewEndedAt,
     }),
   ];
-  await writeBackupSnapshot(directory.handle(), buildBackupSnapshot(settings, sessions, reviews));
+  await writeBackupSnapshot(directory.handle(), buildBackupSnapshot(settings, sessions, reviews, backupAt));
 }
 
 async function rememberDirectory(directory: MemoryDirectoryHandle): Promise<void> {
@@ -287,6 +300,8 @@ describe("file backup side effects", () => {
     expect(day.reviews.map((review) => review.id)).toEqual(["review-browser"]);
     expect(state?.dataConflictBeforeBackup).toBe(false);
     expect(state?.lastSeenBackupVersion).toBe(`snapshot:${manifest.snapshotId}`);
+    expect(state?.lastSeenBackupDataSetId).toBe(settings.dataSetId);
+    expect(state?.lastSeenBackupDayFileDigests).toEqual(manifest.dayFileDigests);
     expect(Object.keys(state?.lastSeenBackupDayFileMetadata ?? {})).toEqual(["2026-07-04"]);
   });
 
@@ -294,11 +309,34 @@ describe("file backup side effects", () => {
     const directory = new MemoryDirectoryHandle("backup");
     await seedBackupDirectory(directory);
     await rememberDirectory(directory);
+    directory.resetReadCounts();
 
-    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({ result: "synced-up" });
+    const outcome = await syncBackupBeforeActivity({ requestPermission: true });
 
+    expect(outcome).toMatchObject({
+      result: "synced-up",
+      importedData: {
+        reviews: [{ id: "review-backup" }],
+        settings: { dataSetId: "dataset-backup" },
+      },
+    });
+    expect(directory.child("days").readCount("2026-07-05.json")).toBe(1);
     await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-backup" }]);
     await expect(db.settings.get("default")).resolves.toMatchObject({ dataSetId: "dataset-backup" });
+  });
+
+  it("rejects a complete digest manifest when a day file no longer matches it", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBackupDirectory(directory);
+    const daysDirectory = directory.child("days");
+    daysDirectory.writeText("2026-07-05.json", `${daysDirectory.readText("2026-07-05.json")}\n`);
+    await rememberDirectory(directory);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).rejects.toThrow(
+      backupText.errors.dayFileDigestMismatch,
+    );
+
+    await expect(db.reviews.count()).resolves.toBe(0);
   });
 
   it("normalizes the legacy answer-pitch key without rewriting the imported backup", async () => {
@@ -456,12 +494,278 @@ describe("file backup side effects", () => {
     expect(directory.child("days").totalReadCount()).toBe(0);
   });
 
+  it("writes only the changed day after an established backup", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData();
+    await db.reviews.put(
+      makeReview({
+        id: "review-next-day",
+        sessionId: "session-browser",
+        targetNoteId: "D4",
+        startedAt: "2026-07-05T10:00:00.000+08:00",
+        answeredAt: "2026-07-05T10:00:02.000+08:00",
+        endedAt: "2026-07-05T10:00:02.000+08:00",
+      }),
+    );
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const firstManifest = directory.readJson<BackupManifest>("manifest.json");
+    expect(firstManifest.dayFileDigests).toEqual({
+      "2026-07-04": expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      "2026-07-05": expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+    });
+
+    await db.reviews.update("review-next-day", { activeMs: 1234 });
+    directory.resetReadCounts();
+    directory.resetWriteCounts();
+
+    await writeBackupNow();
+
+    const daysDirectory = directory.child("days");
+    expect(daysDirectory.totalReadCount()).toBe(0);
+    expect(daysDirectory.writeCount("2026-07-04.json")).toBe(0);
+    expect(daysDirectory.writeCount("2026-07-05.json")).toBe(1);
+    expect(directory.writeCount("manifest.json")).toBe(1);
+  });
+
+  it("rewrites an older day when its browser data changes", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData();
+    await db.reviews.put(
+      makeReview({
+        id: "review-next-day",
+        sessionId: "session-browser",
+        targetNoteId: "D4",
+        startedAt: "2026-07-05T10:00:00.000+08:00",
+        answeredAt: "2026-07-05T10:00:02.000+08:00",
+        endedAt: "2026-07-05T10:00:02.000+08:00",
+      }),
+    );
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    await db.reviews.update("review-browser", { activeMs: 2345 });
+    directory.resetWriteCounts();
+
+    await writeBackupNow();
+
+    const daysDirectory = directory.child("days");
+    expect(daysDirectory.writeCount("2026-07-04.json")).toBe(1);
+    expect(daysDirectory.writeCount("2026-07-05.json")).toBe(0);
+  });
+
+  it("establishes day digests with one full write for a legacy manifest", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData();
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const manifest = directory.readJson<BackupManifest>("manifest.json");
+    delete manifest.dayFileDigests;
+    directory.writeText("manifest.json", JSON.stringify(manifest));
+    directory.resetReadCounts();
+    directory.resetWriteCounts();
+
+    await writeBackupNow();
+
+    const daysDirectory = directory.child("days");
+    expect(daysDirectory.totalReadCount()).toBe(0);
+    expect(daysDirectory.writeCount("2026-07-04.json")).toBe(1);
+    expect(directory.readJson<BackupManifest>("manifest.json").dayFileDigests).toEqual({
+      "2026-07-04": expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+    });
+  });
+
+  it("falls back to full inspection and writing after external day-file metadata changes", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData();
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const daysDirectory = directory.child("days");
+    const dayText = daysDirectory.readText("2026-07-04.json");
+    daysDirectory.writeText("2026-07-04.json", dayText);
+    directory.resetReadCounts();
+    directory.resetWriteCounts();
+
+    await writeBackupNow();
+
+    expect(daysDirectory.totalReadCount()).toBeGreaterThan(0);
+    expect(daysDirectory.writeCount("2026-07-04.json")).toBe(1);
+  });
+
+  it("imports only changed days and applies record-level additions and deletions", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { reviews, sessions, settings } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    const keptReview = makeReview({
+      id: "review-kept",
+      sessionId: sessions[0].id,
+      targetNoteId: "D4",
+      startedAt: "2026-07-05T10:00:00.000+08:00",
+      answeredAt: "2026-07-05T10:00:02.000+08:00",
+      endedAt: "2026-07-05T10:00:02.000+08:00",
+    });
+    const deletedReview = makeReview({
+      id: "review-deleted",
+      sessionId: sessions[0].id,
+      targetNoteId: "E4",
+      startedAt: "2026-07-05T10:30:00.000+08:00",
+      answeredAt: "2026-07-05T10:30:02.000+08:00",
+      endedAt: "2026-07-05T10:30:02.000+08:00",
+    });
+    await db.reviews.bulkPut([keptReview, deletedReview]);
+    await rememberDirectory(directory);
+    await writeBackupNow();
+
+    const addedReview = makeReview({
+      id: "review-added",
+      sessionId: sessions[0].id,
+      targetNoteId: "F4",
+      startedAt: "2026-07-05T11:00:00.000+08:00",
+      answeredAt: "2026-07-05T11:00:02.000+08:00",
+      endedAt: "2026-07-05T11:00:02.000+08:00",
+    });
+    const updatedReview = { ...keptReview, activeMs: 1_234 };
+    await writeBackupSnapshot(
+      directory.handle(),
+      buildBackupSnapshot(
+        settings,
+        sessions,
+        [reviews[0], updatedReview, addedReview],
+        "2099-01-01T00:00:00.000Z",
+      ),
+    );
+    directory.resetReadCounts();
+    const clearReviews = vi.spyOn(db.reviews, "clear");
+    const deleteReviews = vi.spyOn(db.reviews, "bulkDelete");
+    const putReviews = vi.spyOn(db.reviews, "bulkPut");
+
+    const outcome = await syncBackupBeforeActivity({ requestPermission: true });
+
+    expect(outcome.result).toBe("synced-up");
+    expect(outcome.importedData?.reviews.map((review) => review.id)).toEqual([
+      "review-browser",
+      "review-kept",
+      "review-added",
+    ]);
+    expect(directory.child("days").readCount("2026-07-04.json")).toBe(0);
+    expect(directory.child("days").readCount("2026-07-05.json")).toBe(1);
+    expect(clearReviews).not.toHaveBeenCalled();
+    expect(deleteReviews).toHaveBeenCalledWith(["review-deleted"]);
+    expect(putReviews).toHaveBeenCalledWith([updatedReview, addedReview]);
+    await expect(db.reviews.orderBy("startedAt").toArray()).resolves.toEqual([reviews[0], updatedReview, addedReview]);
+  });
+
+  it("incrementally imports a newer deletion-only snapshot but rejects an older rollback", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { reviews, sessions, settings } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    const emptySession = makeSession({
+      id: "session-empty",
+      startedAt: "2026-07-06T10:00:00.000+08:00",
+      endedAt: "2026-07-06T10:01:00.000+08:00",
+    });
+    await db.practiceSessions.put(emptySession);
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const previousManifest = directory.readJson<BackupManifest>("manifest.json");
+
+    await writeBackupSnapshot(
+      directory.handle(),
+      buildBackupSnapshot(settings, sessions, reviews, "2099-01-01T00:00:00.000Z"),
+    );
+    const deletionManifest = directory.readJson<BackupManifest>("manifest.json");
+    expect(deletionManifest.dataModifiedAt!.localeCompare(previousManifest.dataModifiedAt!)).toBeLessThan(0);
+    const clearSessions = vi.spyOn(db.practiceSessions, "clear");
+    const deleteSessions = vi.spyOn(db.practiceSessions, "bulkDelete");
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({ result: "synced-up" });
+
+    expect(clearSessions).not.toHaveBeenCalled();
+    expect(deleteSessions).toHaveBeenCalledWith(["session-empty"]);
+    await expect(db.practiceSessions.get("session-empty")).resolves.toBeUndefined();
+
+    await writeBackupSnapshot(
+      directory.handle(),
+      buildBackupSnapshot(settings, [emptySession, ...sessions], reviews, "2000-01-01T00:00:00.000Z"),
+    );
+    const rollbackManifest = directory.readJson<BackupManifest>("manifest.json");
+    expect(rollbackManifest.dataModifiedAt!.localeCompare(deletionManifest.dataModifiedAt!)).toBeGreaterThan(0);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "data-conflict",
+    });
+    expect(clearSessions).not.toHaveBeenCalled();
+    await expect(db.practiceSessions.get("session-empty")).resolves.toBeUndefined();
+  });
+
+  it("keeps a newer empty snapshot ready and blocks an older backup-only rollback", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { reviews, sessions, settings } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    await rememberDirectory(directory);
+    await writeBackupNow();
+
+    await writeBackupSnapshot(
+      directory.handle(),
+      buildBackupSnapshot(settings, [], [], "2099-01-01T00:00:00.000Z"),
+    );
+    const emptyManifest = directory.readJson<BackupManifest>("manifest.json");
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({ result: "synced-up" });
+    await expect(db.practiceSessions.count()).resolves.toBe(0);
+    await expect(db.reviews.count()).resolves.toBe(0);
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toEqual({
+      result: "ready",
+      backupStateChanged: false,
+    });
+
+    await writeBackupSnapshot(
+      directory.handle(),
+      buildBackupSnapshot(settings, sessions, reviews, "2000-01-01T00:00:00.000Z"),
+    );
+    const rollbackManifest = directory.readJson<BackupManifest>("manifest.json");
+    expect(rollbackManifest.dataModifiedAt!.localeCompare(emptyManifest.dataModifiedAt!)).toBeGreaterThan(0);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "data-conflict",
+    });
+    await expect(db.practiceSessions.count()).resolves.toBe(0);
+    await expect(db.reviews.count()).resolves.toBe(0);
+  });
+
+  it("falls back to a full import when browser data no longer matches the digest baseline", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { reviews, sessions, settings } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    await db.reviews.update(reviews[0].id, { activeMs: 1_234 });
+
+    const addedReview = makeReview({
+      id: "review-added",
+      sessionId: sessions[0].id,
+      targetNoteId: "D4",
+      startedAt: "2026-07-05T11:00:00.000+08:00",
+      answeredAt: "2026-07-05T11:00:02.000+08:00",
+      endedAt: "2026-07-05T11:00:02.000+08:00",
+    });
+    await writeBackupSnapshot(
+      directory.handle(),
+      buildBackupSnapshot(settings, sessions, [reviews[0], addedReview], "2099-01-01T00:00:00.000Z"),
+    );
+    directory.resetReadCounts();
+    const clearReviews = vi.spyOn(db.reviews, "clear");
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({ result: "synced-up" });
+
+    expect(clearReviews).toHaveBeenCalledTimes(1);
+    expect(directory.child("days").readCount("2026-07-04.json")).toBe(1);
+    expect(directory.child("days").readCount("2026-07-05.json")).toBe(1);
+    await expect(db.reviews.orderBy("startedAt").toArray()).resolves.toEqual([reviews[0], addedReview]);
+  });
+
   it("reads day files when an established backup manifest changes externally", async () => {
     const directory = new MemoryDirectoryHandle("backup");
     await seedBrowserData({ dataSetId: "dataset-shared" });
     await rememberDirectory(directory);
     await writeBackupNow();
     await seedBackupDirectory(directory, {
+      backupAt: "2099-01-01T00:00:00.000Z",
       dataSetId: "dataset-shared",
       reviewEndedAt: "2026-07-05T10:00:02.000+08:00",
     });
@@ -484,9 +788,11 @@ describe("file backup side effects", () => {
       reviewEndedAt: "2026-07-05T10:00:02.000+08:00",
     });
     await rememberDirectory(directory);
+    directory.resetReadCounts();
 
     await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({ result: "synced-up" });
 
+    expect(directory.child("days").readCount("2026-07-05.json")).toBe(1);
     await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-backup" }]);
     await expect(db.backupStates.get("default")).resolves.toMatchObject({
       dataConflictBeforeBackup: false,

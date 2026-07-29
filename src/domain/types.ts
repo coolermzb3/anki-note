@@ -249,6 +249,8 @@ export interface BackupState {
   conflictBackupRecordCount?: number;
   conflictBackupStaffRecallRunCount?: number;
   lastSeenBackupVersion?: string;
+  lastSeenBackupDataSetId?: string;
+  lastSeenBackupDayFileDigests?: Record<string, string>;
   lastSeenBackupDayFileMetadata?: Record<string, BackupDayFileMetadata>;
   backupDataModifiedAt?: string;
   lastBackupAt?: string;
@@ -272,6 +274,7 @@ export interface BackupManifest {
   lastBackupAt: string;
   lastReviewId?: string;
   lastStaffRecallRunId?: string;
+  dayFileDigests?: Record<string, string>;
   dates: string[];
 }
 

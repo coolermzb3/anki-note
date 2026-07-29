@@ -40,6 +40,7 @@ export const backupText = {
     unselected: "未选择",
   },
   errors: {
+    dayFileDigestMismatch: "备份文件与清单不一致，请稍后重试或检查备份目录。",
     permissionExpired: "备份目录权限已失效。",
     readPermissionDenied: "未获得备份目录读取权限。",
     unsupportedDirectoryPicker: "当前浏览器不支持选择备份目录。",
