@@ -1977,6 +1977,53 @@ main.has-backup-reminder .setup-grid::after {
   min-width: 76px;
 }
 
+.stats-range-custom {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  display: inline-flex;
+  height: var(--control-height-compact);
+  justify-content: center;
+  padding-left: 4px;
+  white-space: nowrap;
+}
+
+.stats-range-custom.active {
+  background: var(--ink);
+  color: white;
+}
+
+.stats-range-custom input[type="number"] {
+  cursor: text;
+  min-height: 28px;
+  padding: 0 6px;
+  width: 52px;
+}
+
+.stats-range-filter .segmented .stats-range-custom-activate {
+  color: inherit;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0 8px 0 4px;
+}
+
+.stats-range-filter .segmented .stats-range-custom-activate:hover:not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+}
+
+.stats-range-custom.active input[type="number"] {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.45);
+  color: white;
+}
+
+.stats-range-custom.active input[type="number"]::-webkit-inner-spin-button,
+.stats-range-custom.active input[type="number"]::-webkit-outer-spin-button {
+  filter: invert(1);
+  opacity: 0.8;
+}
+
 .chart-panel-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2898,6 +2945,15 @@ button.primary kbd {
   .stats-range-filter .segmented button {
     flex: 1;
     min-width: 0;
+  }
+
+  .stats-range-custom {
+    flex: 0 0 auto;
+    min-width: 88px;
+  }
+
+  .stats-range-filter .segmented .stats-range-custom-activate {
+    flex: 0 0 auto;
   }
 
   .stats-range-staff {

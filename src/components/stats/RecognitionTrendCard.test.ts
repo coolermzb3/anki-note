@@ -8,6 +8,7 @@ function makeChartData(): RecognitionTimeChartStat[] {
     breakBefore: index === 2,
     coveredNoteCount: index < 2 ? 1 : 2,
     errorRate: value,
+    formalRangeStart: index === 2,
     key: String(value),
     label: String(value),
     median: value,
@@ -93,10 +94,85 @@ describe("recognition trend chart", () => {
     expect(medianSeries[1].data).toEqual([null, null, 50, 100]);
   });
 
+  it("can keep the previous formal range's starting baseline", () => {
+    const data = makeChartData();
+    data[2] = { ...data[2], relativeBaseline: { median: 2, p10: 2, p90: 2 } };
+    const option = makeRecognitionTimeChartOption(
+      data,
+      "duration",
+      "relative",
+      ["median"],
+      "previous-range-start",
+    );
+    const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
+      .filter((series) => series.name === "中位");
+
+    expect(medianSeries[0].data).toEqual([0, 100, null, null]);
+    expect(medianSeries[1].data).toEqual([null, null, 200, 300]);
+  });
+
+  it("tracks the immediately previous formal range start across multiple expansions", () => {
+    const data = [1, 2, 3, 4, 5, 6].map((value, index) => ({
+      ...makeChartData()[Math.min(index, 3)],
+      boundaryLabel: index === 2 || index === 4 ? "新范围已纳入" : undefined,
+      breakBefore: index === 2 || index === 4,
+      formalRangeStart: index === 2 || index === 4,
+      key: String(value),
+      label: String(value),
+      median: value,
+      p10: value,
+      p90: value,
+      relativeBaseline: index === 2 || index === 4
+        ? { median: value - 1, p10: value - 1, p90: value - 1 }
+        : undefined,
+      tooltipLabel: String(value),
+    }));
+    const option = makeRecognitionTimeChartOption(
+      data,
+      "duration",
+      "relative",
+      ["median"],
+      "previous-range-start",
+    );
+    const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
+      .filter((series) => series.name === "中位");
+
+    expect(medianSeries[2].data.slice(0, 4)).toEqual([null, null, null, null]);
+    expect(medianSeries[2].data[4]).toBeCloseTo(200 / 3);
+    expect(medianSeries[2].data[5]).toBeCloseTo(100);
+  });
+
+  it("starts the first formal range after its initial accumulation phase", () => {
+    const data = makeChartData().map((point) => ({
+      ...point,
+      boundaryLabel: undefined,
+      breakBefore: false,
+      formalRangeStart: false,
+    }));
+    data[1] = { ...data[1], breakBefore: true, formalRangeStart: true };
+    data[3] = {
+      ...data[3],
+      breakBefore: true,
+      formalRangeStart: true,
+      relativeBaseline: { median: 3, p10: 3, p90: 3 },
+    };
+    const option = makeRecognitionTimeChartOption(
+      data,
+      "duration",
+      "relative",
+      ["median"],
+      "previous-range-start",
+    );
+    const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
+      .filter((series) => series.name === "中位");
+
+    expect(medianSeries[2].data[3]).toBe(100);
+  });
+
   it("can reset the next formal range at its own first point", () => {
     const data = makeChartData();
     data[2] = { ...data[2], relativeBaseline: { median: 2, p10: 2, p90: 2 } };
-    const option = makeRecognitionTimeChartOption(data, "duration", "relative", ["median"], true);
+    const option = makeRecognitionTimeChartOption(data, "duration", "relative", ["median"], "new-range-start");
     const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
       .filter((series) => series.name === "中位");
 
@@ -113,6 +189,26 @@ describe("recognition trend chart", () => {
       .find((series) => series.name === "中位");
 
     expect(medianSeries?.data).toEqual([0]);
+  });
+
+  it("rebases the previous-range start at the window edge when its actual start is hidden", () => {
+    const data = makeChartData();
+    data[2] = {
+      ...data[2],
+      relativeBaseline: { median: 2, p10: 2, p90: 2 },
+    };
+    const option = makeRecognitionTimeChartOption(
+      data.slice(2),
+      "duration",
+      "relative",
+      ["median"],
+      "previous-range-start",
+    );
+    const medianSeries = (option.series as Array<{ data: Array<number | null>; name: string }>)
+      .find((series) => series.name === "中位");
+
+    expect(medianSeries?.data[0]).toBe(0);
+    expect(medianSeries?.data[1]).toBeCloseTo(100 / 3);
   });
 
   it("preserves coverage labels when converting duration thresholds into speed", () => {

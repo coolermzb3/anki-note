@@ -35,6 +35,7 @@ import {
   applyRecognitionRangeTransitions,
   findRecognitionRangeTransitions,
   RECOGNITION_SERIES_KEYS,
+  type RecognitionRelativeBaselineMode,
   type RecognitionSeriesKey,
   type RecognitionTimeChartStat,
   type RecognitionTimeGrouping,
@@ -51,7 +52,12 @@ import {
 } from "./statsCarousel";
 import { StatsRangeStaff, type StaffHeatNote } from "./StatsRangeStaff";
 import { STATS_COLORS } from "./statsColors";
-import { getStatsRangeCutoff, type StatsRange } from "./statsRange";
+import {
+  getStatsRangeCutoff,
+  parseStatsRangeDays,
+  STATS_RANGE_PRESETS,
+  type StatsRange,
+} from "./statsRange";
 import {
   DEFAULT_STATS_UI_PREFERENCES,
   parseStatsUiPreferences,
@@ -181,6 +187,11 @@ export function StatsView({
   const [statsCarouselTransitionEnabled, setStatsCarouselTransitionEnabled] = useState(true);
   const [primaryContentReady, setPrimaryContentReady] = useState(false);
   const [idleContentReady, setIdleContentReady] = useState(false);
+  const [customRangeDraft, setCustomRangeDraft] = useState(() => String(statsUiPreferences.customRangeDays));
+
+  useEffect(() => {
+    setCustomRangeDraft(String(statsUiPreferences.customRangeDays));
+  }, [statsUiPreferences.customRangeDays]);
 
   useEffect(() => {
     let secondFrame = 0;
@@ -224,9 +235,10 @@ export function StatsView({
   );
   const noteRangeStatsReady = primaryContentReady && preparedStatsCarouselCardIds.has("note-range");
   const range = statsUiPreferences.range;
+  const customRangeSelected = range !== "all" && !STATS_RANGE_PRESETS.some((preset) => preset === range);
   const recognitionTimeGrouping = statsUiPreferences.recognitionTimeGrouping;
   const recognitionTimeMetric = statsUiPreferences.recognitionTimeMetric;
-  const recognitionTimeResetNewRangeAtFirstPoint = statsUiPreferences.recognitionTimeResetNewRangeAtFirstPoint;
+  const recognitionTimeRelativeBaselineMode = statsUiPreferences.recognitionTimeRelativeBaselineMode;
   const recognitionTimeValueMode = statsUiPreferences.recognitionTimeValueMode;
   const recognitionVisibleSeries = useMemo(
     () => RECOGNITION_SERIES_KEYS.filter(
@@ -291,14 +303,22 @@ export function StatsView({
   const setRange = (nextRange: StatsRange): void => {
     setStatsUiPreferences((current) => ({ ...current, range: nextRange }));
   };
+  const commitCustomRange = (): void => {
+    const days = parseStatsRangeDays(customRangeDraft);
+    if (days === undefined) {
+      setCustomRangeDraft(String(statsUiPreferences.customRangeDays));
+      return;
+    }
+    setStatsUiPreferences((current) => ({ ...current, customRangeDays: days, range: days }));
+  };
   const setRecognitionTimeGrouping = (nextGrouping: RecognitionTimeGrouping): void => {
     setStatsUiPreferences((current) => ({ ...current, recognitionTimeGrouping: nextGrouping }));
   };
   const setRecognitionTimeMetric = (nextMetric: RecognitionTimeMetric): void => {
     setStatsUiPreferences((current) => ({ ...current, recognitionTimeMetric: nextMetric }));
   };
-  const setRecognitionTimeResetNewRangeAtFirstPoint = (enabled: boolean): void => {
-    setStatsUiPreferences((current) => ({ ...current, recognitionTimeResetNewRangeAtFirstPoint: enabled }));
+  const setRecognitionTimeRelativeBaselineMode = (mode: RecognitionRelativeBaselineMode): void => {
+    setStatsUiPreferences((current) => ({ ...current, recognitionTimeRelativeBaselineMode: mode }));
   };
   const setRecognitionTimeValueMode = (nextValueMode: RecognitionTimeValueMode): void => {
     setStatsUiPreferences((current) => ({ ...current, recognitionTimeValueMode: nextValueMode }));
@@ -424,6 +444,7 @@ export function StatsView({
         breakBefore: stat.breakBefore,
         coveredNoteCount: stat.coveredNoteCount,
         errorRate: stat.errorRate === undefined ? undefined : stat.errorRate * 100,
+        formalRangeStart: stat.formalRangeStart,
         key: stat.key,
         median: stat.medianMs === undefined ? undefined : stat.medianMs / 1000,
         p10: stat.p10Ms === undefined ? undefined : stat.p10Ms / 1000,
@@ -633,9 +654,9 @@ export function StatsView({
           onSelectAllSeries={selectAllRecognitionSeries}
           onSelectOnlySeries={selectOnlyRecognitionSeries}
           onToggleSeries={toggleRecognitionSeries}
-          onResetNewRangeAtFirstPointChange={setRecognitionTimeResetNewRangeAtFirstPoint}
+          onRelativeBaselineModeChange={setRecognitionTimeRelativeBaselineMode}
           onValueModeChange={setRecognitionTimeValueMode}
-          resetNewRangeAtFirstPoint={recognitionTimeResetNewRangeAtFirstPoint}
+          relativeBaselineMode={recognitionTimeRelativeBaselineMode}
           valueMode={recognitionTimeValueMode}
           visibleSeries={recognitionVisibleSeries}
         />
@@ -739,18 +760,41 @@ export function StatsView({
         </div>
         <div className="toolbar stats-range-filter stats-header-range-filter">
           <div className="segmented" aria-label="统计天数筛选">
-            <button className={range === "1" ? "active" : ""} onClick={() => setRange("1")}>
-              1 天
-            </button>
-            <button className={range === "7" ? "active" : ""} onClick={() => setRange("7")}>
-              7 天
-            </button>
-            <button className={range === "30" ? "active" : ""} onClick={() => setRange("30")}>
-              30 天
-            </button>
+            {STATS_RANGE_PRESETS.map((days) => (
+              <button className={range === days ? "active" : ""} key={days} onClick={() => setRange(days)}>
+                {days} 天
+              </button>
+            ))}
             <button className={range === "all" ? "active" : ""} onClick={() => setRange("all")}>
               全部
             </button>
+            <div className={customRangeSelected ? "stats-range-custom active" : "stats-range-custom"}>
+              <input
+                aria-label="自定义统计天数"
+                inputMode="numeric"
+                min={1}
+                onBlur={commitCustomRange}
+                onChange={(event) => setCustomRangeDraft(event.currentTarget.value)}
+                onClick={() => setRange(statsUiPreferences.customRangeDays)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }
+                }}
+                step={1}
+                type="number"
+                value={customRangeDraft}
+              />
+              <button
+                aria-label="应用自定义统计天数"
+                className="stats-range-custom-activate"
+                onClick={commitCustomRange}
+                type="button"
+              >
+                天
+              </button>
+            </div>
           </div>
         </div>
       </div>

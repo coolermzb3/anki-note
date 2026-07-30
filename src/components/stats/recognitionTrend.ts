@@ -9,6 +9,12 @@ export const RECOGNITION_TIME_METRICS = ["duration", "speed"] as const;
 export type RecognitionTimeMetric = (typeof RECOGNITION_TIME_METRICS)[number];
 export const RECOGNITION_TIME_VALUE_MODES = ["absolute", "relative"] as const;
 export type RecognitionTimeValueMode = (typeof RECOGNITION_TIME_VALUE_MODES)[number];
+export const RECOGNITION_RELATIVE_BASELINE_MODES = [
+  "previous-range-start",
+  "previous-range-end",
+  "new-range-start",
+] as const;
+export type RecognitionRelativeBaselineMode = (typeof RECOGNITION_RELATIVE_BASELINE_MODES)[number];
 export const RECOGNITION_SERIES_KEYS = ["p10", "median", "p90", "errorRate"] as const;
 export type RecognitionSeriesKey = (typeof RECOGNITION_SERIES_KEYS)[number];
 
@@ -23,6 +29,7 @@ export interface RecognitionTimeChartStat {
   breakBefore: boolean;
   coveredNoteCount: number;
   errorRate?: number;
+  formalRangeStart: boolean;
   key: string;
   label: string;
   tooltipLabel: string;
@@ -60,6 +67,7 @@ export interface RecognitionTrendRelativeBaseline {
 export interface RecognitionTrendPhasePoint extends RecognitionTrendPoint {
   boundaryLabel?: string;
   breakBefore: boolean;
+  formalRangeStart: boolean;
   relativeBaseline?: RecognitionTrendRelativeBaseline;
   transition: boolean;
   transitionKind?: RecognitionTransitionKind;
@@ -95,17 +103,19 @@ interface RecognitionRangeEpisode {
   startedAt: string;
 }
 
-function buildRecognitionRangeEpisodes(sessions: readonly PracticeSessionRecord[]): RecognitionRangeEpisode[] {
+function buildRecognitionRangeEpisodes(
+  sessions: readonly PracticeSessionRecord[],
+  currentNoteIds: ReadonlySet<TargetNoteId>,
+): RecognitionRangeEpisode[] {
   const ranges = sessions
     .map((session) => {
-      const noteIds = sessionRangeNoteIds(session);
+      const noteIds = sessionRangeNoteIds(session).filter((noteId) => currentNoteIds.has(noteId));
       return {
         key: buildTargetNoteSetKey(noteIds),
         noteIds,
         startedAt: session.startedAt,
       };
     })
-    .filter((range) => range.noteIds.length > 0)
     .sort((left, right) => new Date(left.startedAt).getTime() - new Date(right.startedAt).getTime());
   const episodes: RecognitionRangeEpisode[] = [];
   for (const range of ranges) {
@@ -118,7 +128,7 @@ function buildRecognitionRangeEpisodes(sessions: readonly PracticeSessionRecord[
     }
     episodes.push({ ...range });
   }
-  return episodes;
+  return episodes.filter((episode) => episode.noteIds.length > 0);
 }
 
 export function findRecognitionRangeTransitions(
@@ -132,7 +142,7 @@ export function findRecognitionRangeTransitions(
   const currentNoteIds = activeNotes.map((note) => note.id);
   const currentKey = buildTargetNoteSetKey(currentNoteIds);
   const currentSet = new Set(currentNoteIds);
-  const episodes = buildRecognitionRangeEpisodes(sessions);
+  const episodes = buildRecognitionRangeEpisodes(sessions, currentSet);
   const completedRangeKeys = new Set<string>();
   const pendingExpansions = new Set<string>();
   const transitions: RecognitionRangeTransition[] = [];
@@ -163,13 +173,12 @@ export function findRecognitionRangeTransitions(
       const covered = new Set(point.coveredNoteIds);
       return episode.noteIds.every((noteId) => covered.has(noteId));
     });
-    const isVisible = episode.noteIds.every((noteId) => currentSet.has(noteId));
     const isCurrentEpisode = episode.endedAt === undefined && episode.key === currentKey;
     const rangeAlreadyCompleted = completedRangeKeys.has(episode.key);
     const hasPendingExpansion = pendingExpansions.has(episode.key);
     const coveredBeforeStart = new Set(trend[startIndex - 1]?.coveredNoteIds ?? []);
     const completedBeforeStart = episode.noteIds.every((noteId) => coveredBeforeStart.has(noteId));
-    const isColdStart = !hasCompletedVisibleRange && isVisible;
+    const isColdStart = !hasCompletedVisibleRange;
     if (isColdStart && (completedPoint || isCurrentEpisode)) {
       transitions.push({
         baselineNoteIds: [],
@@ -180,7 +189,7 @@ export function findRecognitionRangeTransitions(
         toNoteCount: completedPoint?.coveredNoteIds.length ?? episode.noteIds.length,
       });
     } else if (hasPendingExpansion && !rangeAlreadyCompleted && !completedBeforeStart) {
-      if (isVisible && (completedPoint || isCurrentEpisode)) {
+      if (completedPoint || isCurrentEpisode) {
         transitions.push({
           baselineNoteIds: [...coveredBeforeStart],
           completedAt: completedPoint?.boundaryAt,
@@ -194,9 +203,7 @@ export function findRecognitionRangeTransitions(
     if (completedPoint) {
       completedRangeKeys.add(episode.key);
       pendingExpansions.delete(episode.key);
-      if (isVisible) {
-        hasCompletedVisibleRange = true;
-      }
+      hasCompletedVisibleRange = true;
     }
   }
   return transitions;
@@ -319,6 +326,7 @@ export function applyRecognitionRangeTransitions(
       ? copyRecognitionMetrics(point, latestMetricPoint(activePhase.baselineTrend, point.boundaryAt))
       : point;
     const completedPhase = completions[completions.length - 1];
+    const formalRangeStart = completions.length > 0;
     return {
       ...metricPoint,
       boundaryLabel: activeStart
@@ -331,6 +339,7 @@ export function applyRecognitionRangeTransitions(
             : "新范围已纳入"
           : undefined,
       breakBefore: starts.length > 0 || completions.length > 0,
+      formalRangeStart,
       relativeBaseline: completedPhase?.transition.kind === "expansion"
         ? completedPhase.preTransitionBaseline
         : undefined,

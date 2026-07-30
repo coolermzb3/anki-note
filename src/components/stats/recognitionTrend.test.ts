@@ -123,6 +123,32 @@ describe("recognition range transitions", () => {
     ], originalNotes, trend).filter((transition) => transition.kind === "expansion")).toEqual([]);
   });
 
+  it("retains a relevant expansion after a different note is removed from the current range", () => {
+    const removedId = originalIds[0];
+    const currentNotes = expandedNotes.filter((note) => note.id !== removedId);
+    const projectedOriginalIds = originalIds.filter((noteId) => noteId !== removedId);
+    const currentIds = expandedIds.filter((noteId) => noteId !== removedId);
+    const rangeSessions = [
+      makeSession("original", "2026-07-01T10:00:00.000+08:00", ORIGINAL_GROUPS),
+      makeSession("expanded", "2026-07-02T10:00:00.000+08:00", EXPANDED_GROUPS),
+    ];
+    const rangeTrend = [
+      makePoint("before", "2026-07-01T10:05:00.000+08:00", projectedOriginalIds, 1000),
+      makePoint("start", "2026-07-02T10:05:00.000+08:00", [...projectedOriginalIds, addedIds[0]], 1100),
+      makePoint("ready", "2026-07-03T10:05:00.000+08:00", currentIds, 1200),
+    ];
+
+    expect(findRecognitionRangeTransitions(rangeSessions, currentNotes, rangeTrend)
+      .filter((transition) => transition.kind === "expansion")).toEqual([{
+      baselineNoteIds: projectedOriginalIds,
+      completedAt: rangeTrend[2].boundaryAt,
+      fromNoteCount: projectedOriginalIds.length,
+      kind: "expansion",
+      startedAt: rangeTrend[1].boundaryAt,
+      toNoteCount: currentIds.length,
+    }]);
+  });
+
   it("keeps transition metrics on the established cohort until the full range is ready", () => {
     const transition = findRecognitionRangeTransitions(sessions, expandedNotes, trend)
       .find((candidate) => candidate.kind === "expansion")!;
@@ -142,6 +168,7 @@ describe("recognition range transitions", () => {
     expect(result.map((point) => point.relativeBaseline?.medianMs)).toEqual([undefined, undefined, undefined, 1000]);
     expect(result.map((point) => point.transition)).toEqual([false, true, true, false]);
     expect(result.map((point) => point.breakBefore)).toEqual([false, true, false, true]);
+    expect(result.map((point) => point.formalRangeStart)).toEqual([false, false, false, true]);
     expect(result.map((point) => point.boundaryLabel)).toEqual([
       undefined,
       `开始扩展 ${originalIds.length}→${expandedIds.length}`,
@@ -207,7 +234,7 @@ describe("recognition range transitions", () => {
     });
   });
 
-  it("does not add a boundary when a range matured while a larger range was active", () => {
+  it("retains a projected expansion that completed while a larger range was active", () => {
     const fullGroups: PracticeGroupId[] = ["G2-F3", ...EXPANDED_GROUPS];
     const rangeSessions = [
       makeSession("original", "2026-07-01T10:00:00.000+08:00", ORIGINAL_GROUPS),
@@ -225,7 +252,14 @@ describe("recognition range transitions", () => {
     const expansions = findRecognitionRangeTransitions(rangeSessions, expandedNotes, rangeTrend)
       .filter((transition) => transition.kind === "expansion");
 
-    expect(expansions).toEqual([]);
+    expect(expansions).toEqual([{
+      baselineNoteIds: originalIds,
+      completedAt: rangeTrend[2].boundaryAt,
+      fromNoteCount: originalIds.length,
+      kind: "expansion",
+      startedAt: rangeTrend[1].boundaryAt,
+      toNoteCount: expandedIds.length,
+    }]);
   });
 
   it("does not treat restoring the initially mature range as an expansion", () => {
@@ -279,6 +313,7 @@ describe("recognition range transitions", () => {
       "初始范围已纳入",
     ]);
     expect(result.map((point) => point.medianMs)).toEqual([undefined, 1100, 1200]);
+    expect(result.map((point) => point.formalRangeStart)).toEqual([false, false, true]);
     expect(result.map((point) => point.relativeBaseline?.medianMs)).toEqual([undefined, undefined, undefined]);
   });
 

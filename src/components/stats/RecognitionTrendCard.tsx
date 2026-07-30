@@ -4,10 +4,12 @@ import { useEffect, useRef } from "react";
 
 import {
   RECOGNITION_SERIES_KEYS,
+  type RecognitionRelativeBaselineMode,
   type RecognitionSeriesKey,
   type RecognitionTimeChartStat,
   type RecognitionTimeGrouping,
   type RecognitionTimeMetric,
+  type RecognitionTimeRelativeBaseline,
   type RecognitionTimeValueMode,
 } from "./recognitionTrend";
 import { STATS_COLORS } from "./statsColors";
@@ -35,6 +37,14 @@ const RECOGNITION_SERIES_OPTIONS: Array<{
   },
 ];
 const DEFAULT_RECOGNITION_VISIBLE_SERIES = RECOGNITION_SERIES_KEYS;
+const RECOGNITION_RELATIVE_BASELINE_OPTIONS: Array<{
+  label: string;
+  value: RecognitionRelativeBaselineMode;
+}> = [
+  { label: "旧段首点", value: "previous-range-start" },
+  { label: "旧段末点", value: "previous-range-end" },
+  { label: "新段首点", value: "new-range-start" },
+];
 const RECOGNITION_CHART_HANDLE_ICON =
   "path://M11,5 H17 A4,4 0 0 1 21,9 V23 A4,4 0 0 1 17,27 H11 A4,4 0 0 1 7,23 V9 A4,4 0 0 1 11,5 Z M14,-3 V5 M14,27 V35";
 
@@ -133,30 +143,43 @@ function makeRecognitionSpeedData(data: RecognitionTimeChartStat[]): Recognition
 
 function makeRelativeRecognitionTimeData(
   data: RecognitionTimeChartStat[],
-  resetNewRangeAtFirstPoint: boolean,
+  relativeBaselineMode: RecognitionRelativeBaselineMode,
 ): RecognitionTimeChartStat[] {
-  let medianBaseline: number | undefined;
-  let p10Baseline: number | undefined;
-  let p90Baseline: number | undefined;
+  let baseline: RecognitionTimeRelativeBaseline = {};
+  let currentRangeStart: RecognitionTimeRelativeBaseline = {};
   return data.map((stat) => {
-    const nextBaseline = resetNewRangeAtFirstPoint && stat.relativeBaseline ? stat : stat.relativeBaseline;
-    medianBaseline = nextBaseline?.median ?? medianBaseline;
-    p10Baseline = nextBaseline?.p10 ?? p10Baseline;
-    p90Baseline = nextBaseline?.p90 ?? p90Baseline;
-    if (medianBaseline === undefined && stat.median !== undefined) {
-      medianBaseline = stat.median;
+    if (stat.relativeBaseline) {
+      if (relativeBaselineMode === "new-range-start") {
+        baseline = { median: stat.median, p10: stat.p10, p90: stat.p90 };
+      } else {
+        const selectedBaseline = relativeBaselineMode === "previous-range-start"
+          ? currentRangeStart
+          : stat.relativeBaseline;
+        baseline = {
+          median: selectedBaseline.median ?? baseline.median,
+          p10: selectedBaseline.p10 ?? baseline.p10,
+          p90: selectedBaseline.p90 ?? baseline.p90,
+        };
+      }
     }
-    if (p10Baseline === undefined && stat.p10 !== undefined) {
-      p10Baseline = stat.p10;
+    if (stat.formalRangeStart) {
+      currentRangeStart = { median: stat.median, p10: stat.p10, p90: stat.p90 };
     }
-    if (p90Baseline === undefined && stat.p90 !== undefined) {
-      p90Baseline = stat.p90;
-    }
+    baseline = {
+      median: baseline.median ?? stat.median,
+      p10: baseline.p10 ?? stat.p10,
+      p90: baseline.p90 ?? stat.p90,
+    };
+    currentRangeStart = {
+      median: currentRangeStart.median ?? stat.median,
+      p10: currentRangeStart.p10 ?? stat.p10,
+      p90: currentRangeStart.p90 ?? stat.p90,
+    };
     return {
       ...stat,
-      median: relativeChange(stat.median, medianBaseline),
-      p10: relativeChange(stat.p10, p10Baseline),
-      p90: relativeChange(stat.p90, p90Baseline),
+      median: relativeChange(stat.median, baseline.median),
+      p10: relativeChange(stat.p10, baseline.p10),
+      p90: relativeChange(stat.p90, baseline.p90),
     };
   });
 }
@@ -166,11 +189,11 @@ export function makeRecognitionTimeChartOption(
   metric: RecognitionTimeMetric = "duration",
   valueMode: RecognitionTimeValueMode = "absolute",
   visibleSeries: readonly RecognitionSeriesKey[] = DEFAULT_RECOGNITION_VISIBLE_SERIES,
-  resetNewRangeAtFirstPoint = false,
+  relativeBaselineMode: RecognitionRelativeBaselineMode = "previous-range-end",
 ): EChartsOption {
   const metricData = metric === "speed" ? makeRecognitionSpeedData(data) : data;
   const displayedData = valueMode === "relative"
-    ? makeRelativeRecognitionTimeData(metricData, resetNewRangeAtFirstPoint)
+    ? makeRelativeRecognitionTimeData(metricData, relativeBaselineMode)
     : metricData;
   const visibleSeriesSet = new Set(visibleSeries);
   const dataZoomPreviewOption = RECOGNITION_SERIES_OPTIONS.find((option) => visibleSeriesSet.has(option.key));
@@ -407,7 +430,7 @@ function RecognitionTrendChart({
   onSelectAllSeries,
   onSelectOnlySeries,
   onToggleSeries,
-  resetNewRangeAtFirstPoint,
+  relativeBaselineMode,
   valueMode,
   visibleSeries,
 }: {
@@ -416,7 +439,7 @@ function RecognitionTrendChart({
   onSelectAllSeries: () => void;
   onSelectOnlySeries: (seriesKey: RecognitionSeriesKey) => void;
   onToggleSeries: (seriesKey: RecognitionSeriesKey) => void;
-  resetNewRangeAtFirstPoint: boolean;
+  relativeBaselineMode: RecognitionRelativeBaselineMode;
   valueMode: RecognitionTimeValueMode;
   visibleSeries: readonly RecognitionSeriesKey[];
 }): JSX.Element {
@@ -454,10 +477,10 @@ function RecognitionTrendChart({
 
   useEffect(() => {
     chartRef.current?.setOption(
-      makeRecognitionTimeChartOption(data, metric, valueMode, visibleSeries, resetNewRangeAtFirstPoint),
+      makeRecognitionTimeChartOption(data, metric, valueMode, visibleSeries, relativeBaselineMode),
       true,
     );
-  }, [data, metric, resetNewRangeAtFirstPoint, valueMode, visibleSeries]);
+  }, [data, metric, relativeBaselineMode, valueMode, visibleSeries]);
 
   return (
     <div className="recognition-time-chart-shell">
@@ -513,9 +536,9 @@ export function RecognitionTrendCard({
   onSelectAllSeries,
   onSelectOnlySeries,
   onToggleSeries,
-  onResetNewRangeAtFirstPointChange,
+  onRelativeBaselineModeChange,
   onValueModeChange,
-  resetNewRangeAtFirstPoint,
+  relativeBaselineMode,
   valueMode,
   visibleSeries,
 }: {
@@ -528,9 +551,9 @@ export function RecognitionTrendCard({
   onSelectAllSeries: () => void;
   onSelectOnlySeries: (seriesKey: RecognitionSeriesKey) => void;
   onToggleSeries: (seriesKey: RecognitionSeriesKey) => void;
-  onResetNewRangeAtFirstPointChange: (enabled: boolean) => void;
+  onRelativeBaselineModeChange: (mode: RecognitionRelativeBaselineMode) => void;
   onValueModeChange: (valueMode: RecognitionTimeValueMode) => void;
-  resetNewRangeAtFirstPoint: boolean;
+  relativeBaselineMode: RecognitionRelativeBaselineMode;
   valueMode: RecognitionTimeValueMode;
   visibleSeries: readonly RecognitionSeriesKey[];
 }): JSX.Element {
@@ -585,7 +608,7 @@ export function RecognitionTrendCard({
               onSelectAllSeries={onSelectAllSeries}
               onSelectOnlySeries={onSelectOnlySeries}
               onToggleSeries={onToggleSeries}
-              resetNewRangeAtFirstPoint={resetNewRangeAtFirstPoint}
+              relativeBaselineMode={relativeBaselineMode}
               valueMode={valueMode}
               visibleSeries={visibleSeries}
             />
@@ -593,25 +616,20 @@ export function RecognitionTrendCard({
               {valueMode === "relative" ? (
                 <>
                   {hasVisibleExpansionBaseline ? (
-                    <span aria-label="新范围零点" className="recognition-relative-baseline-control" role="group">
-                      新范围 0% 参照
+                    <span aria-label="新段零点参照" className="recognition-relative-baseline-control" role="group">
+                      新段 0% 参照
                       <span className="recognition-relative-baseline-options">
-                        <button
-                          aria-pressed={!resetNewRangeAtFirstPoint}
-                          className={!resetNewRangeAtFirstPoint ? "active" : ""}
-                          onClick={() => onResetNewRangeAtFirstPointChange(false)}
-                          type="button"
-                        >
-                          扩展前末点
-                        </button>
-                        <button
-                          aria-pressed={resetNewRangeAtFirstPoint}
-                          className={resetNewRangeAtFirstPoint ? "active" : ""}
-                          onClick={() => onResetNewRangeAtFirstPointChange(true)}
-                          type="button"
-                        >
-                          自身首点
-                        </button>
+                        {RECOGNITION_RELATIVE_BASELINE_OPTIONS.map((option) => (
+                          <button
+                            aria-pressed={relativeBaselineMode === option.value}
+                            className={relativeBaselineMode === option.value ? "active" : ""}
+                            key={option.value}
+                            onClick={() => onRelativeBaselineModeChange(option.value)}
+                            type="button"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
                       </span>
                       ；
                     </span>

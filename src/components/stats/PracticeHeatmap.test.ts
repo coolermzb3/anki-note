@@ -11,9 +11,10 @@ describe("practice heatmap", () => {
     ];
     const today = new Date(2026, 6, 15, 12);
 
-    expect(averageDailyPracticeMs(dailyStats, "1", today)).toBe(120_000);
-    expect(averageDailyPracticeMs(dailyStats, "7", today)).toBe(90_000);
-    expect(averageDailyPracticeMs(dailyStats, "30", today)).toBe(90_000);
+    expect(averageDailyPracticeMs(dailyStats, 1, today)).toBe(120_000);
+    expect(averageDailyPracticeMs(dailyStats, 7, today)).toBe(90_000);
+    expect(averageDailyPracticeMs(dailyStats, 14, today)).toBe(90_000);
+    expect(averageDailyPracticeMs(dailyStats, 30, today)).toBe(90_000);
     expect(averageDailyPracticeMs(dailyStats, "all", today)).toBe(80_000);
   });
 });

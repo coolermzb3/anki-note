@@ -1,45 +1,45 @@
 import {
+  RECOGNITION_RELATIVE_BASELINE_MODES,
   RECOGNITION_SERIES_KEYS,
   RECOGNITION_TIME_GROUPINGS,
   RECOGNITION_TIME_METRICS,
   RECOGNITION_TIME_VALUE_MODES,
+  type RecognitionRelativeBaselineMode,
   type RecognitionSeriesKey,
   type RecognitionTimeGrouping,
   type RecognitionTimeMetric,
   type RecognitionTimeValueMode,
 } from "./recognitionTrend";
-import { STATS_RANGES, type StatsRange } from "./statsRange";
+import { parseStatsRange, parseStatsRangeDays, type StatsRange } from "./statsRange";
 
 export const STATS_CAROUSEL_CARD_IDS = ["recognition-time", "session-progress", "note-range"] as const;
 export type StatsCarouselCardId = (typeof STATS_CAROUSEL_CARD_IDS)[number];
 
 export interface StatsUiPreferences {
   carouselCardId: StatsCarouselCardId;
+  customRangeDays: number;
   hiddenRecognitionSeries: RecognitionSeriesKey[];
   range: StatsRange;
   recognitionTimeGrouping: RecognitionTimeGrouping;
   recognitionTimeMetric: RecognitionTimeMetric;
-  recognitionTimeResetNewRangeAtFirstPoint: boolean;
+  recognitionTimeRelativeBaselineMode: RecognitionRelativeBaselineMode;
   recognitionTimeValueMode: RecognitionTimeValueMode;
 }
 
 export const STATS_UI_PREFERENCES_KEY = "anki-note.statsUiPreferences";
 export const DEFAULT_STATS_UI_PREFERENCES: StatsUiPreferences = {
   carouselCardId: STATS_CAROUSEL_CARD_IDS[1],
+  customRangeDays: 14,
   hiddenRecognitionSeries: [],
-  range: "30",
+  range: 30,
   recognitionTimeGrouping: "practice-session",
   recognitionTimeMetric: "duration",
-  recognitionTimeResetNewRangeAtFirstPoint: false,
+  recognitionTimeRelativeBaselineMode: "previous-range-end",
   recognitionTimeValueMode: "absolute",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStatsRange(value: unknown): value is StatsRange {
-  return typeof value === "string" && STATS_RANGES.includes(value as StatsRange);
 }
 
 function isRecognitionTimeGrouping(value: unknown): value is RecognitionTimeGrouping {
@@ -48,6 +48,11 @@ function isRecognitionTimeGrouping(value: unknown): value is RecognitionTimeGrou
 
 function isRecognitionTimeMetric(value: unknown): value is RecognitionTimeMetric {
   return typeof value === "string" && RECOGNITION_TIME_METRICS.includes(value as RecognitionTimeMetric);
+}
+
+function isRecognitionRelativeBaselineMode(value: unknown): value is RecognitionRelativeBaselineMode {
+  return typeof value === "string" &&
+    RECOGNITION_RELATIVE_BASELINE_MODES.includes(value as RecognitionRelativeBaselineMode);
 }
 
 function isRecognitionTimeValueMode(value: unknown): value is RecognitionTimeValueMode {
@@ -77,20 +82,25 @@ export function parseStatsUiPreferences(value: unknown, fallback: StatsUiPrefere
 
   return {
     carouselCardId: isStatsCarouselCardId(value.carouselCardId) ? value.carouselCardId : fallback.carouselCardId,
+    customRangeDays: parseStatsRangeDays(value.customRangeDays) ?? fallback.customRangeDays,
     hiddenRecognitionSeries: parseHiddenRecognitionSeries(
       value.hiddenRecognitionSeries,
       fallback.hiddenRecognitionSeries,
     ),
-    range: isStatsRange(value.range) ? value.range : fallback.range,
+    range: parseStatsRange(value.range, fallback.range),
     recognitionTimeGrouping: isRecognitionTimeGrouping(value.recognitionTimeGrouping)
       ? value.recognitionTimeGrouping
       : fallback.recognitionTimeGrouping,
     recognitionTimeMetric: isRecognitionTimeMetric(value.recognitionTimeMetric)
       ? value.recognitionTimeMetric
       : fallback.recognitionTimeMetric,
-    recognitionTimeResetNewRangeAtFirstPoint: typeof value.recognitionTimeResetNewRangeAtFirstPoint === "boolean"
-      ? value.recognitionTimeResetNewRangeAtFirstPoint
-      : fallback.recognitionTimeResetNewRangeAtFirstPoint,
+    recognitionTimeRelativeBaselineMode: isRecognitionRelativeBaselineMode(value.recognitionTimeRelativeBaselineMode)
+      ? value.recognitionTimeRelativeBaselineMode
+      : typeof value.recognitionTimeResetNewRangeAtFirstPoint === "boolean"
+        ? value.recognitionTimeResetNewRangeAtFirstPoint
+          ? "new-range-start"
+          : "previous-range-end"
+        : fallback.recognitionTimeRelativeBaselineMode,
     recognitionTimeValueMode: isRecognitionTimeValueMode(value.recognitionTimeValueMode)
       ? value.recognitionTimeValueMode
       : fallback.recognitionTimeValueMode,
