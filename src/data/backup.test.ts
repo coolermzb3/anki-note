@@ -14,6 +14,7 @@ import type {
   StaffRecallRunRecordV1,
 } from "../domain/types";
 import { backupText } from "../domain/backupText";
+import { DEFAULT_VOCAL_PITCH_CONFIG, type VocalAudioMaterial, type VocalAudioSource } from "../domain/vocalPitch";
 import { db, makeDefaultSettings } from "./db";
 import { refreshBackupConflictDetails, syncBackupBeforeActivity, writeBackupIfSafe, writeBackupNow, writeBackupSnapshot } from "./backup";
 
@@ -256,6 +257,23 @@ async function seedBackupDirectory(
   await writeBackupSnapshot(directory.handle(), buildBackupSnapshot(settings, sessions, reviews, backupAt));
 }
 
+function makeVocalAudioMaterial(id: string, source: VocalAudioSource): VocalAudioMaterial {
+  return {
+    audioBlob: new Blob(),
+    config: DEFAULT_VOCAL_PITCH_CONFIG,
+    contentDigest: `digest-${id}`,
+    createdAt: "2026-07-04T12:00:00.000+08:00",
+    durationSeconds: 1,
+    id,
+    mimeType: "audio/webm",
+    name: id,
+    schemaVersion: 1,
+    size: 0,
+    source,
+    updatedAt: "2026-07-04T12:00:00.000+08:00",
+  };
+}
+
 async function rememberDirectory(directory: MemoryDirectoryHandle): Promise<void> {
   await db.backupStates.put({
     id: "default",
@@ -303,6 +321,24 @@ describe("file backup side effects", () => {
     expect(state?.lastSeenBackupDataSetId).toBe(settings.dataSetId);
     expect(state?.lastSeenBackupDayFileDigests).toEqual(manifest.dayFileDigests);
     expect(Object.keys(state?.lastSeenBackupDayFileMetadata ?? {})).toEqual(["2026-07-04"]);
+  });
+
+  it("does not overwrite an audio backup index changed outside the browser", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData();
+    await rememberDirectory(directory);
+    await writeBackupNow();
+
+    const audioDirectory = directory.child("audio");
+    audioDirectory.writeText("index.json", `${audioDirectory.readText("index.json")}\n`);
+
+    await writeBackupIfSafe();
+
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      dataConflictBeforeBackup: true,
+      syncRequiredBeforeBackup: true,
+    });
+    expect(audioDirectory.readText("index.json")).toMatch(/\n$/);
   });
 
   it("imports backup data before practice when the browser has no practice data", async () => {
@@ -864,6 +900,27 @@ describe("file backup side effects", () => {
     const directory = new MemoryDirectoryHandle("backup");
     await seedBrowserData();
     await seedBackupDirectory(directory);
+    await db.vocalAudioMaterials.bulkPut([
+      makeVocalAudioMaterial("browser-recording-1", "recording"),
+      makeVocalAudioMaterial("browser-recording-2", "recording"),
+      makeVocalAudioMaterial("browser-upload", "upload"),
+    ]);
+    const backupMaterials = [
+      makeVocalAudioMaterial("backup-recording", "recording"),
+      makeVocalAudioMaterial("backup-upload", "upload"),
+    ];
+    const audioDirectory = (await directory.getDirectoryHandle("audio", { create: true })) as unknown as MemoryDirectoryHandle;
+    audioDirectory.writeText(
+      "index.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: "2026-07-05T12:00:00.000+08:00",
+        materials: backupMaterials.map(({ analysis: _analysis, audioBlob: _audioBlob, schemaVersion: _schemaVersion, ...material }) => ({
+          ...material,
+          audioFileName: `${material.id}.webm`,
+        })),
+      }),
+    );
     await db.backupStates.put({
       id: "default",
       schemaVersion: 1,
@@ -881,11 +938,13 @@ describe("file backup side effects", () => {
       conflictBackupRecordCount: 1,
       conflictBackupReviewCount: 1,
       conflictBackupStaffRecallRunCount: 0,
+      conflictBackupVocalAudioCounts: { materialCount: 2, recordingCount: 1, uploadCount: 1 },
       conflictBrowserFirstDataAt: "2026-07-04T10:00:00.000+08:00",
       conflictBrowserLastDataAt: "2026-07-04T10:00:02.000+08:00",
       conflictBrowserRecordCount: 1,
       conflictBrowserReviewCount: 1,
       conflictBrowserStaffRecallRunCount: 0,
+      conflictBrowserVocalAudioCounts: { materialCount: 3, recordingCount: 2, uploadCount: 1 },
       dataConflictBeforeBackup: true,
       lastError: backupText.messages.dataConflictBeforeBackup,
       syncRequiredBeforeBackup: true,

@@ -1,4 +1,4 @@
-import { BarChart3, BellOff, BookOpen, Download, Dumbbell, FolderOpen, Settings, Upload, X } from "lucide-react";
+import { AudioLines, BarChart3, BellOff, BookOpen, Download, Dumbbell, FolderOpen, Settings, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { preloadPianoSamples, setPianoVolume } from "./audio/piano";
 import {
@@ -27,6 +27,7 @@ import {
 import { SettingsView } from "./components/SettingsView";
 import { StatsView } from "./components/stats/StatsView";
 import { StudyView, type StaffRecallStartPreflightResult } from "./components/StudyView";
+import { VocalPitchView } from "./components/vocal-pitch/VocalPitchView";
 import { useBlurButtonAfterPointerClick } from "./components/useBlurButtonAfterPointerClick";
 import { useMidiInput } from "./midi/useMidiInput";
 
@@ -80,7 +81,9 @@ function readInitialView(): View {
 
   try {
     const storedView = window.sessionStorage.getItem(RELOAD_VIEW_SESSION_KEY);
-    return storedView === "stats" || storedView === "study" || storedView === "settings" ? storedView : "practice";
+    return storedView === "stats" || storedView === "study" || storedView === "settings" || storedView === "vocal"
+      ? storedView
+      : "practice";
   } catch {
     return "practice";
   }
@@ -104,7 +107,9 @@ function backupConflictDetailsMissing(backupState: BackupState): boolean {
     backupState.conflictBrowserReviewCount === undefined ||
     backupState.conflictBackupReviewCount === undefined ||
     backupState.conflictBrowserStaffRecallRunCount === undefined ||
-    backupState.conflictBackupStaffRecallRunCount === undefined
+    backupState.conflictBackupStaffRecallRunCount === undefined ||
+    backupState.conflictBrowserVocalAudioCounts === undefined ||
+    backupState.conflictBackupVocalAudioCounts === undefined
   );
 }
 
@@ -142,7 +147,9 @@ export function App(): JSX.Element {
   const [backupToastMessage, setBackupToastMessage] = useState<{ detail: string; title: string } | null>(null);
   const [backupReminderVisible, setBackupReminderVisible] = useState(false);
   const [practiceExitRequest, setPracticeExitRequest] = useState<PracticeNavigationExitRequest | null>(null);
+  const [vocalExitRequest, setVocalExitRequest] = useState<PracticeNavigationExitRequest | null>(null);
   const practiceExitRequestIdRef = useRef(0);
+  const vocalExitRequestIdRef = useRef(0);
   const backupToastMessageTimerRef = useRef<number | null>(null);
   const backupCheckInFlightRef = useRef<Promise<BackupCheckResult> | null>(null);
 
@@ -233,13 +240,23 @@ export function App(): JSX.Element {
         }
         return;
       }
+      if (view === "vocal" && nextView !== view) {
+        vocalExitRequestIdRef.current += 1;
+        setVocalExitRequest({ id: vocalExitRequestIdRef.current, targetView: nextView });
+        return;
+      }
       setView(nextView);
     },
-    [practiceExitRequest, practiceRunning, view],
+    [practiceExitRequest, practiceRunning, view, vocalExitRequest],
   );
 
   const handleNavigationExit = useCallback((targetView: PracticeNavigationExitTarget): void => {
     setPracticeExitRequest(null);
+    setView(targetView);
+  }, []);
+
+  const handleVocalNavigationExit = useCallback((targetView: PracticeNavigationExitTarget): void => {
+    setVocalExitRequest(null);
     setView(targetView);
   }, []);
 
@@ -307,6 +324,8 @@ export function App(): JSX.Element {
     data?.backupState.conflictBackupRecordCount,
     data?.backupState.conflictBrowserStaffRecallRunCount,
     data?.backupState.conflictBackupStaffRecallRunCount,
+    data?.backupState.conflictBrowserVocalAudioCounts,
+    data?.backupState.conflictBackupVocalAudioCounts,
     refreshBackupState,
   ]);
 
@@ -528,14 +547,18 @@ export function App(): JSX.Element {
           <BarChart3 size={18} />
           统计
         </button>
+        <button className={view === "vocal" ? "active" : ""} onClick={() => selectView("vocal")}>
+          <AudioLines size={18} />
+          清唱
+        </button>
         <button className={view === "settings" ? "active" : ""} onClick={() => selectView("settings")}>
           <Settings size={18} />
           设置
         </button>
       </nav>
 
-      <main className={showBackupReminder && !practiceRunning ? "has-backup-reminder" : undefined}>
-        {showBackupReminder && !practiceRunning ? (
+      <main className={showBackupReminder && !practiceRunning && view !== "vocal" ? "has-backup-reminder" : undefined}>
+        {showBackupReminder && !practiceRunning && view !== "vocal" ? (
           <div className="backup-reminder" role="status">
             <div>
               <strong>
@@ -653,6 +676,14 @@ export function App(): JSX.Element {
             midi={midi}
             onDataChanged={refresh}
             onSettingsSaved={saveSettings}
+          />
+        ) : null}
+        {view === "vocal" ? (
+          <VocalPitchView
+            backupDirectory={data.backupState.directoryHandle}
+            navigationExitRequest={vocalExitRequest}
+            onBackupStateChanged={refreshBackupState}
+            onNavigationExit={handleVocalNavigationExit}
           />
         ) : null}
       </main>

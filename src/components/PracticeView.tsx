@@ -113,7 +113,7 @@ interface PracticeViewProps {
   onRunningChange: (running: boolean) => void;
 }
 
-export type PracticeNavigationExitTarget = "practice" | "stats" | "settings" | "study";
+export type PracticeNavigationExitTarget = "practice" | "stats" | "settings" | "study" | "vocal";
 
 export interface PracticeStartPreflightResult {
   proceed: boolean;

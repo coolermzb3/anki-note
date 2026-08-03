@@ -1,3 +1,5 @@
+import type { VocalAudioCounts } from "./vocalPitch";
+
 export type NoteName = "C" | "D" | "E" | "F" | "G" | "A" | "B";
 export type PianoKeyName = NoteName | "C#" | "D#" | "F#" | "G#" | "A#";
 export type Octave = 1 | 2 | 3 | 4 | 5 | 6;
@@ -244,14 +246,18 @@ export interface BackupState {
   conflictBrowserLastDataAt?: string;
   conflictBrowserRecordCount?: number;
   conflictBrowserStaffRecallRunCount?: number;
+  conflictBrowserVocalAudioCounts?: VocalAudioCounts;
   conflictBackupFirstDataAt?: string;
   conflictBackupLastDataAt?: string;
   conflictBackupRecordCount?: number;
   conflictBackupStaffRecallRunCount?: number;
+  conflictBackupVocalAudioCounts?: VocalAudioCounts;
   lastSeenBackupVersion?: string;
   lastSeenBackupDataSetId?: string;
   lastSeenBackupDayFileDigests?: Record<string, string>;
   lastSeenBackupDayFileMetadata?: Record<string, BackupDayFileMetadata>;
+  lastSeenVocalAudioLibraryDigest?: string;
+  lastSeenVocalAudioFileMetadata?: Record<string, BackupDayFileMetadata>;
   backupDataModifiedAt?: string;
   lastBackupAt?: string;
   lastBackupReviewId?: string;
@@ -275,6 +281,7 @@ export interface BackupManifest {
   lastReviewId?: string;
   lastStaffRecallRunId?: string;
   dayFileDigests?: Record<string, string>;
+  vocalAudioLibraryDigest?: string;
   dates: string[];
 }
 

@@ -14,6 +14,7 @@ import type {
   ReviewRecord,
   StaffRecallRunRecord,
 } from "../domain/types";
+import type { VocalAudioCounts, VocalAudioMaterial } from "../domain/vocalPitch";
 import {
   applyBackupDataChanges,
   db,
@@ -26,6 +27,12 @@ import {
   resolveDrillNoteNames,
   resolveQueueStrategy,
 } from "./db";
+import {
+  getVocalAudioLibraryDigest,
+  inspectVocalAudioBackup,
+  readVocalAudioLibrary,
+  syncVocalAudioLibrary,
+} from "./vocalAudioBackup";
 
 type LegacyBackupState = BackupState & { restoreRequiredBeforeBackup?: boolean; syncRequiredReason?: unknown };
 
@@ -39,11 +46,17 @@ interface BrowserData {
 interface BackupBrowserFacts {
   dataSetId: string;
   hasRecords: boolean;
+  hasPracticeRecords: boolean;
   latestReviewPresent: boolean;
   latestStaffRecallRunPresent: boolean;
+  vocalAudioBackupDigest: string;
+  vocalAudioBackupFilesValid: boolean;
+  hasVocalAudioMaterials: boolean;
+  vocalAudioLibraryDigest: string;
 }
 
 interface BackupStatusInspection {
+  backupVocalAudioCounts: VocalAudioCounts;
   data: BrowserData;
   browserSummary: DataSummary;
   backupSummary?: DataSummary;
@@ -88,9 +101,11 @@ interface DataSummary {
   recordCount: number;
   reviewCount: number;
   staffRecallRunCount: number;
+  vocalAudioCounts: VocalAudioCounts;
 }
 
 interface WriteBackupSnapshotOptions {
+  deferManifestWrite?: boolean;
   reuseDayFilesFrom?: BackupManifest;
 }
 
@@ -115,7 +130,9 @@ function conflictDetailsMissing(state: BackupState): boolean {
     state.conflictBrowserReviewCount === undefined ||
     state.conflictBackupReviewCount === undefined ||
     state.conflictBrowserStaffRecallRunCount === undefined ||
-    state.conflictBackupStaffRecallRunCount === undefined
+    state.conflictBackupStaffRecallRunCount === undefined ||
+    state.conflictBrowserVocalAudioCounts === undefined ||
+    state.conflictBackupVocalAudioCounts === undefined
   );
 }
 
@@ -127,7 +144,19 @@ function getManifestDataModifiedAt(manifest: BackupManifest | null): string | un
   return manifest?.dataModifiedAt ?? manifest?.lastBackupAt;
 }
 
-function summarizeData(reviews: ReviewRecord[], staffRecallRuns: StaffRecallRunRecord[]): DataSummary {
+function summarizeVocalAudio(materials: readonly Pick<VocalAudioMaterial, "source">[]): VocalAudioCounts {
+  return {
+    materialCount: materials.length,
+    recordingCount: materials.filter((material) => material.source === "recording").length,
+    uploadCount: materials.filter((material) => material.source === "upload").length,
+  };
+}
+
+function summarizeData(
+  reviews: ReviewRecord[],
+  staffRecallRuns: StaffRecallRunRecord[],
+  vocalAudioCounts: VocalAudioCounts = { materialCount: 0, recordingCount: 0, uploadCount: 0 },
+): DataSummary {
   const times = [
     ...reviews.flatMap((review) => [review.startedAt, review.answeredAt, review.endedAt]),
     ...staffRecallRuns.flatMap((run) => [run.startedAt, run.endedAt]),
@@ -139,6 +168,7 @@ function summarizeData(reviews: ReviewRecord[], staffRecallRuns: StaffRecallRunR
     recordCount: reviews.length + staffRecallRuns.length,
     reviewCount: reviews.length,
     staffRecallRunCount: staffRecallRuns.length,
+    vocalAudioCounts,
   };
 }
 
@@ -169,26 +199,47 @@ function backupDataConsistent(
   manifest: BackupManifest | null,
   browser: BackupBrowserFacts,
 ): boolean {
+  const vocalAudioBackupUnchanged = state.lastSeenVocalAudioLibraryDigest
+    ? manifest?.vocalAudioLibraryDigest === state.lastSeenVocalAudioLibraryDigest &&
+      browser.vocalAudioBackupDigest === state.lastSeenVocalAudioLibraryDigest
+    : browser.vocalAudioLibraryDigest === browser.vocalAudioBackupDigest &&
+      (manifest?.vocalAudioLibraryDigest === undefined ||
+        manifest.vocalAudioLibraryDigest === browser.vocalAudioBackupDigest);
   return Boolean(
     manifest &&
       state.lastSeenBackupVersion &&
       manifest.dataSetId === browser.dataSetId &&
       getBackupManifestVersion(manifest) === state.lastSeenBackupVersion &&
-      browser.hasRecords === (manifest.dates.length > 0) &&
+      browser.hasPracticeRecords === (manifest.dates.length > 0) &&
       browser.latestReviewPresent &&
-      browser.latestStaffRecallRunPresent,
+      browser.latestStaffRecallRunPresent &&
+      vocalAudioBackupUnchanged &&
+      browser.vocalAudioBackupFilesValid,
   );
 }
 
-function getBackupBrowserFacts(data: BrowserData, manifest: BackupManifest | null): BackupBrowserFacts {
+function getBackupBrowserFacts(
+  data: BrowserData,
+  manifest: BackupManifest | null,
+  vocalAudioLibraryDigest: string,
+  vocalAudioBackupDigest: string,
+  vocalAudioBackupFilesValid: boolean,
+  hasVocalAudioMaterials: boolean,
+  hasLocallyChangedVocalAudio: boolean,
+): BackupBrowserFacts {
   const lastReviewId = manifest?.lastReviewId;
   const lastStaffRecallRunId = manifest?.lastStaffRecallRunId;
   return {
     dataSetId: data.settings.dataSetId,
-    hasRecords: hasBrowserData(data),
+    hasRecords: hasBrowserData(data) || hasVocalAudioMaterials || hasLocallyChangedVocalAudio,
+    hasPracticeRecords: hasBrowserData(data),
     latestReviewPresent: !lastReviewId || data.reviews.some((review) => review.id === lastReviewId),
     latestStaffRecallRunPresent:
       !lastStaffRecallRunId || data.staffRecallRuns.some((run) => run.id === lastStaffRecallRunId),
+    vocalAudioBackupDigest,
+    vocalAudioBackupFilesValid,
+    hasVocalAudioMaterials,
+    vocalAudioLibraryDigest,
   };
 }
 
@@ -404,22 +455,40 @@ async function readReadyBackupManifest(
     return undefined;
   }
 
-  const [settings, sessionCount, reviewCount, staffRecallRunCount, latestReview, latestStaffRecallRun] =
+  const [
+    settings,
+    sessionCount,
+    reviewCount,
+    staffRecallRunCount,
+    vocalAudioMaterialCount,
+    vocalAudioLibraryDigest,
+    vocalAudioBackup,
+    latestReview,
+    latestStaffRecallRun,
+  ] =
     await Promise.all([
       ensureSettings(),
       db.practiceSessions.count(),
       db.reviews.count(),
       db.staffRecallRuns.count(),
+      db.vocalAudioMaterials.count(),
+      getVocalAudioLibraryDigest(),
+      inspectVocalAudioBackup(directory, state.lastSeenVocalAudioFileMetadata, !state.lastSeenVocalAudioFileMetadata),
       manifest.lastReviewId ? db.reviews.get(manifest.lastReviewId) : undefined,
       manifest.lastStaffRecallRunId ? db.staffRecallRuns.get(manifest.lastStaffRecallRunId) : undefined,
     ]);
-  const hasBrowserRecords = sessionCount > 0 || reviewCount > 0 || staffRecallRunCount > 0;
+  const hasBrowserRecords = sessionCount > 0 || reviewCount > 0 || staffRecallRunCount > 0 || vocalAudioMaterialCount > 0;
   if (
     backupDataConsistent(state, manifest, {
       dataSetId: settings.dataSetId,
       hasRecords: hasBrowserRecords,
+      hasPracticeRecords: sessionCount > 0 || reviewCount > 0 || staffRecallRunCount > 0,
+      hasVocalAudioMaterials: vocalAudioMaterialCount > 0,
       latestReviewPresent: !manifest.lastReviewId || Boolean(latestReview),
       latestStaffRecallRunPresent: !manifest.lastStaffRecallRunId || Boolean(latestStaffRecallRun),
+      vocalAudioBackupDigest: vocalAudioBackup.digest,
+      vocalAudioBackupFilesValid: vocalAudioBackup.filesValid,
+      vocalAudioLibraryDigest,
     })
   ) {
     return manifest;
@@ -431,11 +500,26 @@ async function inspectBackupStatus(
   directory: FileSystemDirectoryHandle,
   state: BackupState,
 ): Promise<BackupStatusInspection> {
-  const [data, manifest] = await Promise.all([loadAllData(), readBackupManifestIfExists(directory)]);
+  const [data, manifest, vocalAudioMaterials, vocalAudioLibraryDigest, vocalAudioBackup] = await Promise.all([
+    loadAllData(),
+    readBackupManifestIfExists(directory),
+    db.vocalAudioMaterials.toArray(),
+    getVocalAudioLibraryDigest(),
+    inspectVocalAudioBackup(directory, state.lastSeenVocalAudioFileMetadata, !state.lastSeenVocalAudioFileMetadata),
+  ]);
   const browserModifiedAt = getBackupDataModifiedAt(data.settings, data.sessions, data.reviews, data.staffRecallRuns);
   const backupModifiedAt = getManifestDataModifiedAt(manifest);
-  const browserSummary = summarizeData(data.reviews, data.staffRecallRuns);
-  const browserFacts = getBackupBrowserFacts(data, manifest);
+  const browserSummary = summarizeData(data.reviews, data.staffRecallRuns, summarizeVocalAudio(vocalAudioMaterials));
+  const browserFacts = getBackupBrowserFacts(
+    data,
+    manifest,
+    vocalAudioLibraryDigest,
+    vocalAudioBackup.digest,
+    vocalAudioBackup.filesValid,
+    vocalAudioMaterials.length > 0,
+    state.lastSeenVocalAudioLibraryDigest !== undefined &&
+      state.lastSeenVocalAudioLibraryDigest !== vocalAudioLibraryDigest,
+  );
   const status = deriveBackupDataStatus({
     hasDirectoryHandle: true,
     hasBrowserData: browserFacts.hasRecords,
@@ -447,9 +531,19 @@ async function inspectBackupStatus(
       ? await readBackupSnapshotFromManifest(directory, manifest)
       : undefined;
   const backupSummary = backupSnapshot
-    ? summarizeData(backupSnapshot.reviews, backupSnapshot.staffRecallRuns)
+    ? summarizeData(backupSnapshot.reviews, backupSnapshot.staffRecallRuns, vocalAudioBackup.counts)
     : undefined;
-  return { data, browserSummary, backupSummary, backupModifiedAt, backupSnapshot, browserModifiedAt, manifest, status };
+  return {
+    backupVocalAudioCounts: vocalAudioBackup.counts,
+    data,
+    browserSummary,
+    backupSummary,
+    backupModifiedAt,
+    backupSnapshot,
+    browserModifiedAt,
+    manifest,
+    status,
+  };
 }
 
 function buildReadyBackupState(
@@ -457,6 +551,7 @@ function buildReadyBackupState(
   directory: FileSystemDirectoryHandle,
   manifest: BackupManifest | null,
   dayFileMetadata?: Record<string, BackupDayFileMetadata>,
+  vocalAudioFileMetadata?: Record<string, BackupDayFileMetadata>,
 ): BackupState {
   return {
     ...cleanBackupState(state),
@@ -478,14 +573,18 @@ function buildReadyBackupState(
     conflictBrowserLastDataAt: undefined,
     conflictBrowserRecordCount: undefined,
     conflictBrowserStaffRecallRunCount: undefined,
+    conflictBrowserVocalAudioCounts: undefined,
     conflictBackupFirstDataAt: undefined,
     conflictBackupLastDataAt: undefined,
     conflictBackupRecordCount: undefined,
     conflictBackupStaffRecallRunCount: undefined,
+    conflictBackupVocalAudioCounts: undefined,
     lastSeenBackupVersion: manifest ? getBackupManifestVersion(manifest) : undefined,
     lastSeenBackupDataSetId: manifest?.dataSetId,
     lastSeenBackupDayFileDigests: manifest?.dayFileDigests,
     lastSeenBackupDayFileMetadata: manifest ? dayFileMetadata : undefined,
+    lastSeenVocalAudioLibraryDigest: manifest?.vocalAudioLibraryDigest,
+    lastSeenVocalAudioFileMetadata: vocalAudioFileMetadata,
     backupDataModifiedAt: getManifestDataModifiedAt(manifest),
     lastBackupAt: manifest?.lastBackupAt,
     lastBackupReviewId: manifest?.lastReviewId,
@@ -498,10 +597,11 @@ async function saveReadyBackupState(
   directory: FileSystemDirectoryHandle,
   manifest: BackupManifest | null,
 ): Promise<BackupState> {
-  const dayFileMetadata = manifest
-    ? await readBackupDayFileMetadata(directory, manifest.dates)
-    : undefined;
-  const readyState = buildReadyBackupState(state, directory, manifest, dayFileMetadata);
+  const [dayFileMetadata, vocalAudioBackup] = await Promise.all([
+    manifest ? readBackupDayFileMetadata(directory, manifest.dates) : undefined,
+    inspectVocalAudioBackup(directory),
+  ]);
+  const readyState = buildReadyBackupState(state, directory, manifest, dayFileMetadata, vocalAudioBackup.fileMetadata);
   await db.backupStates.put(readyState);
   return readyState;
 }
@@ -516,7 +616,9 @@ async function saveDivergedBackupState(
     (inspection.manifest ? await readBackupSnapshotFromManifest(directory, inspection.manifest) : undefined);
   const backupSummary =
     inspection.backupSummary ??
-    (backupSnapshot ? summarizeData(backupSnapshot.reviews, backupSnapshot.staffRecallRuns) : undefined);
+    (backupSnapshot
+      ? summarizeData(backupSnapshot.reviews, backupSnapshot.staffRecallRuns, inspection.backupVocalAudioCounts)
+      : undefined);
   await db.backupStates.put({
     ...cleanBackupState(state),
     id: "default",
@@ -537,14 +639,22 @@ async function saveDivergedBackupState(
     conflictBrowserLastDataAt: inspection.browserSummary.lastDataAt,
     conflictBrowserRecordCount: inspection.browserSummary.recordCount,
     conflictBrowserStaffRecallRunCount: inspection.browserSummary.staffRecallRunCount,
+    conflictBrowserVocalAudioCounts: inspection.browserSummary.vocalAudioCounts,
     conflictBackupFirstDataAt: backupSummary?.firstDataAt,
     conflictBackupLastDataAt: backupSummary?.lastDataAt,
     conflictBackupRecordCount: backupSummary?.recordCount ?? 0,
     conflictBackupStaffRecallRunCount: backupSummary?.staffRecallRunCount ?? 0,
+    conflictBackupVocalAudioCounts: backupSummary?.vocalAudioCounts ?? {
+      materialCount: 0,
+      recordingCount: 0,
+      uploadCount: 0,
+    },
     lastSeenBackupVersion: undefined,
     lastSeenBackupDataSetId: undefined,
     lastSeenBackupDayFileDigests: undefined,
     lastSeenBackupDayFileMetadata: undefined,
+    lastSeenVocalAudioLibraryDigest: undefined,
+    lastSeenVocalAudioFileMetadata: undefined,
     lastBackupAt: inspection.manifest?.lastBackupAt,
     lastBackupReviewId: inspection.manifest?.lastReviewId,
     lastError: backupText.messages.dataConflictBeforeBackup,
@@ -558,8 +668,14 @@ async function writeBrowserSnapshotToDirectory(
   reuseDayFilesFrom?: BackupManifest,
 ): Promise<BackupSnapshot> {
   const snapshot = buildBackupSnapshot(data.settings, data.sessions, data.reviews, backupAt, data.staffRecallRuns);
-  const manifest = await writeBackupSnapshot(directory, snapshot, { reuseDayFilesFrom });
-  return { ...snapshot, manifest };
+  const manifest = await writeBackupSnapshot(directory, snapshot, { deferManifestWrite: true, reuseDayFilesFrom });
+  const vocalAudioStatus = await syncVocalAudioLibrary(directory);
+  if (vocalAudioStatus !== "backed-up") {
+    throw new Error("音频素材备份失败");
+  }
+  const completeManifest = { ...manifest, vocalAudioLibraryDigest: await getVocalAudioLibraryDigest() };
+  await writeJson(directory, "manifest.json", completeManifest);
+  return { ...snapshot, manifest: completeManifest };
 }
 
 async function writeBrowserSnapshotFromReadyBackup(
@@ -690,7 +806,14 @@ async function importDirectorySnapshot(
   existingSnapshot?: ImportedBackupSnapshot,
 ): Promise<BackupImportedData> {
   const snapshot = existingSnapshot ?? (await readBackupSnapshot(directory));
-  await replaceAllData(snapshot.settings, snapshot.sessions, snapshot.reviews, snapshot.staffRecallRuns);
+  const vocalAudioMaterials = await readVocalAudioLibrary(directory);
+  await replaceAllData(
+    snapshot.settings,
+    snapshot.sessions,
+    snapshot.reviews,
+    snapshot.staffRecallRuns,
+    vocalAudioMaterials,
+  );
   const backupState = await saveReadyBackupState(state, directory, snapshot.manifest);
   return {
     settings: snapshot.settings,
@@ -908,7 +1031,7 @@ export async function writeBrowserDataToBackupDirectory(): Promise<void> {
 export async function writeBackupSnapshot(
   directory: FileSystemDirectoryHandle,
   snapshot: BackupSnapshot,
-  { reuseDayFilesFrom }: WriteBackupSnapshotOptions = {},
+  { deferManifestWrite = false, reuseDayFilesFrom }: WriteBackupSnapshotOptions = {},
 ): Promise<BackupManifest> {
   const daysDirectory = await directory.getDirectoryHandle("days", { create: true });
   const { dayFileDigests, serializedDays } = await serializeBackupDays(snapshot.days);
@@ -925,7 +1048,9 @@ export async function writeBackupSnapshot(
     await writeText(daysDirectory, `${date}.json`, json);
   }
   const manifest = { ...snapshot.manifest, dayFileDigests };
-  await writeJson(directory, "manifest.json", manifest);
+  if (!deferManifestWrite) {
+    await writeJson(directory, "manifest.json", manifest);
+  }
   return manifest;
 }
 

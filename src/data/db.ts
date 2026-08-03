@@ -23,6 +23,7 @@ import type {
   StoredAppSettings,
   StaffNotationMode,
 } from "../domain/types";
+import type { VocalAudioMaterial } from "../domain/vocalPitch";
 
 export class AppDatabase extends Dexie {
   settings!: Table<StoredAppSettings, string>;
@@ -30,6 +31,7 @@ export class AppDatabase extends Dexie {
   reviews!: Table<ReviewRecord, string>;
   staffRecallRuns!: Table<StaffRecallRunRecord, string>;
   backupStates!: Table<BackupState, string>;
+  vocalAudioMaterials!: Table<VocalAudioMaterial, string>;
 
   constructor() {
     super("anki-note");
@@ -45,6 +47,14 @@ export class AppDatabase extends Dexie {
       reviews: "id, sessionId, targetNoteId, groupId, startedAt, answeredCorrectly, interrupted",
       staffRecallRuns: "id, answerSetKey, endedAt",
       backupStates: "id",
+    });
+    this.version(3).stores({
+      settings: "id",
+      practiceSessions: "id, startedAt, mode, endReason",
+      reviews: "id, sessionId, targetNoteId, groupId, startedAt, answeredCorrectly, interrupted",
+      staffRecallRuns: "id, answerSetKey, endedAt",
+      backupStates: "id",
+      vocalAudioMaterials: "id, createdAt, updatedAt, name",
     });
   }
 }
@@ -216,8 +226,9 @@ export async function replaceAllData(
   sessions: PracticeSessionRecord[],
   reviews: ReviewRecord[],
   staffRecallRuns: StaffRecallRunRecord[] = [],
+  vocalAudioMaterials?: VocalAudioMaterial[],
 ): Promise<void> {
-  await db.transaction("rw", db.settings, db.practiceSessions, db.reviews, db.staffRecallRuns, async () => {
+  await db.transaction("rw", db.settings, db.practiceSessions, db.reviews, db.staffRecallRuns, db.vocalAudioMaterials, async () => {
     await db.settings.clear();
     await db.practiceSessions.clear();
     await db.reviews.clear();
@@ -226,6 +237,10 @@ export async function replaceAllData(
     await db.practiceSessions.bulkPut(sessions);
     await db.reviews.bulkPut(reviews);
     await db.staffRecallRuns.bulkPut(staffRecallRuns);
+    if (vocalAudioMaterials) {
+      await db.vocalAudioMaterials.clear();
+      await db.vocalAudioMaterials.bulkPut(vocalAudioMaterials);
+    }
   });
 }
 
@@ -276,4 +291,27 @@ export async function recoverAbandonedSessions(): Promise<void> {
       endReason: "abandoned" as const,
     })),
   );
+}
+
+export async function listVocalAudioMaterials(): Promise<VocalAudioMaterial[]> {
+  return db.vocalAudioMaterials.orderBy("createdAt").reverse().toArray();
+}
+
+export async function getVocalAudioMaterial(id: string): Promise<VocalAudioMaterial | undefined> {
+  return db.vocalAudioMaterials.get(id);
+}
+
+export async function saveVocalAudioMaterial(material: VocalAudioMaterial): Promise<void> {
+  await db.vocalAudioMaterials.put(material);
+}
+
+export async function deleteVocalAudioMaterial(id: string): Promise<void> {
+  await db.vocalAudioMaterials.delete(id);
+}
+
+export async function replaceVocalAudioMaterials(materials: VocalAudioMaterial[]): Promise<void> {
+  await db.transaction("rw", db.vocalAudioMaterials, async () => {
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.bulkPut(materials);
+  });
 }

@@ -1,13 +1,15 @@
 import type { BackupState } from "./types";
+import type { VocalAudioCounts } from "./vocalPitch";
 
 export const backupText = {
   labels: {
     chooseDirectory: "选择目录",
     chooseEmptyDirectory: "选择空目录",
     close: "关闭",
-    conflictCount: "条数",
-    conflictEnd: "截止",
-    conflictStart: "起始",
+    conflictCount: "练习/默写",
+    conflictEnd: "练习截止",
+    conflictStart: "练习起始",
+    conflictVocalAudio: "清唱素材",
     importBackup: "导入备份",
     keepBackupData: "保留备份目录数据",
     keepBrowserData: "保留浏览器数据",
@@ -56,6 +58,7 @@ export interface BackupConflictDataSummary {
   firstDataAt: string;
   lastDataAt: string;
   recordCount: number;
+  vocalAudioCounts: VocalAudioCounts;
 }
 
 export interface BackupConflictDataSummaries {
@@ -80,17 +83,21 @@ type BackupConflictSummarySource = Pick<
   | "conflictBrowserLastDataAt"
   | "conflictBrowserRecordCount"
   | "conflictBrowserStaffRecallRunCount"
+  | "conflictBrowserVocalAudioCounts"
+  | "conflictBackupVocalAudioCounts"
 >;
 
 function formatBackupDataSummary(
   firstDataAt?: string,
   lastDataAt?: string,
   recordCount?: number,
+  vocalAudioCounts: VocalAudioCounts = { materialCount: 0, recordingCount: 0, uploadCount: 0 },
 ): BackupConflictDataSummary {
   return {
     firstDataAt: formatBackupTime(firstDataAt),
     lastDataAt: formatBackupTime(lastDataAt),
     recordCount: recordCount ?? 0,
+    vocalAudioCounts,
   };
 }
 
@@ -117,10 +124,12 @@ function backupDataCovers({
   lastDataAt,
   reviewCount,
   staffRecallRunCount,
+  vocalAudioCounts,
   otherFirstDataAt,
   otherLastDataAt,
   otherReviewCount,
   otherStaffRecallRunCount,
+  otherVocalAudioCounts,
 }: {
   firstDataAt?: string;
   lastDataAt?: string;
@@ -128,8 +137,10 @@ function backupDataCovers({
   otherLastDataAt?: string;
   otherReviewCount?: number;
   otherStaffRecallRunCount?: number;
+  otherVocalAudioCounts?: VocalAudioCounts;
   reviewCount?: number;
   staffRecallRunCount?: number;
+  vocalAudioCounts?: VocalAudioCounts;
 }): boolean {
   if (
     !firstDataAt ||
@@ -139,7 +150,9 @@ function backupDataCovers({
     reviewCount === undefined ||
     otherReviewCount === undefined ||
     staffRecallRunCount === undefined ||
-    otherStaffRecallRunCount === undefined
+    otherStaffRecallRunCount === undefined ||
+    vocalAudioCounts === undefined ||
+    otherVocalAudioCounts === undefined
   ) {
     return false;
   }
@@ -147,7 +160,10 @@ function backupDataCovers({
     compareBackupTime(firstDataAt, otherFirstDataAt) <= 0 &&
     compareBackupTime(lastDataAt, otherLastDataAt) >= 0 &&
     reviewCount >= otherReviewCount &&
-    staffRecallRunCount >= otherStaffRecallRunCount
+    staffRecallRunCount >= otherStaffRecallRunCount &&
+    vocalAudioCounts.materialCount >= otherVocalAudioCounts.materialCount &&
+    vocalAudioCounts.recordingCount >= otherVocalAudioCounts.recordingCount &&
+    vocalAudioCounts.uploadCount >= otherVocalAudioCounts.uploadCount
   );
 }
 
@@ -158,11 +174,13 @@ export function getBackupConflictDataSummaries(
     backupState.conflictBackupFirstDataAt ?? backupState.conflictBackupFirstReviewAt,
     backupState.conflictBackupLastDataAt ?? backupState.conflictBackupLastReviewAt,
     backupState.conflictBackupRecordCount ?? backupState.conflictBackupReviewCount,
+    backupState.conflictBackupVocalAudioCounts,
   );
   const browser = formatBackupDataSummary(
     backupState.conflictBrowserFirstDataAt ?? backupState.conflictBrowserFirstReviewAt,
     backupState.conflictBrowserLastDataAt ?? backupState.conflictBrowserLastReviewAt,
     backupState.conflictBrowserRecordCount ?? backupState.conflictBrowserReviewCount,
+    backupState.conflictBrowserVocalAudioCounts,
   );
   const backupFirstDataAt = backupState.conflictBackupFirstDataAt ?? backupState.conflictBackupFirstReviewAt;
   const backupLastDataAt = backupState.conflictBackupLastDataAt ?? backupState.conflictBackupLastReviewAt;
@@ -175,8 +193,10 @@ export function getBackupConflictDataSummaries(
     otherLastDataAt: browserLastDataAt,
     otherReviewCount: backupState.conflictBrowserReviewCount,
     otherStaffRecallRunCount: backupState.conflictBrowserStaffRecallRunCount,
+    otherVocalAudioCounts: backupState.conflictBrowserVocalAudioCounts,
     reviewCount: backupState.conflictBackupReviewCount,
     staffRecallRunCount: backupState.conflictBackupStaffRecallRunCount,
+    vocalAudioCounts: backupState.conflictBackupVocalAudioCounts,
   });
   const browserCoversBackup = backupDataCovers({
     firstDataAt: browserFirstDataAt,
@@ -185,8 +205,10 @@ export function getBackupConflictDataSummaries(
     otherLastDataAt: backupLastDataAt,
     otherReviewCount: backupState.conflictBackupReviewCount,
     otherStaffRecallRunCount: backupState.conflictBackupStaffRecallRunCount,
+    otherVocalAudioCounts: backupState.conflictBackupVocalAudioCounts,
     reviewCount: backupState.conflictBrowserReviewCount,
     staffRecallRunCount: backupState.conflictBrowserStaffRecallRunCount,
+    vocalAudioCounts: backupState.conflictBrowserVocalAudioCounts,
   });
   return {
     backup,

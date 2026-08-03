@@ -147,9 +147,8 @@ export async function playPianoNote(noteName: PianoKeyName, octave: Octave): Pro
   getFallbackSynth().triggerAttackRelease(note, "8n", undefined, pianoVolume);
 }
 
-export async function startPianoNote(noteName: PianoKeyName, octave: Octave): Promise<SustainedPianoNote> {
+async function startToneNote(note: string): Promise<SustainedPianoNote> {
   await unlockAudio();
-  const note = noteToToneName(noteName, octave);
   const sampledPiano = getLoadedSampler();
   let released = false;
 
@@ -157,9 +156,7 @@ export async function startPianoNote(noteName: PianoKeyName, octave: Octave): Pr
     sampledPiano.triggerAttack(note, undefined, pianoVolume);
     return {
       release: () => {
-        if (released) {
-          return;
-        }
+        if (released) return;
         released = true;
         sampledPiano.triggerRelease(note);
       },
@@ -170,13 +167,19 @@ export async function startPianoNote(noteName: PianoKeyName, octave: Octave): Pr
   synth.triggerAttack(note, undefined, pianoVolume);
   return {
     release: () => {
-      if (released) {
-        return;
-      }
+      if (released) return;
       released = true;
       synth.triggerRelease(note);
     },
   };
+}
+
+export async function startPianoMidi(midi: number): Promise<SustainedPianoNote> {
+  return startToneNote(Tone.Frequency(midi, "midi").toNote());
+}
+
+export async function startPianoNote(noteName: PianoKeyName, octave: Octave): Promise<SustainedPianoNote> {
+  return startToneNote(noteToToneName(noteName, octave));
 }
 
 export async function playTargetNote(note: TargetNote): Promise<void> {

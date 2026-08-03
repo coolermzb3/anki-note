@@ -12,6 +12,7 @@ export function BackupConflictActionContent({
   label,
   summary,
 }: BackupConflictActionContentProps): JSX.Element {
+  const { materialCount, recordingCount, uploadCount } = summary.vocalAudioCounts;
   return (
     <>
       <span className="backup-action-heading">
@@ -26,7 +27,10 @@ export function BackupConflictActionContent({
           {backupText.labels.conflictEnd}：{summary.lastDataAt}
         </span>
         <span>
-          {backupText.labels.conflictCount}：{summary.recordCount}
+          {backupText.labels.conflictCount}：{summary.recordCount} 条
+        </span>
+        <span>
+          {backupText.labels.conflictVocalAudio}：{materialCount} 个（录音 {recordingCount}，上传 {uploadCount}）
         </span>
       </span>
     </>
