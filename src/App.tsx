@@ -1,23 +1,24 @@
-import { AudioLines, BarChart3, BellOff, BookOpen, Download, Dumbbell, FolderOpen, Settings, Upload, X } from "lucide-react";
+import { AudioLines, BarChart3, BellOff, BookOpen, Dumbbell, FolderOpen, Settings, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { preloadPianoSamples, setPianoVolume } from "./audio/piano";
 import {
   type BackupPreflightResult,
   chooseBackupDirectory,
   refreshBackupConflictDetails,
-  restoreBackupFromDirectory,
+  resolveBackupConflict,
   supportsFileBackups,
   syncBackupBeforeActivity,
-  writeBrowserDataToBackupDirectory,
+  type BackupConflictResolution,
 } from "./data/backup";
 import { db, getBackupState, loadAllData, recoverAbandonedSessions } from "./data/db";
 import { IndexedDbMaintenancePanel } from "./debug/IndexedDbMaintenancePanel";
 import { installIndexedDbMaintenanceDebug } from "./debug/indexedDbMaintenance";
-import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "./domain/backupText";
+import { shouldRunBackupEntryPreflight } from "./domain/backupSync";
+import { backupText, formatBackupConflictDetail } from "./domain/backupText";
 import type { AppSettings, BackupState, PracticeSessionRecord, ReviewRecord, StaffRecallRunRecord } from "./domain/types";
 import { MidiLatencyDiagnosticsPanel } from "./diagnostics/MidiLatencyDiagnosticsPanel";
 import { MIDI_LATENCY_DIAGNOSTICS_ENABLED } from "./diagnostics/midiLatencyDiagnostics";
-import { BackupConflictActionContent } from "./components/BackupConflictActionContent";
+import { BackupConflictResolver } from "./components/BackupConflictResolver";
 import {
   PracticeView,
   type PracticeNavigationExitRequest,
@@ -27,7 +28,10 @@ import {
 import { SettingsView } from "./components/SettingsView";
 import { StatsView } from "./components/stats/StatsView";
 import { StudyView, type StaffRecallStartPreflightResult } from "./components/StudyView";
-import { VocalPitchView } from "./components/vocal-pitch/VocalPitchView";
+import {
+  VocalPitchView,
+  type VocalLibraryMutationPreflightResult,
+} from "./components/vocal-pitch/VocalPitchView";
 import { useBlurButtonAfterPointerClick } from "./components/useBlurButtonAfterPointerClick";
 import { useMidiInput } from "./midi/useMidiInput";
 
@@ -55,7 +59,7 @@ type BackupReminderState =
   | { kind: "none"; showReminder: false }
   | { kind: "needs-directory"; showReminder: boolean }
   | { kind: "data-conflict"; showReminder: true };
-type BackupReminderAction = "choose-directory" | "keep-backup-data" | "write-browser-data";
+type BackupReminderAction = "choose-directory";
 
 function todayKey(): string {
   const now = new Date();
@@ -104,6 +108,7 @@ function backupSyncRequired(backupState: BackupState): boolean {
 
 function backupConflictDetailsMissing(backupState: BackupState): boolean {
   return (
+    !backupState.conflictRevision ||
     backupState.conflictBrowserReviewCount === undefined ||
     backupState.conflictBackupReviewCount === undefined ||
     backupState.conflictBrowserStaffRecallRunCount === undefined ||
@@ -411,11 +416,17 @@ export function App(): JSX.Element {
     return { proceed: checkResult.proceed };
   }, [runBackupCheck]);
 
+  const preflightBeforeVocalLibraryChange = useCallback(async (): Promise<VocalLibraryMutationPreflightResult> => {
+    const checkResult = await runBackupCheck({ requestPermission: true });
+    if (!checkResult.proceed) return "blocked";
+    return checkResult.result === "synced-up" ? "backup-updated" : "proceed";
+  }, [runBackupCheck]);
+
   useEffect(() => {
+    const backupEntryView = view === "practice" || view === "vocal" ? view : null;
     if (
       !data ||
-      view !== "practice" ||
-      practiceRunning ||
+      !shouldRunBackupEntryPreflight(backupEntryView, practiceRunning) ||
       !hasBackupDirectory
     ) {
       return;
@@ -455,30 +466,34 @@ export function App(): JSX.Element {
         return;
       }
 
-      if (reminderState.kind === "data-conflict" && action === "keep-backup-data") {
-        if (!data.backupState.directoryHandle) {
-          return;
-        }
-        await restoreBackupFromDirectory(data.backupState.directoryHandle);
-        await refresh();
-        showBackupReminderMessage(backupText.titles.importSuccess, backupText.messages.importSuccessDetail, true);
-        return;
-      }
-
-      if (reminderState.kind === "data-conflict" && action === "write-browser-data") {
-        if (!window.confirm(backupText.messages.backupDirectoryWillBeReplaced)) {
-          return;
-        }
-        await writeBrowserDataToBackupDirectory();
-        await refresh();
-        showBackupReminderMessage(backupText.titles.backupWritten, backupText.messages.browserDataWrittenToBackup, true);
-      }
     } catch (error) {
       if (isUserAbort(error)) {
         setBackupReminderMessage(null);
         setBackupReminderVisible(reminderState.showReminder);
         return;
       }
+      showBackupReminderMessage(
+        error instanceof Error ? error.message : String(error),
+        backupText.messages.backupPermissionOrDirectoryHint,
+        false,
+      );
+    } finally {
+      setBackupReminderBusy(false);
+    }
+  }, [backupReminderBusy, data, refresh, showBackupReminderMessage]);
+
+  const resolveBackupReminderConflict = useCallback(async (resolution: BackupConflictResolution): Promise<void> => {
+    if (!data || backupReminderBusy) {
+      return;
+    }
+    setBackupReminderBusy(true);
+    setBackupReminderMessage(null);
+    try {
+      await resolveBackupConflict(resolution);
+      await refresh();
+      showBackupReminderMessage(backupText.titles.conflictResolved, backupText.messages.conflictResolvedDetail, true);
+    } catch (error) {
+      await refresh();
       showBackupReminderMessage(
         error instanceof Error ? error.message : String(error),
         backupText.messages.backupPermissionOrDirectoryHint,
@@ -522,10 +537,15 @@ export function App(): JSX.Element {
 
   const backupReminderState = getBackupReminderState(data);
   const showBackupReminder = (backupReminderVisible && backupReminderState.showReminder) || backupReminderMessage !== null;
-  const hasBrowserData = data.sessions.length > 0 || data.reviews.length > 0 || data.staffRecallRuns.length > 0;
-  const backupConflictSummaries =
-    backupReminderState.kind === "data-conflict" ? getBackupConflictDataSummaries(data.backupState) : null;
-
+  const backupReminderTitle =
+    backupReminderMessage?.title ??
+    (backupReminderState.kind === "data-conflict"
+      ? backupText.titles.dataConflict
+      : backupText.titles.chooseDirectorySuggestion);
+  const displayBackupReminder =
+    showBackupReminder &&
+    !practiceRunning &&
+    (view !== "vocal" || backupReminderState.kind === "data-conflict");
   return (
     <div className="app-shell">
       {backupToastMessage ? (
@@ -557,15 +577,16 @@ export function App(): JSX.Element {
         </button>
       </nav>
 
-      <main className={showBackupReminder && !practiceRunning && view !== "vocal" ? "has-backup-reminder" : undefined}>
-        {showBackupReminder && !practiceRunning && view !== "vocal" ? (
-          <div className="backup-reminder" role="status">
+      <main className={displayBackupReminder && view !== "vocal" ? "has-backup-reminder" : undefined}>
+        {displayBackupReminder ? (
+          <div
+            aria-label={backupReminderTitle}
+            className={`backup-reminder${view === "vocal" ? " vocal-backup-reminder" : ""}`}
+            role="region"
+          >
             <div>
               <strong>
-                {backupReminderMessage?.title ??
-                  (backupReminderState.kind === "data-conflict"
-                    ? backupText.titles.dataConflict
-                    : backupText.titles.chooseDirectorySuggestion)}
+                {backupReminderTitle}
               </strong>
               <span>
                 {backupReminderMessage
@@ -583,41 +604,19 @@ export function App(): JSX.Element {
                 </button>
               ) : null}
               {backupReminderState.kind === "data-conflict" ? (
-                <button
-                  className={`backup-decision-button${backupConflictSummaries?.highlighted === "backup" ? " primary" : ""}`}
+                <BackupConflictResolver
+                  backupState={data.backupState}
                   disabled={backupReminderBusy}
-                  onClick={() => void runBackupReminderAction("keep-backup-data")}
-                >
-                  <BackupConflictActionContent
-                    icon={<Upload size={18} />}
-                    label={backupText.labels.keepBackupData}
-                    summary={backupConflictSummaries!.backup}
-                  />
-                </button>
+                  onResolve={resolveBackupReminderConflict}
+                />
               ) : null}
               {backupReminderState.kind === "data-conflict" ? (
                 <button
-                  className={`backup-decision-button${backupConflictSummaries?.highlighted === "browser" ? " primary" : ""}`}
-                  disabled={backupReminderBusy}
-                  onClick={() => void runBackupReminderAction("write-browser-data")}
-                >
-                  <BackupConflictActionContent
-                    icon={<Download size={18} />}
-                    label={backupText.labels.keepBrowserData}
-                    summary={backupConflictSummaries!.browser}
-                  />
-                </button>
-              ) : null}
-              {backupReminderState.kind === "data-conflict" ? (
-                <button
-                  className="backup-decision-button backup-directory-choice-button"
                   disabled={backupReminderBusy}
                   onClick={() => void runBackupReminderAction("choose-directory")}
                 >
-                  <span className="backup-action-heading">
-                    <FolderOpen size={18} />
-                    <span>{backupText.labels.chooseEmptyDirectory}</span>
-                  </span>
+                  <FolderOpen size={18} />
+                  {backupText.labels.chooseEmptyDirectory}
                 </button>
               ) : null}
               {backupReminderState.kind === "needs-directory" ? (
@@ -671,7 +670,6 @@ export function App(): JSX.Element {
         {view === "settings" ? (
           <SettingsView
             backupState={data.backupState}
-            hasBrowserData={hasBrowserData}
             settings={data.settings}
             midi={midi}
             onDataChanged={refresh}
@@ -681,8 +679,10 @@ export function App(): JSX.Element {
         {view === "vocal" ? (
           <VocalPitchView
             backupDirectory={data.backupState.directoryHandle}
+            libraryRevision={data.backupState.lastSeenVocalAudioLibraryDigest}
             navigationExitRequest={vocalExitRequest}
             onBackupStateChanged={refreshBackupState}
+            onBeforeLibraryChange={preflightBeforeVocalLibraryChange}
             onNavigationExit={handleVocalNavigationExit}
           />
         ) : null}

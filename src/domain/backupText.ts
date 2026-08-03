@@ -3,38 +3,38 @@ import type { VocalAudioCounts } from "./vocalPitch";
 
 export const backupText = {
   labels: {
+    applyDomainChoices: "应用选择并合并",
+    backupDirectory: "备份目录",
+    browser: "当前浏览器",
     chooseDirectory: "选择目录",
     chooseEmptyDirectory: "选择空目录",
     close: "关闭",
-    conflictCount: "练习/默写",
-    conflictEnd: "练习截止",
-    conflictStart: "练习起始",
-    conflictVocalAudio: "清唱素材",
     importBackup: "导入备份",
-    keepBackupData: "保留备份目录数据",
-    keepBrowserData: "保留浏览器数据",
+    learningDomain: "学习域",
     dismiss: "稍后",
     suppressToday: "今日不再提醒",
+    vocalAudioDomain: "清唱素材域",
   },
   titles: {
-    backupWritten: "已写入备份",
     chooseDirectorySuggestion: "建议设置备份目录",
-    dataConflict: "请选择保留哪份数据",
+    conflictResolved: "备份冲突已解决",
+    dataConflict: "请选择各数据域保留哪边",
     importSuccess: "已导入备份",
   },
   messages: {
-    backupDirectoryAutoImported: "备份目录已有更新，已自动导入。",
-    backupDirectoryWillBeReplaced: "这会用当前浏览器数据覆盖备份目录。继续？",
-    backupEnabled: "自动备份已启用，练习或默写完成后会写入备份目录。",
+    backupDirectoryAutoImported: "备份目录已有更新，已按数据域自动同步。",
+    backupEnabled: "自动备份已启用；学习记录和已保存的清唱素材会写入备份目录。",
     backupPermissionOrDirectoryHint: "请检查备份目录权限，或在设置页重新选择目录。",
-    browserDataWillBeReplaced: "导入备份会替换当前浏览器内学习数据。继续？",
+    browserDataWillBeReplaced: "导入备份会替换当前浏览器内的学习数据和清唱素材。继续？",
     browserOnlyNeedsDirectory: "学习记录只保存在当前浏览器，设置目录后可以导入和迁移数据。",
     directorySelected: "已选择备份目录",
-    emptyBackupDirectory: "备份目录还没有可导入的数据，完成一次练习或默写后会自动备份。",
+    emptyBackupDirectory: "备份目录还没有可导入的数据；产生学习记录或保存清唱素材后会自动备份。",
     dataConflictBeforeBackup:
-      "备份目录与当前浏览器数据不一致。请选择保留哪份数据，或改选空目录以保留两边（备份目录数据保留，浏览器数据进入新的空目录）。",
+      "备份目录与当前浏览器在部分数据域中都发生了变化。请分别选择这些数据域保留哪一边；未冲突的数据域会自动合并。也可以改选空目录以保留两边。",
+    conflictChanged: "冲突期间数据已发生变化，请根据刷新后的信息重新选择。",
+    domainConflictHint: "学习域包含练习、默写与设置；清唱素材域包含录音、上传文件及分析缓存。",
+    conflictResolvedDetail: "已按选择合并浏览器与备份目录数据。",
     importSuccessDetail: "当前浏览器已使用备份目录中的数据。",
-    browserDataWrittenToBackup: "已用当前浏览器数据写入备份目录。",
   },
   status: {
     normal: "正常",
@@ -64,7 +64,6 @@ export interface BackupConflictDataSummary {
 export interface BackupConflictDataSummaries {
   backup: BackupConflictDataSummary;
   browser: BackupConflictDataSummary;
-  highlighted: "backup" | "browser" | null;
 }
 
 type BackupConflictSummarySource = Pick<
@@ -78,11 +77,9 @@ type BackupConflictSummarySource = Pick<
   | "conflictBackupFirstDataAt"
   | "conflictBackupLastDataAt"
   | "conflictBackupRecordCount"
-  | "conflictBackupStaffRecallRunCount"
   | "conflictBrowserFirstDataAt"
   | "conflictBrowserLastDataAt"
   | "conflictBrowserRecordCount"
-  | "conflictBrowserStaffRecallRunCount"
   | "conflictBrowserVocalAudioCounts"
   | "conflictBackupVocalAudioCounts"
 >;
@@ -101,72 +98,6 @@ function formatBackupDataSummary(
   };
 }
 
-function compareBackupTime(a?: string, b?: string): number {
-  if (!a && !b) {
-    return 0;
-  }
-  if (!a) {
-    return -1;
-  }
-  if (!b) {
-    return 1;
-  }
-  const parsedA = Date.parse(a);
-  const parsedB = Date.parse(b);
-  if (Number.isFinite(parsedA) && Number.isFinite(parsedB)) {
-    return parsedA - parsedB;
-  }
-  return a.localeCompare(b);
-}
-
-function backupDataCovers({
-  firstDataAt,
-  lastDataAt,
-  reviewCount,
-  staffRecallRunCount,
-  vocalAudioCounts,
-  otherFirstDataAt,
-  otherLastDataAt,
-  otherReviewCount,
-  otherStaffRecallRunCount,
-  otherVocalAudioCounts,
-}: {
-  firstDataAt?: string;
-  lastDataAt?: string;
-  otherFirstDataAt?: string;
-  otherLastDataAt?: string;
-  otherReviewCount?: number;
-  otherStaffRecallRunCount?: number;
-  otherVocalAudioCounts?: VocalAudioCounts;
-  reviewCount?: number;
-  staffRecallRunCount?: number;
-  vocalAudioCounts?: VocalAudioCounts;
-}): boolean {
-  if (
-    !firstDataAt ||
-    !lastDataAt ||
-    !otherFirstDataAt ||
-    !otherLastDataAt ||
-    reviewCount === undefined ||
-    otherReviewCount === undefined ||
-    staffRecallRunCount === undefined ||
-    otherStaffRecallRunCount === undefined ||
-    vocalAudioCounts === undefined ||
-    otherVocalAudioCounts === undefined
-  ) {
-    return false;
-  }
-  return (
-    compareBackupTime(firstDataAt, otherFirstDataAt) <= 0 &&
-    compareBackupTime(lastDataAt, otherLastDataAt) >= 0 &&
-    reviewCount >= otherReviewCount &&
-    staffRecallRunCount >= otherStaffRecallRunCount &&
-    vocalAudioCounts.materialCount >= otherVocalAudioCounts.materialCount &&
-    vocalAudioCounts.recordingCount >= otherVocalAudioCounts.recordingCount &&
-    vocalAudioCounts.uploadCount >= otherVocalAudioCounts.uploadCount
-  );
-}
-
 export function getBackupConflictDataSummaries(
   backupState: BackupConflictSummarySource,
 ): BackupConflictDataSummaries {
@@ -182,39 +113,7 @@ export function getBackupConflictDataSummaries(
     backupState.conflictBrowserRecordCount ?? backupState.conflictBrowserReviewCount,
     backupState.conflictBrowserVocalAudioCounts,
   );
-  const backupFirstDataAt = backupState.conflictBackupFirstDataAt ?? backupState.conflictBackupFirstReviewAt;
-  const backupLastDataAt = backupState.conflictBackupLastDataAt ?? backupState.conflictBackupLastReviewAt;
-  const browserFirstDataAt = backupState.conflictBrowserFirstDataAt ?? backupState.conflictBrowserFirstReviewAt;
-  const browserLastDataAt = backupState.conflictBrowserLastDataAt ?? backupState.conflictBrowserLastReviewAt;
-  const backupCoversBrowser = backupDataCovers({
-    firstDataAt: backupFirstDataAt,
-    lastDataAt: backupLastDataAt,
-    otherFirstDataAt: browserFirstDataAt,
-    otherLastDataAt: browserLastDataAt,
-    otherReviewCount: backupState.conflictBrowserReviewCount,
-    otherStaffRecallRunCount: backupState.conflictBrowserStaffRecallRunCount,
-    otherVocalAudioCounts: backupState.conflictBrowserVocalAudioCounts,
-    reviewCount: backupState.conflictBackupReviewCount,
-    staffRecallRunCount: backupState.conflictBackupStaffRecallRunCount,
-    vocalAudioCounts: backupState.conflictBackupVocalAudioCounts,
-  });
-  const browserCoversBackup = backupDataCovers({
-    firstDataAt: browserFirstDataAt,
-    lastDataAt: browserLastDataAt,
-    otherFirstDataAt: backupFirstDataAt,
-    otherLastDataAt: backupLastDataAt,
-    otherReviewCount: backupState.conflictBackupReviewCount,
-    otherStaffRecallRunCount: backupState.conflictBackupStaffRecallRunCount,
-    otherVocalAudioCounts: backupState.conflictBackupVocalAudioCounts,
-    reviewCount: backupState.conflictBrowserReviewCount,
-    staffRecallRunCount: backupState.conflictBrowserStaffRecallRunCount,
-    vocalAudioCounts: backupState.conflictBrowserVocalAudioCounts,
-  });
-  return {
-    backup,
-    browser,
-    highlighted: backupCoversBrowser === browserCoversBackup ? null : backupCoversBrowser ? "backup" : "browser",
-  };
+  return { backup, browser };
 }
 
 export function formatBackupConflictDetail(

@@ -247,6 +247,15 @@ export interface BackupState {
   conflictBrowserRecordCount?: number;
   conflictBrowserStaffRecallRunCount?: number;
   conflictBrowserVocalAudioCounts?: VocalAudioCounts;
+  conflictLearningData?: boolean;
+  conflictVocalAudio?: boolean;
+  conflictRevision?: {
+    backupLearningDataDigest?: string;
+    backupVersion?: string;
+    backupVocalAudioLibraryDigest: string;
+    browserLearningDataDigest: string;
+    browserVocalAudioLibraryDigest: string;
+  };
   conflictBackupFirstDataAt?: string;
   conflictBackupLastDataAt?: string;
   conflictBackupRecordCount?: number;
@@ -256,6 +265,7 @@ export interface BackupState {
   lastSeenBackupDataSetId?: string;
   lastSeenBackupDayFileDigests?: Record<string, string>;
   lastSeenBackupDayFileMetadata?: Record<string, BackupDayFileMetadata>;
+  lastSeenLearningDataDigest?: string;
   lastSeenVocalAudioLibraryDigest?: string;
   lastSeenVocalAudioFileMetadata?: Record<string, BackupDayFileMetadata>;
   backupDataModifiedAt?: string;
@@ -281,6 +291,7 @@ export interface BackupManifest {
   lastReviewId?: string;
   lastStaffRecallRunId?: string;
   dayFileDigests?: Record<string, string>;
+  learningDataDigest?: string;
   vocalAudioLibraryDigest?: string;
   dates: string[];
 }

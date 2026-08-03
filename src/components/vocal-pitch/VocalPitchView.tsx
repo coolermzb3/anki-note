@@ -49,10 +49,14 @@ import { useVocalAudioLibrary } from "../../vocal-pitch/useVocalAudioLibrary";
 
 interface VocalPitchViewProps {
   backupDirectory?: FileSystemDirectoryHandle;
+  libraryRevision?: string;
   navigationExitRequest?: PracticeNavigationExitRequest | null;
   onBackupStateChanged: () => void | Promise<void>;
+  onBeforeLibraryChange: () => Promise<VocalLibraryMutationPreflightResult>;
   onNavigationExit: (target: PracticeNavigationExitTarget) => void;
 }
+
+export type VocalLibraryMutationPreflightResult = "backup-updated" | "blocked" | "proceed";
 
 const MAX_AUDIO_SECONDS = 10 * 60;
 
@@ -85,8 +89,10 @@ function recordingEndedUnexpectedly(reason: VocalRecordingEndReason): boolean {
 
 export function VocalPitchView({
   backupDirectory,
+  libraryRevision,
   navigationExitRequest,
   onBackupStateChanged,
+  onBeforeLibraryChange,
   onNavigationExit,
 }: VocalPitchViewProps): JSX.Element {
   const [material, setMaterial] = useState<VocalAudioMaterial | null>(null);
@@ -104,11 +110,16 @@ export function VocalPitchView({
   const [microphones, setMicrophones] = useState<MicrophoneChoice[]>([]);
   const [followResetKey, setFollowResetKey] = useState(0);
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
+  const [backupPreflightPending, setBackupPreflightPending] = useState(false);
+  const [materialLibraryOutdated, setMaterialLibraryOutdated] = useState(false);
   const [recordingResultPending, setRecordingResultPending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const analysisRequestGenerationRef = useRef(0);
   const lastNavigationRequestIdRef = useRef(0);
+  const materialBaseUpdatedAtRef = useRef<string | null>(null);
+  const mountedRef = useRef(false);
   const pendingRecordingNavigationTargetRef = useRef<PracticeNavigationExitTarget | null>(null);
+  const preflightGenerationRef = useRef(0);
   const recordingResultPendingRef = useRef(false);
   const recordingEndedRef = useRef<(result: VocalRecordingResult, reason: VocalRecordingEndReason) => void>(() => undefined);
   const playback = useAudioPlayback(material);
@@ -131,11 +142,13 @@ export function VocalPitchView({
   const {
     backupStatus,
     materials,
+    refresh: refreshLibrary,
     remove: removeLibraryMaterial,
     rename: renameLibraryMaterial,
     save: saveLibraryMaterial,
   } = useVocalAudioLibrary({
     backupDirectory,
+    libraryRevision,
     onBackupStateChanged,
     onMessage: setInlineMessage,
   });
@@ -159,6 +172,15 @@ export function VocalPitchView({
 
   const recordingActive = recorder.status !== "idle";
   const recordingBusy = recordingActive || recordingResultPending;
+  const mutationBusy = recordingBusy || backupPreflightPending;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      preflightGenerationRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     void refreshMicrophones();
@@ -217,6 +239,64 @@ export function VocalPitchView({
     }
   }, [analyzeDecoded, cancelAnalysis, setAnalysisMessage]);
 
+  const reconcileLibraryAfterBackupImport = useCallback(async (): Promise<void> => {
+    const latestMaterials = await refreshLibrary();
+    if (!mountedRef.current || !material || materialBaseUpdatedAtRef.current === null) return;
+    const latestMaterial = latestMaterials.find((item) => item.id === material.id);
+    if (latestMaterial?.updatedAt === materialBaseUpdatedAtRef.current) return;
+
+    if (dirty) {
+      setMaterialLibraryOutdated(true);
+      setInlineMessage("备份中的当前素材已更新；本次操作已取消，保存前会再次确认");
+      return;
+    }
+
+    cancelAnalysis();
+    playback.pause();
+    setMaterialLibraryOutdated(false);
+    if (!latestMaterial) {
+      materialBaseUpdatedAtRef.current = null;
+      setMaterial(null);
+      setDisplayedFrames([]);
+      setAnalysisStale(false);
+      setAnalysisMessage(null);
+      setInlineMessage("备份中的当前素材已删除，工作区已清空");
+      return;
+    }
+
+    materialBaseUpdatedAtRef.current = latestMaterial.updatedAt;
+    setMaterial(latestMaterial);
+    setConfig(latestMaterial.config);
+    setDisplayedFrames(latestMaterial.analysis?.frames ?? []);
+    setAnalysisStale(false);
+    setAnalysisMessage(latestMaterial.analysis ? "已载入备份中的分析缓存" : null);
+    setInlineMessage("备份中的当前素材已更新，工作区已重新载入");
+    if (!latestMaterial.analysis) void analyzeMaterial(latestMaterial);
+  }, [analyzeMaterial, cancelAnalysis, dirty, material, playback, refreshLibrary, setAnalysisMessage]);
+
+  const runLibraryMutationPreflight = useCallback(async (): Promise<boolean> => {
+    const generation = ++preflightGenerationRef.current;
+    setBackupPreflightPending(true);
+    try {
+      const result = await onBeforeLibraryChange();
+      if (!mountedRef.current || generation !== preflightGenerationRef.current) return false;
+      if (result === "backup-updated") {
+        await reconcileLibraryAfterBackupImport();
+        return false;
+      }
+      return result === "proceed";
+    } catch (error) {
+      if (mountedRef.current && generation === preflightGenerationRef.current) {
+        setInlineMessage(error instanceof Error ? error.message : "无法检查备份状态");
+      }
+      return false;
+    } finally {
+      if (mountedRef.current && generation === preflightGenerationRef.current) {
+        setBackupPreflightPending(false);
+      }
+    }
+  }, [onBeforeLibraryChange, reconcileLibraryAfterBackupImport]);
+
   const buildRecordingMaterial = useCallback(async (
     result: VocalRecordingResult,
     unexpected: boolean,
@@ -269,6 +349,8 @@ export function VocalPitchView({
   ) => {
     setInlineMessage(recordingEndMessage(reason));
     const next = await buildRecordingMaterial(result, recordingEndedUnexpectedly(reason));
+    materialBaseUpdatedAtRef.current = null;
+    setMaterialLibraryOutdated(false);
     setMaterial(next);
     setConfig(next.config);
     setDirty(true);
@@ -309,12 +391,21 @@ export function VocalPitchView({
 
   const saveCurrentMaterial = useCallback(async (): Promise<VocalAudioMaterial | null> => {
     if (!material) return null;
+    if (!(await runLibraryMutationPreflight())) return null;
+    if (
+      materialLibraryOutdated &&
+      !window.confirm("备份中的这条素材已经更新。继续保存会用当前未保存内容覆盖刚导入的版本，是否继续？")
+    ) {
+      return null;
+    }
     const next = { ...material, config, updatedAt: new Date().toISOString() };
     await saveLibraryMaterial(next);
+    materialBaseUpdatedAtRef.current = next.updatedAt;
+    setMaterialLibraryOutdated(false);
     setMaterial(next);
     setDirty(false);
     return next;
-  }, [config, material, saveLibraryMaterial]);
+  }, [config, material, materialLibraryOutdated, runLibraryMutationPreflight, saveLibraryMaterial]);
 
   const runWithReplacementGuard = useCallback((after: () => void | Promise<void>) => {
     if (dirty && material) {
@@ -326,8 +417,11 @@ export function VocalPitchView({
 
   const startRecording = useCallback(() => {
     runWithReplacementGuard(async () => {
+      if (!(await runLibraryMutationPreflight())) return;
       playback.pause();
       cancelAnalysis();
+      materialBaseUpdatedAtRef.current = null;
+      setMaterialLibraryOutdated(false);
       setMaterial(null);
       setDisplayedFrames([]);
       setInlineMessage(null);
@@ -336,12 +430,14 @@ export function VocalPitchView({
       setFollowResetKey((value) => value + 1);
       try {
         await recorder.start(selectedMicrophoneId || undefined);
-        await refreshMicrophones();
+        if (mountedRef.current) await refreshMicrophones();
       } catch (error) {
-        setInlineMessage(error instanceof Error ? `无法开始录音：${error.message}` : "无法开始录音");
+        if (mountedRef.current) {
+          setInlineMessage(error instanceof Error ? `无法开始录音：${error.message}` : "无法开始录音");
+        }
       }
     });
-  }, [cancelAnalysis, playback, recorder, refreshMicrophones, runWithReplacementGuard, selectedMicrophoneId]);
+  }, [cancelAnalysis, playback, recorder, refreshMicrophones, runLibraryMutationPreflight, runWithReplacementGuard, selectedMicrophoneId]);
 
   const finishRecording = useCallback(() => {
     void recorder.finish().catch((error) => {
@@ -350,8 +446,10 @@ export function VocalPitchView({
   }, [recorder]);
 
   const openUploadPicker = useCallback(() => {
-    runWithReplacementGuard(() => fileInputRef.current?.click());
-  }, [runWithReplacementGuard]);
+    runWithReplacementGuard(async () => {
+      if (await runLibraryMutationPreflight()) fileInputRef.current?.click();
+    });
+  }, [runLibraryMutationPreflight, runWithReplacementGuard]);
 
   const importFile = useCallback(async (file: File) => {
     cancelAnalysis();
@@ -381,6 +479,8 @@ export function VocalPitchView({
         audioBlob: file,
         config,
       };
+      materialBaseUpdatedAtRef.current = null;
+      setMaterialLibraryOutdated(false);
       setMaterial(next);
       setDisplayedFrames([]);
       setDirty(true);
@@ -397,6 +497,8 @@ export function VocalPitchView({
   const openMaterial = useCallback((target: VocalAudioMaterial) => {
     runWithReplacementGuard(() => {
       cancelAnalysis();
+      materialBaseUpdatedAtRef.current = target.updatedAt;
+      setMaterialLibraryOutdated(false);
       setMaterial(target);
       setConfig(target.config);
       setDisplayedFrames(target.analysis?.frames ?? []);
@@ -411,6 +513,8 @@ export function VocalPitchView({
     runWithReplacementGuard(() => {
       cancelAnalysis();
       playback.pause();
+      materialBaseUpdatedAtRef.current = null;
+      setMaterialLibraryOutdated(false);
       setMaterial(null);
       setDisplayedFrames([]);
       setDirty(false);
@@ -465,20 +569,30 @@ export function VocalPitchView({
   }, [analysisRunning, analyzeMaterial, cancelAnalysis, config, material]);
 
   const renameMaterial = useCallback(async (target: VocalAudioMaterial, name: string) => {
+    if (!(await runLibraryMutationPreflight())) return;
     const updated = await renameLibraryMaterial(target, name);
-    if (material?.id === target.id) setMaterial((current) => current ? { ...current, name, updatedAt: updated.updatedAt } : current);
-  }, [material?.id, renameLibraryMaterial]);
+    if (material?.id === target.id) {
+      materialBaseUpdatedAtRef.current = updated.updatedAt;
+      setMaterial((current) => current ? { ...current, name, updatedAt: updated.updatedAt } : current);
+    }
+  }, [material?.id, renameLibraryMaterial, runLibraryMutationPreflight]);
 
   const deleteMaterial = useCallback(async (target: VocalAudioMaterial) => {
+    if (!(await runLibraryMutationPreflight())) {
+      setDialog(null);
+      return;
+    }
     await removeLibraryMaterial(target.id);
     if (material?.id === target.id) {
       cancelAnalysis();
+      materialBaseUpdatedAtRef.current = null;
+      setMaterialLibraryOutdated(false);
       setMaterial(null);
       setDisplayedFrames([]);
       setDirty(false);
     }
     setDialog(null);
-  }, [cancelAnalysis, material?.id, removeLibraryMaterial]);
+  }, [cancelAnalysis, material?.id, removeLibraryMaterial, runLibraryMutationPreflight]);
 
   const downloadMaterial = useCallback((target: VocalAudioMaterial) => {
     const url = URL.createObjectURL(target.audioBlob);
@@ -529,10 +643,12 @@ export function VocalPitchView({
   const currentPitch = describeFrequency(currentFrame?.frequencyHz ?? null, config.referencePitchHz);
   const statusLabel = recordingResultPending
     ? "正在完成录音"
+    : backupPreflightPending
+      ? "正在检查备份"
     : recordingActive
       ? recorder.status === "stopping" ? "正在停止" : allowBackgroundRecording ? "录音中 · 后台录音已开启" : "录音中"
     : analysisProgress !== null ? `分析中 ${Math.round(analysisProgress * 100)}%` : material?.analysis ? "已完成" : "等待音频";
-  const controlStatusMessage = inlineMessage
+  const controlStatusMessage = (backupPreflightPending ? "正在检查备份状态…" : inlineMessage)
     ?? analysisMessage
     ?? recorder.captureNotice
     ?? (analysisStale ? "参数已更改，请重新分析" : null);
@@ -575,10 +691,10 @@ export function VocalPitchView({
           {!material && !recordingBusy ? (
             <div className="vocal-empty-overlay">
               <div className="vocal-empty-actions">
-                <button className="record-button" onClick={startRecording}>
+                <button className="record-button" disabled={backupPreflightPending} onClick={startRecording}>
                   <Mic size={18} /> 录一段清唱
                 </button>
-                <button onClick={openUploadPicker}>
+                <button disabled={backupPreflightPending} onClick={openUploadPicker}>
                   <FolderUp size={17} /> 上传音频
                 </button>
               </div>
@@ -590,7 +706,7 @@ export function VocalPitchView({
         <footer className="vocal-controls">
           <button
             className={recordingBusy ? "recording-stop" : "record-button"}
-            disabled={recorder.status === "stopping" || recordingResultPending}
+            disabled={backupPreflightPending || recorder.status === "stopping" || recordingResultPending}
             onClick={() => {
               if (recordingActive) {
                 finishRecording();
@@ -602,7 +718,7 @@ export function VocalPitchView({
             {recordingActive ? <kbd>Space</kbd> : null}
           </button>
           <button
-            disabled={recordingBusy || !material}
+            disabled={mutationBusy || !material}
             onClick={() => void togglePlayback()}
           >
             {playback.isPlaying ? <Pause size={17} /> : <Play size={17} />}
@@ -610,14 +726,14 @@ export function VocalPitchView({
             <kbd>Space</kbd>
           </button>
           <i className="vocal-control-divider" />
-          <button disabled={recordingBusy || !material} onClick={reanalyze}>
+          <button disabled={mutationBusy || !material} onClick={reanalyze}>
             <RotateCcw size={17} />
             {analysisProgress !== null ? "取消分析" : "重新分析"}
           </button>
-          <button disabled={recordingBusy} onClick={openUploadPicker}>
+          <button disabled={mutationBusy} onClick={openUploadPicker}>
             <FolderUp size={17} /> 上传文件
           </button>
-          <button disabled={recordingBusy || analysisProgress !== null || !material || !dirty} onClick={() => void saveCurrentMaterial()}>
+          <button disabled={mutationBusy || analysisProgress !== null || !material || !dirty} onClick={() => void saveCurrentMaterial()}>
             <Save size={17} /> 保存
           </button>
           {controlStatusMessage || analysisProgress !== null ? (
@@ -626,7 +742,7 @@ export function VocalPitchView({
               {analysisProgress !== null ? <progress max={1} value={analysisProgress} /> : null}
             </span>
           ) : null}
-          <button disabled={recordingBusy || !material} onClick={clearWorkspace}>
+          <button disabled={mutationBusy || !material} onClick={clearWorkspace}>
             <Eraser size={17} /> 清空
           </button>
           <input
@@ -658,7 +774,7 @@ export function VocalPitchView({
             allowBackgroundRecording={allowBackgroundRecording}
             backupStatus={backupStatus}
             config={config}
-            disabled={recordingBusy}
+            disabled={mutationBusy}
             inputLevel={recorder.inputLevel}
             materials={materials}
             microphones={microphones}
@@ -699,7 +815,8 @@ export function VocalPitchView({
           onSaveUnsaved={() => {
             if (dialog.kind !== "unsaved") return;
             const after = dialog.after;
-            void saveCurrentMaterial().then(() => {
+            void saveCurrentMaterial().then((saved) => {
+              if (!saved) return;
               setDialog(null);
               void after();
             });
@@ -710,6 +827,10 @@ export function VocalPitchView({
             setDialog(null);
             if (!save) {
               onNavigationExit(target);
+              return;
+            }
+            if (!(await runLibraryMutationPreflight())) {
+              setDialog({ kind: "recording-leave", reason, result, target });
               return;
             }
             recordingResultPendingRef.current = true;

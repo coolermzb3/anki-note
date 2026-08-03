@@ -1,18 +1,19 @@
-import { DatabaseBackup, Download, FolderOpen, Upload } from "lucide-react";
+import { DatabaseBackup, FolderOpen, Upload } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import {
   chooseBackupDirectory,
+  resolveBackupConflict,
   restoreBackupFromDirectory,
   supportsFileBackups,
-  writeBrowserDataToBackupDirectory,
+  type BackupConflictResolution,
   type BackupDirectorySelectionResult,
 } from "../data/backup";
 import { getBackupState } from "../data/db";
-import { backupText, formatBackupConflictDetail, getBackupConflictDataSummaries } from "../domain/backupText";
+import { backupText, formatBackupConflictDetail } from "../domain/backupText";
 import { normalizeAnswerKeyboardScale, normalizePianoVolume } from "../domain/settings";
 import type { AppSettings, BackupState } from "../domain/types";
 import type { MidiInputController } from "../midi/useMidiInput";
-import { BackupConflictActionContent } from "./BackupConflictActionContent";
+import { BackupConflictResolver } from "./BackupConflictResolver";
 import { PausedPlaybackBpmInput } from "./PausedPlaybackBpmInput";
 import { PlayableKeyboardPreview } from "./PlayableKeyboardPreview";
 import { handleWheelStep } from "./settingsWheel";
@@ -63,7 +64,6 @@ function isUserAbort(error: unknown): boolean {
 interface SettingsViewProps {
   settings: AppSettings;
   backupState: BackupState;
-  hasBrowserData: boolean;
   onSettingsSaved: (settings: AppSettings) => void | Promise<void>;
   onDataChanged: () => Promise<void>;
   midi: MidiInputController;
@@ -72,7 +72,6 @@ interface SettingsViewProps {
 export function SettingsView({
   settings,
   backupState,
-  hasBrowserData,
   onSettingsSaved,
   onDataChanged,
   midi,
@@ -97,7 +96,6 @@ export function SettingsView({
     backupState.dataConflictBeforeBackup ?? backupState.syncRequiredBeforeBackup ?? storedBackupState.restoreRequiredBeforeBackup,
   );
   const hasBackupSnapshot = Boolean(backupBlockedUntilSync || backupState.lastSeenBackupVersion);
-  const backupConflictSummaries = backupBlockedUntilSync ? getBackupConflictDataSummaries(backupState) : null;
   const pianoVolumePercent = Math.round(pianoVolumeDraft * 100);
   const answerKeyboardScalePercent = Math.round(answerKeyboardScaleDraft * 100);
 
@@ -170,6 +168,17 @@ export function SettingsView({
     } finally {
       setBusy(false);
     }
+  }
+
+  function resolveConflict(resolution: BackupConflictResolution): Promise<void> {
+    return runBusy(async () => {
+      try {
+        await resolveBackupConflict(resolution);
+      } catch (error) {
+        await onDataChanged();
+        throw error;
+      }
+    }, backupText.messages.conflictResolvedDetail);
   }
 
   return (
@@ -370,7 +379,6 @@ export function SettingsView({
         </div>
         <div className="action-row">
           <button
-            className={backupBlockedUntilSync ? "backup-decision-button backup-directory-choice-button" : undefined}
             disabled={!supportsFileBackups() || busy}
             onClick={() =>
               void runBusy(async () => {
@@ -379,68 +387,31 @@ export function SettingsView({
               }, backupText.messages.directorySelected)
             }
           >
-            {backupBlockedUntilSync ? (
-              <span className="backup-action-heading">
-                <FolderOpen size={18} />
-                <span>{backupText.labels.chooseDirectory}</span>
-              </span>
-            ) : (
-              <>
-                <FolderOpen size={18} />
-                {backupText.labels.chooseDirectory}
-              </>
-            )}
+            <FolderOpen size={18} />
+            {backupText.labels.chooseDirectory}
           </button>
-          <button
-            className={
-              backupBlockedUntilSync
-                ? `backup-decision-button${backupConflictSummaries?.highlighted === "backup" ? " primary" : ""}`
-                : undefined
-            }
-            disabled={!backupState.directoryHandle || !hasBackupSnapshot || busy}
-            onClick={() => {
-              if (!backupState.directoryHandle) {
-                return;
-              }
-              if (!hasBrowserData || window.confirm(backupText.messages.browserDataWillBeReplaced)) {
-                void runBusy(() => restoreBackupFromDirectory(backupState.directoryHandle!), backupText.titles.importSuccess);
-              }
-            }}
-          >
-            {backupBlockedUntilSync ? (
-              <BackupConflictActionContent
-                icon={<Upload size={18} />}
-                label={backupText.labels.keepBackupData}
-                summary={backupConflictSummaries!.backup}
-              />
-            ) : (
-              <>
-                <Upload size={18} />
-                {backupText.labels.importBackup}
-              </>
-            )}
-          </button>
-          {backupBlockedUntilSync ? (
+          {!backupBlockedUntilSync ? (
             <button
-              className={`backup-decision-button${backupConflictSummaries?.highlighted === "browser" ? " primary" : ""}`}
-              disabled={!backupState.directoryHandle || busy}
+              disabled={!backupState.directoryHandle || !hasBackupSnapshot || busy}
               onClick={() => {
-                if (!window.confirm(backupText.messages.backupDirectoryWillBeReplaced)) {
+                if (!backupState.directoryHandle) {
                   return;
                 }
-                void runBusy(writeBrowserDataToBackupDirectory, backupText.messages.browserDataWrittenToBackup);
+                if (window.confirm(backupText.messages.browserDataWillBeReplaced)) {
+                  void runBusy(() => restoreBackupFromDirectory(backupState.directoryHandle!), backupText.titles.importSuccess);
+                }
               }}
             >
-              <BackupConflictActionContent
-                icon={<Download size={18} />}
-                label={backupText.labels.keepBrowserData}
-                summary={backupConflictSummaries!.browser}
-              />
+              <Upload size={18} />
+              {backupText.labels.importBackup}
             </button>
           ) : null}
         </div>
         {backupBlockedUntilSync ? (
-          <div className="status-line warning">{formatBackupConflictDetail(backupState)}</div>
+          <>
+            <div className="status-line warning">{formatBackupConflictDetail(backupState)}</div>
+            <BackupConflictResolver backupState={backupState} disabled={busy} onResolve={resolveConflict} />
+          </>
         ) : backupState.directoryHandle && !hasBackupSnapshot ? (
           <div className="status-line">{backupText.messages.emptyBackupDirectory}</div>
         ) : backupState.directoryHandle ? (

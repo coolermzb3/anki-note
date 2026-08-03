@@ -56,6 +56,8 @@ export function useVocalRecorder({ allowBackgroundRecording, config, onEnded, on
   const finishPromiseRef = useRef<Promise<VocalRecordingResult> | null>(null);
   const finishResolveRef = useRef<((result: VocalRecordingResult) => void) | null>(null);
   const endReasonRef = useRef<VocalRecordingEndReason | null>(null);
+  const mountedRef = useRef(false);
+  const startGenerationRef = useRef(0);
   const callbacksRef = useRef({ allowBackgroundRecording, config, onEnded, onPitchFrame });
   callbacksRef.current = { allowBackgroundRecording, config, onEnded, onPitchFrame };
 
@@ -89,7 +91,7 @@ export function useVocalRecorder({ allowBackgroundRecording, config, onEnded, on
     if (context) {
       void context.close().catch(() => undefined);
     }
-    setInputLevel(0);
+    if (mountedRef.current) setInputLevel(0);
   }, []);
 
   const finalizeFromRecorder = useCallback(() => {
@@ -166,6 +168,7 @@ export function useVocalRecorder({ allowBackgroundRecording, config, onEnded, on
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       throw new Error("当前浏览器不支持录音");
     }
+    const generation = ++startGenerationRef.current;
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
@@ -175,6 +178,10 @@ export function useVocalRecorder({ allowBackgroundRecording, config, onEnded, on
         channelCount: 1,
       },
     });
+    if (!mountedRef.current || generation !== startGenerationRef.current) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
     const settings = stream.getAudioTracks()[0]?.getSettings();
     const enabledProcessing = [
       settings?.echoCancellation ? "回声消除" : null,
@@ -183,7 +190,18 @@ export function useVocalRecorder({ allowBackgroundRecording, config, onEnded, on
     ].filter(Boolean);
     setCaptureNotice(enabledProcessing.length > 0 ? `浏览器仍启用了${enabledProcessing.join("、")}` : null);
     const context = new AudioContext();
-    await context.resume();
+    try {
+      await context.resume();
+    } catch (error) {
+      stream.getTracks().forEach((track) => track.stop());
+      void context.close().catch(() => undefined);
+      throw error;
+    }
+    if (!mountedRef.current || generation !== startGenerationRef.current) {
+      stream.getTracks().forEach((track) => track.stop());
+      void context.close().catch(() => undefined);
+      return;
+    }
     const source = context.createMediaStreamSource(stream);
     const analyser = context.createAnalyser();
     const frameSize = getPitchFrameSize(context.sampleRate, callbacksRef.current.config.minFrequencyHz);
@@ -254,7 +272,10 @@ export function useVocalRecorder({ allowBackgroundRecording, config, onEnded, on
   }, [finish]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      startGenerationRef.current += 1;
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== "inactive") {
         recorder.onstop = null;

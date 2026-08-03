@@ -9,6 +9,7 @@ import { digestBlob } from "./blobDigest";
 import { getBackupState, listVocalAudioMaterials, replaceVocalAudioMaterials } from "./db";
 
 interface VocalAudioBackupEntry {
+  analysisDigest?: string;
   analysisFileName?: string;
   audioFileName: string;
   config: VocalPitchAnalysisConfig;
@@ -38,6 +39,7 @@ export interface VocalAudioBackupFacts {
   fileMetadata: Record<string, BackupDayFileMetadata>;
   filesValid: boolean;
   hasIndex: boolean;
+  metadataChanged: boolean;
 }
 
 function countEntries(entries: readonly VocalAudioBackupEntry[]): VocalAudioCounts {
@@ -88,10 +90,15 @@ async function readIndex(directory: FileSystemDirectoryHandle): Promise<VocalAud
 async function readOptionalAnalysis(
   directory: FileSystemDirectoryHandle,
   filename: string | undefined,
+  expectedDigest: string | undefined,
 ): Promise<VocalPitchAnalysis | undefined> {
   if (!filename) return undefined;
   const file = await (await directory.getFileHandle(filename)).getFile();
-  return JSON.parse(await file.text()) as VocalPitchAnalysis;
+  const text = await file.text();
+  if (expectedDigest && (await digestText(text)) !== expectedDigest) {
+    throw new Error("清唱分析缓存校验失败");
+  }
+  return JSON.parse(text) as VocalPitchAnalysis;
 }
 
 async function digestText(value: string): Promise<string> {
@@ -105,7 +112,7 @@ async function hasWritePermission(directoryHandle: FileSystemDirectoryHandle): P
   return (await directoryHandle.requestPermission?.({ mode: "readwrite" })) === "granted";
 }
 
-function toEntry(material: VocalAudioMaterial): VocalAudioBackupEntry {
+async function toEntry(material: VocalAudioMaterial): Promise<VocalAudioBackupEntry> {
   return {
     id: material.id,
     name: material.name,
@@ -119,12 +126,14 @@ function toEntry(material: VocalAudioMaterial): VocalAudioBackupEntry {
     config: material.config,
     originalFileName: material.originalFileName,
     audioFileName: `${material.id}.${extensionFor(material)}`,
+    analysisDigest: material.analysis ? await digestText(JSON.stringify(material.analysis)) : undefined,
     analysisFileName: material.analysis ? `${material.id}.analysis.json` : undefined,
   };
 }
 
 function canonicalEntry(entry: VocalAudioBackupEntry): VocalAudioBackupEntry {
   return {
+    analysisDigest: entry.analysisDigest,
     analysisFileName: entry.analysisFileName,
     audioFileName: entry.audioFileName,
     config: {
@@ -168,7 +177,7 @@ function metadataMatches(
 }
 
 export async function getVocalAudioLibraryDigest(): Promise<string> {
-  return digestEntries((await listVocalAudioMaterials()).map(toEntry));
+  return digestEntries(await Promise.all((await listVocalAudioMaterials()).map(toEntry)));
 }
 
 export async function inspectVocalAudioBackup(
@@ -186,6 +195,7 @@ export async function inspectVocalAudioBackup(
         fileMetadata: {},
         filesValid: true,
         hasIndex: false,
+        metadataChanged: Object.keys(rememberedMetadata ?? {}).length > 0,
         counts: countEntries([]),
       };
     }
@@ -198,6 +208,7 @@ export async function inspectVocalAudioBackup(
       fileMetadata: {},
       filesValid: true,
       hasIndex: false,
+      metadataChanged: Object.keys(rememberedMetadata ?? {}).length > 0,
       counts: countEntries([]),
     };
   }
@@ -220,9 +231,8 @@ export async function inspectVocalAudioBackup(
       throw error;
     }
   }
-  filesValid = filesValid && metadataMatches(rememberedMetadata, fileMetadata);
-
-  if (verifyContents && !rememberedMetadata && filesValid) {
+  const metadataUnchanged = metadataMatches(rememberedMetadata, fileMetadata);
+  if (filesValid && (verifyContents || !metadataUnchanged)) {
     for (const entry of index.materials) {
       const audio = await (await audioDirectory.getFileHandle(entry.audioFileName)).getFile();
       if (audio.size !== entry.size || (await digestBlob(audio)) !== entry.contentDigest) {
@@ -231,7 +241,12 @@ export async function inspectVocalAudioBackup(
       }
       if (entry.analysisFileName) {
         try {
-          JSON.parse(await (await (await audioDirectory.getFileHandle(entry.analysisFileName)).getFile()).text());
+          const analysisText = await (await (await audioDirectory.getFileHandle(entry.analysisFileName)).getFile()).text();
+          JSON.parse(analysisText);
+          if (entry.analysisDigest && (await digestText(analysisText)) !== entry.analysisDigest) {
+            filesValid = false;
+            break;
+          }
         } catch {
           filesValid = false;
           break;
@@ -245,6 +260,7 @@ export async function inspectVocalAudioBackup(
     fileMetadata,
     filesValid,
     hasIndex: true,
+    metadataChanged: !metadataUnchanged,
     counts: countEntries(index.materials),
   };
 }
@@ -272,6 +288,7 @@ export async function getVocalAudioBackupStatus(
 
 export async function syncVocalAudioLibrary(
   directoryHandle: FileSystemDirectoryHandle | undefined,
+  { forceRewrite = false }: { forceRewrite?: boolean } = {},
 ): Promise<VocalAudioBackupStatus> {
   if (!directoryHandle) {
     return "browser-only";
@@ -284,15 +301,25 @@ export async function syncVocalAudioLibrary(
     const audioDirectory = await directoryHandle.getDirectoryHandle("audio", { create: true });
     const previousIndex = await readIndex(audioDirectory);
     const previousById = new Map(previousIndex?.materials.map((entry) => [entry.id, entry]) ?? []);
-    const nextEntries = materials.map(toEntry);
+    const nextEntries = await Promise.all(materials.map(toEntry));
+    const nextById = new Map(nextEntries.map((entry) => [entry.id, entry]));
 
     for (const material of materials) {
-      const entry = toEntry(material);
+      const entry = nextById.get(material.id)!;
       const previous = previousById.get(material.id);
-      if (previous?.contentDigest !== material.contentDigest || previous.audioFileName !== entry.audioFileName) {
+      if (
+        forceRewrite ||
+        previous?.contentDigest !== material.contentDigest ||
+        previous?.audioFileName !== entry.audioFileName
+      ) {
         await writeFile(audioDirectory, entry.audioFileName, material.audioBlob);
       }
-      if (material.analysis && (previous?.updatedAt !== material.updatedAt || previous.analysisFileName !== entry.analysisFileName)) {
+      if (
+        material.analysis &&
+        (forceRewrite ||
+          previous?.analysisDigest !== entry.analysisDigest ||
+          previous?.analysisFileName !== entry.analysisFileName)
+      ) {
         await writeFile(audioDirectory, entry.analysisFileName!, JSON.stringify(material.analysis satisfies VocalPitchAnalysis));
       }
     }
@@ -310,12 +337,14 @@ export async function syncVocalAudioLibrary(
       }
     }
 
-    const nextIndex: VocalAudioBackupIndex = {
-      schemaVersion: 1,
-      updatedAt: new Date().toISOString(),
-      materials: nextEntries,
-    };
-    await writeFile(audioDirectory, "index.json", JSON.stringify(nextIndex, null, 2));
+    if (!previousIndex || (await digestEntries(previousIndex.materials)) !== (await digestEntries(nextEntries))) {
+      const nextIndex: VocalAudioBackupIndex = {
+        schemaVersion: 1,
+        updatedAt: new Date().toISOString(),
+        materials: nextEntries,
+      };
+      await writeFile(audioDirectory, "index.json", JSON.stringify(nextIndex, null, 2));
+    }
     return "backed-up";
   } catch {
     return "failed";
@@ -353,7 +382,7 @@ export async function readVocalAudioLibrary(
       contentDigest: entry.contentDigest,
       originalFileName: entry.originalFileName,
       config: entry.config,
-      analysis: await readOptionalAnalysis(audioDirectory, entry.analysisFileName),
+      analysis: await readOptionalAnalysis(audioDirectory, entry.analysisFileName, entry.analysisDigest),
       audioBlob,
     });
   }

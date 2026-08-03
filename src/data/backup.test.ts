@@ -15,8 +15,16 @@ import type {
 } from "../domain/types";
 import { backupText } from "../domain/backupText";
 import { DEFAULT_VOCAL_PITCH_CONFIG, type VocalAudioMaterial, type VocalAudioSource } from "../domain/vocalPitch";
+import { digestBlob } from "./blobDigest";
 import { db, makeDefaultSettings } from "./db";
-import { refreshBackupConflictDetails, syncBackupBeforeActivity, writeBackupIfSafe, writeBackupNow, writeBackupSnapshot } from "./backup";
+import {
+  refreshBackupConflictDetails,
+  resolveBackupConflict,
+  syncBackupBeforeActivity,
+  writeBackupIfSafe,
+  writeBackupNow,
+  writeBackupSnapshot,
+} from "./backup";
 
 class MemoryFileHandle {
   readonly kind = "file";
@@ -28,11 +36,12 @@ class MemoryFileHandle {
 
   async getFile(): Promise<File> {
     const file = this.directory.fileSnapshot(this.name);
-    return {
-      size: new TextEncoder().encode(file.text).byteLength,
-      lastModified: file.lastModified,
-      text: async () => this.directory.readText(this.name),
-    } as File;
+    const blob = new Blob([file.text]);
+    Object.defineProperties(blob, {
+      lastModified: { value: file.lastModified },
+      text: { value: async () => this.directory.readText(this.name) },
+    });
+    return blob as File;
   }
 
   async createWritable(): Promise<FileSystemWritableFileStream> {
@@ -86,6 +95,12 @@ class MemoryDirectoryHandle {
 
   async requestPermission(): Promise<PermissionState> {
     return "granted";
+  }
+
+  async removeEntry(name: string): Promise<void> {
+    if (!this.files.delete(name) && !this.directories.delete(name)) {
+      throw new DOMException("Entry not found", "NotFoundError");
+    }
   }
 
   readJson<T>(name: string): T {
@@ -274,6 +289,16 @@ function makeVocalAudioMaterial(id: string, source: VocalAudioSource): VocalAudi
   };
 }
 
+async function makeBackedVocalAudioMaterial(id: string): Promise<VocalAudioMaterial> {
+  const audioBlob = new Blob(["[object Blob]"], { type: "audio/webm" });
+  return {
+    ...makeVocalAudioMaterial(id, "recording"),
+    audioBlob,
+    contentDigest: await digestBlob(audioBlob),
+    size: audioBlob.size,
+  };
+}
+
 async function rememberDirectory(directory: MemoryDirectoryHandle): Promise<void> {
   await db.backupStates.put({
     id: "default",
@@ -323,7 +348,7 @@ describe("file backup side effects", () => {
     expect(Object.keys(state?.lastSeenBackupDayFileMetadata ?? {})).toEqual(["2026-07-04"]);
   });
 
-  it("does not overwrite an audio backup index changed outside the browser", async () => {
+  it("ignores metadata-only changes to a verified audio backup index", async () => {
     const directory = new MemoryDirectoryHandle("backup");
     await seedBrowserData();
     await rememberDirectory(directory);
@@ -335,10 +360,70 @@ describe("file backup side effects", () => {
     await writeBackupIfSafe();
 
     await expect(db.backupStates.get("default")).resolves.toMatchObject({
-      dataConflictBeforeBackup: true,
-      syncRequiredBeforeBackup: true,
+      dataConflictBeforeBackup: false,
+      syncRequiredBeforeBackup: false,
     });
     expect(audioDirectory.readText("index.json")).toMatch(/\n$/);
+  });
+
+  it("detects a changed analysis cache in the audio backup", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData();
+    await db.vocalAudioMaterials.put({
+      ...(await makeBackedVocalAudioMaterial("vocal-analyzed")),
+      analysis: {
+        analyzedAt: "2026-07-04T12:01:00.000+08:00",
+        config: DEFAULT_VOCAL_PITCH_CONFIG,
+        detectorId: "pitchy-mpm",
+        detectorVersion: 1,
+        frames: [{ confidence: 1, frequencyHz: 440, timeSeconds: 0 }],
+        hopSeconds: 0.01,
+        sampleRate: 48_000,
+        schemaVersion: 1,
+      },
+    });
+    await rememberDirectory(directory);
+    await writeBackupNow();
+
+    directory.child("audio").writeText("vocal-analyzed.analysis.json", JSON.stringify({ frames: [] }));
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "data-conflict",
+    });
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      conflictLearningData: false,
+      conflictVocalAudio: true,
+    });
+
+    await resolveBackupConflict({ vocalAudio: "browser" });
+
+    expect(directory.child("audio").readJson<{ frames: unknown[] }>("vocal-analyzed.analysis.json").frames).toEqual([
+      { confidence: 1, frequencyHz: 440, timeSeconds: 0 },
+    ]);
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      dataConflictBeforeBackup: false,
+      syncRequiredBeforeBackup: false,
+    });
+  });
+
+  it("rewrites a missing audio backup file when keeping the browser domain", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData();
+    await db.vocalAudioMaterials.put(await makeBackedVocalAudioMaterial("vocal-missing"));
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    await directory.child("audio").removeEntry("vocal-missing.webm");
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "data-conflict",
+    });
+    await resolveBackupConflict({ vocalAudio: "browser" });
+
+    expect(directory.child("audio").readText("vocal-missing.webm")).toBe("[object Blob]");
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      dataConflictBeforeBackup: false,
+      syncRequiredBeforeBackup: false,
+    });
   });
 
   it("imports backup data before practice when the browser has no practice data", async () => {
@@ -379,6 +464,7 @@ describe("file backup side effects", () => {
     const directory = new MemoryDirectoryHandle("backup");
     await seedBackupDirectory(directory);
     const manifest = directory.readJson<BackupManifest>("manifest.json");
+    delete manifest.learningDataDigest;
     (manifest.settings as unknown as { answerPitchMode: string }).answerPitchMode = "absolute-pitch";
     directory.writeText("manifest.json", JSON.stringify(manifest));
     await rememberDirectory(directory);
@@ -495,7 +581,7 @@ describe("file backup side effects", () => {
     expect(directory.child("days").totalReadCount()).toBe(0);
   });
 
-  it("keeps a cross-day browser append ready and tracks its new day after backup", async () => {
+  it("backs up a cross-day browser append during activity preflight", async () => {
     const directory = new MemoryDirectoryHandle("backup");
     await seedBrowserData();
     await rememberDirectory(directory);
@@ -513,12 +599,9 @@ describe("file backup side effects", () => {
     directory.resetReadCounts();
 
     await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toEqual({
-      result: "ready",
-      backupStateChanged: false,
+      result: "synced-down",
+      backupStateChanged: true,
     });
-    expect(directory.child("days").totalReadCount()).toBe(0);
-
-    await writeBackupNow();
     const state = await db.backupStates.get("default");
     expect(Object.keys(state?.lastSeenBackupDayFileMetadata ?? {})).toEqual(["2026-07-04", "2026-07-05"]);
     directory.resetReadCounts();
@@ -689,6 +772,386 @@ describe("file backup side effects", () => {
     await expect(db.reviews.orderBy("startedAt").toArray()).resolves.toEqual([reviews[0], updatedReview, addedReview]);
   });
 
+  it("imports remote vocal audio changes with the whole snapshot", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData({ dataSetId: "dataset-shared" });
+    const localMaterial = await makeBackedVocalAudioMaterial("vocal-local");
+    await db.vocalAudioMaterials.put(localMaterial);
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const localBackupState = await db.backupStates.get("default");
+
+    const remoteMaterial = await makeBackedVocalAudioMaterial("vocal-remote");
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(remoteMaterial);
+    await writeBackupNow();
+
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(localMaterial);
+    await db.backupStates.put({ ...localBackupState!, lastBackupAt: "2000-01-01T00:00:00.000Z" });
+
+    const outcome = await syncBackupBeforeActivity({ requestPermission: true });
+
+    expect(outcome.result).toBe("synced-up");
+    await expect(db.vocalAudioMaterials.toArray()).resolves.toMatchObject([{ id: "vocal-remote" }]);
+  });
+
+  it("merges newer backup practice data with a local vocal audio change", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { reviews, sessions, settings } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    await db.vocalAudioMaterials.put(makeVocalAudioMaterial("vocal-original", "recording"));
+    await rememberDirectory(directory);
+    await writeBackupNow();
+
+    const localMaterial = makeVocalAudioMaterial("vocal-local-change", "recording");
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(localMaterial);
+    const remoteReview = {
+      ...reviews[0],
+      answeredAt: "2099-01-01T00:00:02.000Z",
+      endedAt: "2099-01-01T00:00:02.000Z",
+      startedAt: "2099-01-01T00:00:00.000Z",
+    };
+    const remoteManifest = await writeBackupSnapshot(
+      directory.handle(),
+      buildBackupSnapshot(settings, sessions, [remoteReview], "2099-01-01T00:01:00.000Z"),
+    );
+    directory.writeText("manifest.json", JSON.stringify({
+      ...remoteManifest,
+      vocalAudioLibraryDigest: (await db.backupStates.get("default"))?.lastSeenVocalAudioLibraryDigest,
+    }));
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "synced-up",
+    });
+    await expect(db.vocalAudioMaterials.toArray()).resolves.toMatchObject([{ id: localMaterial.id }]);
+    await expect(db.reviews.toArray()).resolves.toMatchObject([{ endedAt: remoteReview.endedAt }]);
+  });
+
+  it("merges a local practice change with newer backup vocal audio", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { reviews } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    const originalMaterial = await makeBackedVocalAudioMaterial("vocal-original");
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const localBackupState = await db.backupStates.get("default");
+
+    const remoteMaterial = await makeBackedVocalAudioMaterial("vocal-remote");
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(remoteMaterial);
+    await writeBackupNow();
+
+    const localReview = {
+      ...reviews[0],
+      id: "review-local-change",
+      answeredAt: "2099-01-01T00:00:02.000Z",
+      endedAt: "2099-01-01T00:00:02.000Z",
+      startedAt: "2099-01-01T00:00:00.000Z",
+    };
+    await db.reviews.put(localReview);
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await db.backupStates.put({ ...localBackupState!, lastBackupAt: "2000-01-01T00:00:00.000Z" });
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "synced-up",
+    });
+    await expect(db.reviews.get(localReview.id)).resolves.toMatchObject({ id: localReview.id });
+    await expect(db.vocalAudioMaterials.toArray()).resolves.toMatchObject([{ id: remoteMaterial.id }]);
+  });
+
+  it("preserves local settings while importing newer backup vocal audio", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { settings } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    const originalMaterial = await makeBackedVocalAudioMaterial("vocal-original");
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const baselineState = await db.backupStates.get("default");
+
+    const remoteMaterial = await makeBackedVocalAudioMaterial("vocal-remote");
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(remoteMaterial);
+    await writeBackupNow();
+
+    await db.settings.put({ ...settings, pianoVolume: 0.21 });
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await db.backupStates.put(baselineState!);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "synced-up",
+    });
+    await expect(db.settings.get("default")).resolves.toMatchObject({ pianoVolume: 0.21 });
+    await expect(db.vocalAudioMaterials.toArray()).resolves.toMatchObject([{ id: remoteMaterial.id }]);
+  });
+
+  it("preserves a locally emptied learning domain while importing newer backup vocal audio", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData({ dataSetId: "dataset-shared" });
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const baselineState = await db.backupStates.get("default");
+
+    const remoteMaterial = await makeBackedVocalAudioMaterial("vocal-remote");
+    await db.vocalAudioMaterials.put(remoteMaterial);
+    await writeBackupNow();
+
+    await db.practiceSessions.clear();
+    await db.reviews.clear();
+    await db.staffRecallRuns.clear();
+    await db.vocalAudioMaterials.clear();
+    await db.backupStates.put(baselineState!);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "synced-up",
+    });
+    await expect(db.practiceSessions.count()).resolves.toBe(0);
+    await expect(db.reviews.count()).resolves.toBe(0);
+    await expect(db.staffRecallRuns.count()).resolves.toBe(0);
+    await expect(db.vocalAudioMaterials.toArray()).resolves.toMatchObject([{ id: remoteMaterial.id }]);
+  });
+
+  it("reports a conflict when local learning data is emptied and backup learning data changes", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { sessions } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const baselineState = await db.backupStates.get("default");
+
+    await db.reviews.put(
+      makeReview({
+        id: "review-remote",
+        sessionId: sessions[0].id,
+        targetNoteId: "D4",
+        startedAt: "2026-07-05T11:00:00.000+08:00",
+        answeredAt: "2026-07-05T11:00:02.000+08:00",
+        endedAt: "2026-07-05T11:00:02.000+08:00",
+      }),
+    );
+    await writeBackupNow();
+
+    await db.practiceSessions.clear();
+    await db.reviews.clear();
+    await db.staffRecallRuns.clear();
+    await db.backupStates.put(baselineState!);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "data-conflict",
+    });
+    await expect(db.practiceSessions.count()).resolves.toBe(0);
+    await expect(db.reviews.count()).resolves.toBe(0);
+  });
+
+  it("reports a conflict when local settings and backup learning records both change", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { reviews, sessions, settings } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    const originalMaterial = await makeBackedVocalAudioMaterial("vocal-original");
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const baselineState = await db.backupStates.get("default");
+
+    const remoteReview = makeReview({
+      id: "review-remote",
+      sessionId: sessions[0].id,
+      targetNoteId: "D4",
+      startedAt: "2026-07-05T11:00:00.000+08:00",
+      answeredAt: "2026-07-05T11:00:02.000+08:00",
+      endedAt: "2026-07-05T11:00:02.000+08:00",
+    });
+    await db.reviews.put(remoteReview);
+    const remoteMaterial = await makeBackedVocalAudioMaterial("vocal-remote");
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(remoteMaterial);
+    await writeBackupNow();
+
+    await db.reviews.clear();
+    await db.reviews.bulkPut(reviews);
+    await db.settings.put({ ...settings, pianoVolume: 0.21 });
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await db.backupStates.put(baselineState!);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "data-conflict",
+    });
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      conflictLearningData: true,
+      conflictVocalAudio: false,
+    });
+    await expect(db.settings.get("default")).resolves.toMatchObject({ pianoVolume: 0.21 });
+    await expect(db.reviews.get(remoteReview.id)).resolves.toBeUndefined();
+
+    await resolveBackupConflict({ learningData: "browser" });
+
+    await expect(db.settings.get("default")).resolves.toMatchObject({ pianoVolume: 0.21 });
+    await expect(db.reviews.get(remoteReview.id)).resolves.toBeUndefined();
+    await expect(db.vocalAudioMaterials.toArray()).resolves.toMatchObject([{ id: remoteMaterial.id }]);
+  });
+
+  it("imports a remote vocal audio deletion", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData({ dataSetId: "dataset-shared" });
+    const originalMaterial = await makeBackedVocalAudioMaterial("vocal-original");
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const localBackupState = await db.backupStates.get("default");
+
+    await db.vocalAudioMaterials.clear();
+    await writeBackupNow();
+
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await db.backupStates.put({ ...localBackupState!, lastBackupAt: "2000-01-01T00:00:00.000Z" });
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({ result: "synced-up" });
+    await expect(db.vocalAudioMaterials.count()).resolves.toBe(0);
+  });
+
+  it("requires a vocal-domain choice before applying an older vocal snapshot", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData({ dataSetId: "dataset-shared" });
+    const originalMaterial = await makeBackedVocalAudioMaterial("vocal-original");
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const baselineState = await db.backupStates.get("default");
+
+    const olderMaterial = await makeBackedVocalAudioMaterial("vocal-older");
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(olderMaterial);
+    await writeBackupNow();
+    const olderManifest = directory.readJson<BackupManifest>("manifest.json");
+    directory.writeText("manifest.json", JSON.stringify({
+      ...olderManifest,
+      lastBackupAt: "2000-01-01T00:00:00.000Z",
+    }));
+
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await db.backupStates.put(baselineState!);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "data-conflict",
+    });
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      conflictLearningData: false,
+      conflictVocalAudio: true,
+    });
+    await expect(db.vocalAudioMaterials.toArray()).resolves.toMatchObject([{ id: originalMaterial.id }]);
+  });
+
+  it("backs up a local vocal audio deletion as the next library version", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData({ dataSetId: "dataset-shared" });
+    await db.vocalAudioMaterials.put(await makeBackedVocalAudioMaterial("vocal-original"));
+    await rememberDirectory(directory);
+    await writeBackupNow();
+
+    await db.vocalAudioMaterials.clear();
+    await writeBackupNow();
+
+    expect(directory.child("audio").readJson<{ materials: unknown[] }>("index.json").materials).toEqual([]);
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      dataConflictBeforeBackup: false,
+      syncRequiredBeforeBackup: false,
+    });
+  });
+
+  it("writes a local settings change during the next activity preflight", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { settings } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    await rememberDirectory(directory);
+    await writeBackupNow();
+
+    await db.settings.put({ ...settings, pianoVolume: 0.21 });
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "synced-down",
+    });
+    expect(directory.readJson<BackupManifest>("manifest.json").settings).toMatchObject({ pianoVolume: 0.21 });
+  });
+
+  it("writes a local vocal audio deletion during the next activity preflight", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    await seedBrowserData({ dataSetId: "dataset-shared" });
+    await db.vocalAudioMaterials.put(await makeBackedVocalAudioMaterial("vocal-original"));
+    await rememberDirectory(directory);
+    await writeBackupNow();
+
+    await db.vocalAudioMaterials.clear();
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "synced-down",
+    });
+    expect(directory.child("audio").readJson<{ materials: unknown[] }>("index.json").materials).toEqual([]);
+  });
+
+  it("resolves learning and vocal audio conflicts from different sources", async () => {
+    const directory = new MemoryDirectoryHandle("backup");
+    const { reviews } = await seedBrowserData({ dataSetId: "dataset-shared" });
+    const originalMaterial = await makeBackedVocalAudioMaterial("vocal-original");
+    await db.vocalAudioMaterials.put(originalMaterial);
+    await rememberDirectory(directory);
+    await writeBackupNow();
+    const baselineState = await db.backupStates.get("default");
+
+    const remoteReview = {
+      ...reviews[0],
+      answeredAt: "2099-01-01T00:00:02.000Z",
+      endedAt: "2099-01-01T00:00:03.000Z",
+    };
+    const remoteMaterial = await makeBackedVocalAudioMaterial("vocal-remote");
+    await db.reviews.put(remoteReview);
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(remoteMaterial);
+    await writeBackupNow();
+
+    const localReview = {
+      ...reviews[0],
+      answeredAt: "2088-01-01T00:00:02.000Z",
+      endedAt: "2088-01-01T00:00:03.000Z",
+    };
+    const localMaterial = await makeBackedVocalAudioMaterial("vocal-local");
+    await db.reviews.put(localReview);
+    await db.vocalAudioMaterials.clear();
+    await db.vocalAudioMaterials.put(localMaterial);
+    await db.backupStates.put(baselineState!);
+
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "data-conflict",
+    });
+    const conflictState = await db.backupStates.get("default");
+    expect(conflictState).toMatchObject({
+      conflictLearningData: true,
+      conflictVocalAudio: true,
+    });
+
+    const revisedLocalMaterial = {
+      ...localMaterial,
+      name: "本地冲突期间修改",
+      updatedAt: "2099-01-02T00:00:00.000Z",
+    };
+    await db.vocalAudioMaterials.put(revisedLocalMaterial);
+    await expect(resolveBackupConflict({ learningData: "backup", vocalAudio: "browser" })).rejects.toThrow(
+      backupText.messages.conflictChanged,
+    );
+    expect((await db.backupStates.get("default"))?.conflictRevision).not.toEqual(conflictState?.conflictRevision);
+
+    await resolveBackupConflict({ learningData: "backup", vocalAudio: "browser" });
+
+    await expect(db.reviews.get(remoteReview.id)).resolves.toMatchObject({ endedAt: remoteReview.endedAt });
+    await expect(db.vocalAudioMaterials.toArray()).resolves.toMatchObject([
+      { id: revisedLocalMaterial.id, name: revisedLocalMaterial.name },
+    ]);
+    await expect(db.backupStates.get("default")).resolves.toMatchObject({
+      dataConflictBeforeBackup: false,
+      syncRequiredBeforeBackup: false,
+    });
+  });
+
   it("incrementally imports a newer deletion-only snapshot but rejects an older rollback", async () => {
     const directory = new MemoryDirectoryHandle("backup");
     const { reviews, sessions, settings } = await seedBrowserData({ dataSetId: "dataset-shared" });
@@ -747,8 +1210,8 @@ describe("file backup side effects", () => {
     await expect(db.practiceSessions.count()).resolves.toBe(0);
     await expect(db.reviews.count()).resolves.toBe(0);
     await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toEqual({
-      result: "ready",
-      backupStateChanged: false,
+      result: "synced-down",
+      backupStateChanged: true,
     });
 
     await writeBackupSnapshot(
@@ -765,7 +1228,7 @@ describe("file backup side effects", () => {
     await expect(db.reviews.count()).resolves.toBe(0);
   });
 
-  it("falls back to a full import when browser data no longer matches the digest baseline", async () => {
+  it("reports a conflict when browser and backup learning records both change", async () => {
     const directory = new MemoryDirectoryHandle("backup");
     const { reviews, sessions, settings } = await seedBrowserData({ dataSetId: "dataset-shared" });
     await rememberDirectory(directory);
@@ -787,12 +1250,15 @@ describe("file backup side effects", () => {
     directory.resetReadCounts();
     const clearReviews = vi.spyOn(db.reviews, "clear");
 
-    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({ result: "synced-up" });
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "data-conflict",
+    });
 
-    expect(clearReviews).toHaveBeenCalledTimes(1);
+    expect(clearReviews).not.toHaveBeenCalled();
     expect(directory.child("days").readCount("2026-07-04.json")).toBe(1);
     expect(directory.child("days").readCount("2026-07-05.json")).toBe(1);
-    await expect(db.reviews.orderBy("startedAt").toArray()).resolves.toEqual([reviews[0], addedReview]);
+    await expect(db.reviews.get(reviews[0].id)).resolves.toMatchObject({ activeMs: 1_234 });
+    await expect(db.reviews.get(addedReview.id)).resolves.toBeUndefined();
   });
 
   it("reads day files when an established backup manifest changes externally", async () => {
@@ -813,7 +1279,7 @@ describe("file backup side effects", () => {
     await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-backup" }]);
   });
 
-  it("imports newer backup data before practice when no conflict guard exists", async () => {
+  it("requires a choice for a legacy backup with no shared baseline", async () => {
     const directory = new MemoryDirectoryHandle("backup");
     await seedBrowserData({
       dataSetId: "dataset-shared",
@@ -823,16 +1289,21 @@ describe("file backup side effects", () => {
       dataSetId: "dataset-shared",
       reviewEndedAt: "2026-07-05T10:00:02.000+08:00",
     });
+    const legacyManifest = directory.readJson<BackupManifest>("manifest.json");
+    delete legacyManifest.learningDataDigest;
+    directory.writeText("manifest.json", JSON.stringify(legacyManifest));
     await rememberDirectory(directory);
     directory.resetReadCounts();
 
-    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({ result: "synced-up" });
+    await expect(syncBackupBeforeActivity({ requestPermission: true })).resolves.toMatchObject({
+      result: "data-conflict",
+    });
 
     expect(directory.child("days").readCount("2026-07-05.json")).toBe(1);
-    await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-backup" }]);
+    await expect(db.reviews.toArray()).resolves.toMatchObject([{ id: "review-browser" }]);
     await expect(db.backupStates.get("default")).resolves.toMatchObject({
-      dataConflictBeforeBackup: false,
-      syncRequiredBeforeBackup: false,
+      dataConflictBeforeBackup: true,
+      syncRequiredBeforeBackup: true,
     });
   });
 
