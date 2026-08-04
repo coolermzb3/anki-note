@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Formatter, Renderer, StaveNote, Voice } from "vexflow";
-import { playTargetNote, startTargetNote, type SustainedPianoNote } from "../audio/piano";
+import { playTargetNote, startTargetNote } from "../audio/piano";
 import { formatTargetNoteLabel, getNotesForGroups, noteToVexKey } from "../domain/notes";
 import {
   buildNoteNameColumns,
@@ -17,6 +17,22 @@ import {
   STUDY_COLUMN_ORDER_OPTIONS,
   type StudyColumnOrderId,
 } from "./StudyDisplayControls";
+import {
+  beginHeldNoteSequence,
+  findNearestAnswerPitch,
+  getListeningTargetNoteName,
+  getStudyPitchPoolKey,
+  getUniqueStudyPitches,
+  recordListeningAttempt,
+  releaseHeldNoteSequence,
+  selectFreeSinglePitch,
+  selectListeningSelfCheckTarget,
+  shouldRerollListeningTarget,
+  type HeldNoteSequence,
+  type ListeningAttemptState,
+  type ListeningSelfCheckTarget,
+  type StudyPlaybackMode,
+} from "./studyListeningSelfCheck";
 import { StaffRecallView } from "./StaffRecallView";
 import { STUDY_STAFF_LAYOUT } from "./staffLayoutProfiles";
 import {
@@ -36,6 +52,7 @@ type FixedStudyColumnOrderId = Exclude<StudyColumnOrderId, "random">;
 interface StudyUiPreferences {
   columnOrderId: StudyColumnOrderId;
   isColumnOrderReversed: boolean;
+  playbackMode: StudyPlaybackMode;
   showLabels: boolean;
 }
 
@@ -56,12 +73,17 @@ const FIXED_STUDY_COLUMN_ANSWER_NUMBERS: Record<FixedStudyColumnOrderId, readonl
 const DEFAULT_STUDY_UI_PREFERENCES: StudyUiPreferences = {
   columnOrderId: "circle",
   isColumnOrderReversed: false,
+  playbackMode: "octaves",
   showLabels: true,
 };
-interface HeldColumnPlayback {
-  cancelled: boolean;
-  noteName: NoteName;
-  releases: Array<SustainedPianoNote["release"]>;
+interface HeldKeyboardPlayback extends HeldNoteSequence {
+  highlightedNoteName?: NoteName;
+  kind: "answer" | "prompt";
+}
+
+interface ListeningSelfCheckSession {
+  attempt: ListeningAttemptState;
+  target?: ListeningSelfCheckTarget;
 }
 
 interface StudyNoteMapProps {
@@ -115,6 +137,10 @@ function isStudyColumnOrderId(value: unknown): value is StudyColumnOrderId {
   );
 }
 
+function isStudyPlaybackMode(value: unknown): value is StudyPlaybackMode {
+  return value === "single" || value === "octaves";
+}
+
 function parseStudyUiPreferences(value: unknown, fallback: StudyUiPreferences): StudyUiPreferences {
   if (!isRecord(value)) {
     return fallback;
@@ -126,6 +152,7 @@ function parseStudyUiPreferences(value: unknown, fallback: StudyUiPreferences): 
       typeof value.isColumnOrderReversed === "boolean"
         ? value.isColumnOrderReversed
         : fallback.isColumnOrderReversed,
+    playbackMode: isStudyPlaybackMode(value.playbackMode) ? value.playbackMode : fallback.playbackMode,
     showLabels: typeof value.showLabels === "boolean" ? value.showLabels : fallback.showLabels,
   };
 }
@@ -576,9 +603,16 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-function collectHighlightedNoteNames(heldColumns: Map<string, HeldColumnPlayback>, flashedNoteName?: NoteName): Set<NoteName> {
+function collectHighlightedNoteNames(
+  heldKeys: Map<string, HeldKeyboardPlayback>,
+  flashedNoteName?: NoteName,
+): Set<NoteName> {
   const noteNames = new Set<NoteName>();
-  heldColumns.forEach((held) => noteNames.add(held.noteName));
+  heldKeys.forEach((held) => {
+    if (held.highlightedNoteName) {
+      noteNames.add(held.highlightedNoteName);
+    }
+  });
   if (flashedNoteName) {
     noteNames.add(flashedNoteName);
   }
@@ -593,9 +627,11 @@ function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
   );
   const [highlightedNoteNames, setHighlightedNoteNames] = useState<ReadonlySet<NoteName>>(() => new Set());
   const [highlightedNoteId, setHighlightedNoteId] = useState<string | undefined>();
+  const [listeningSelfCheckStarted, setListeningSelfCheckStarted] = useState(false);
   const [randomAnswerNumbers, setRandomAnswerNumbers] = useState(() => shuffleStudyAnswerNumbers());
   const columnOrderId = studyUiPreferences.columnOrderId;
   const isColumnOrderReversed = studyUiPreferences.isColumnOrderReversed;
+  const playbackMode = studyUiPreferences.playbackMode;
   const showLabels = studyUiPreferences.showLabels;
   const setColumnOrderId = (nextColumnOrderId: StudyColumnOrderId): void => {
     if (nextColumnOrderId === "random") {
@@ -606,13 +642,17 @@ function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
   const setIsColumnOrderReversed = (nextIsColumnOrderReversed: boolean): void => {
     setStudyUiPreferences((current) => ({ ...current, isColumnOrderReversed: nextIsColumnOrderReversed }));
   };
+  const setPlaybackMode = (nextPlaybackMode: StudyPlaybackMode): void => {
+    setStudyUiPreferences((current) => ({ ...current, playbackMode: nextPlaybackMode }));
+  };
   const setShowLabels = (nextShowLabels: boolean): void => {
     setStudyUiPreferences((current) => ({ ...current, showLabels: nextShowLabels }));
   };
   const columnFlashTimerRef = useRef<number | undefined>();
   const flashedColumnRef = useRef<NoteName | undefined>();
   const noteFlashTimerRef = useRef<number | undefined>();
-  const heldColumnsRef = useRef(new Map<string, HeldColumnPlayback>());
+  const heldKeysRef = useRef(new Map<string, HeldKeyboardPlayback>());
+  const listeningSelfCheckRef = useRef<ListeningSelfCheckSession>({ attempt: "untouched" });
   const columnDefinitions = useMemo(
     () => getStudyColumnDefinitions(columnOrderId, isColumnOrderReversed, randomAnswerNumbers),
     [columnOrderId, isColumnOrderReversed, randomAnswerNumbers],
@@ -622,19 +662,21 @@ function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
     () => getNotesForGroups(settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode),
     [settings.enabledGroupIds, settings.includeInterStaffLedgerSpellings, staffNotationMode],
   );
+  const studyPitches = useMemo(() => getUniqueStudyPitches(studyNotes), [studyNotes]);
+  const studyPitchPoolKey = getStudyPitchPoolKey(studyPitches);
   const columns = useMemo(() => buildNoteNameColumns(studyNotes, columnDefinitions), [columnDefinitions, studyNotes]);
   const showInterStaffLedger = studyNotes.some((note) => note.isInterStaffLedgerSpelling);
 
   const flashColumn = useCallback((noteName: NoteName): void => {
     window.clearTimeout(columnFlashTimerRef.current);
     flashedColumnRef.current = noteName;
-    setHighlightedNoteNames(collectHighlightedNoteNames(heldColumnsRef.current, noteName));
+    setHighlightedNoteNames(collectHighlightedNoteNames(heldKeysRef.current, noteName));
     columnFlashTimerRef.current = window.setTimeout(() => {
       if (flashedColumnRef.current !== noteName) {
         return;
       }
       flashedColumnRef.current = undefined;
-      setHighlightedNoteNames(collectHighlightedNoteNames(heldColumnsRef.current));
+      setHighlightedNoteNames(collectHighlightedNoteNames(heldKeysRef.current));
     }, KEY_FLASH_MS);
   }, []);
 
@@ -669,78 +711,85 @@ function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
     [columns, flashColumn],
   );
 
-  const releaseHeldColumn = useCallback((key: string): void => {
-    const held = heldColumnsRef.current.get(key);
+  const releaseHeldKey = useCallback((inputId: string): Promise<void> | undefined => {
+    const held = heldKeysRef.current.get(inputId);
     if (!held) {
       return;
     }
-    held.cancelled = true;
-    heldColumnsRef.current.delete(key);
-    held.releases.splice(0).forEach((release) => release());
-    setHighlightedNoteNames(collectHighlightedNoteNames(heldColumnsRef.current, flashedColumnRef.current));
+    heldKeysRef.current.delete(inputId);
+    const settled = releaseHeldNoteSequence(held);
+    setHighlightedNoteNames(collectHighlightedNoteNames(heldKeysRef.current, flashedColumnRef.current));
+    return settled;
   }, []);
 
-  const releaseAllHeldColumns = useCallback((): void => {
-    Array.from(heldColumnsRef.current.keys()).forEach(releaseHeldColumn);
-  }, [releaseHeldColumn]);
+  const releaseAllHeldKeys = useCallback((): void => {
+    Array.from(heldKeysRef.current.keys()).forEach((inputId) => void releaseHeldKey(inputId));
+  }, [releaseHeldKey]);
 
-  const startHeldColumn = useCallback(
-    (key: string, noteName: NoteName): void => {
-      if (heldColumnsRef.current.has(key)) {
+  const startHeldNotes = useCallback(
+    (
+      inputId: string,
+      notes: readonly TargetNote[],
+      kind: HeldKeyboardPlayback["kind"],
+      highlightedNoteName?: NoteName,
+      beforeStart: Promise<void> = Promise.resolve(),
+    ): void => {
+      if (heldKeysRef.current.has(inputId) || notes.length === 0) {
         return;
       }
-      const column = columns.find((candidate) => candidate.noteName === noteName);
-      if (!column) {
-        return;
-      }
 
-      const held: HeldColumnPlayback = { cancelled: false, noteName, releases: [] };
-      heldColumnsRef.current.set(key, held);
-      setHighlightedNoteNames(collectHighlightedNoteNames(heldColumnsRef.current, flashedColumnRef.current));
+      const held: HeldKeyboardPlayback = {
+        cancelled: false,
+        highlightedNoteName,
+        kind,
+        releases: [],
+        settled: Promise.resolve(),
+      };
+      heldKeysRef.current.set(inputId, held);
+      setHighlightedNoteNames(collectHighlightedNoteNames(heldKeysRef.current, flashedColumnRef.current));
 
-      void (async () => {
-        for (const note of dedupeTargetNotePitches(column.notes).sort(compareTargetNotePitch)) {
-          if (held.cancelled) {
-            break;
-          }
-          const sustained = await startTargetNote(note).catch(() => undefined);
-          if (!sustained) {
-            continue;
-          }
-          if (held.cancelled) {
-            sustained.release();
-            break;
-          }
-          held.releases.push(sustained.release);
-          if (STUDY_STAFF_LAYOUT.columnNoteDelayMs > 0) {
-            await delay(STUDY_STAFF_LAYOUT.columnNoteDelayMs);
-          }
-        }
-      })();
+      beginHeldNoteSequence(
+        held,
+        dedupeTargetNotePitches([...notes]).sort(compareTargetNotePitch),
+        beforeStart,
+        (note) => startTargetNote(note).catch(() => undefined),
+        () =>
+          STUDY_STAFF_LAYOUT.columnNoteDelayMs > 0 ? delay(STUDY_STAFF_LAYOUT.columnNoteDelayMs) : undefined,
+      );
     },
-    [columns],
+    [],
   );
+
+  const resetListeningSelfCheck = useCallback((): void => {
+    listeningSelfCheckRef.current = { attempt: "untouched" };
+    setListeningSelfCheckStarted(false);
+  }, []);
 
   useEffect(() => {
     return () => {
       window.clearTimeout(columnFlashTimerRef.current);
       window.clearTimeout(noteFlashTimerRef.current);
-      releaseAllHeldColumns();
+      releaseAllHeldKeys();
     };
-  }, [releaseAllHeldColumns]);
+  }, [releaseAllHeldKeys]);
 
   useEffect(() => {
-    releaseAllHeldColumns();
-  }, [columns, releaseAllHeldColumns]);
+    releaseAllHeldKeys();
+  }, [columns, releaseAllHeldKeys]);
+
+  useEffect(() => {
+    releaseAllHeldKeys();
+    resetListeningSelfCheck();
+  }, [playbackMode, releaseAllHeldKeys, resetListeningSelfCheck, studyPitchPoolKey]);
 
   useEffect(() => {
     function releaseForFocusLoss(): void {
-      releaseAllHeldColumns();
+      releaseAllHeldKeys();
     }
 
     function releaseForVisibilityChange(): void {
       if (document.visibilityState === "hidden") {
-        releaseAllHeldColumns();
+        releaseAllHeldKeys();
       }
     }
 
@@ -750,27 +799,107 @@ function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
       window.removeEventListener("blur", releaseForFocusLoss);
       document.removeEventListener("visibilitychange", releaseForVisibilityChange);
     };
-  }, [releaseAllHeldColumns]);
+  }, [releaseAllHeldKeys]);
 
   useEffect(() => {
+    function getInputId(event: KeyboardEvent): string {
+      return `keyboard:${event.code || event.key}`;
+    }
+
+    function getAnswerPlaybackNotes(noteName: NoteName): TargetNote[] {
+      if (playbackMode === "octaves") {
+        return studyPitches.filter((pitch) => pitch.noteName === noteName);
+      }
+      const target = listeningSelfCheckRef.current.target;
+      const pitch =
+        target?.mode === "single"
+          ? findNearestAnswerPitch(noteName, target.pitch, studyPitches)
+          : selectFreeSinglePitch(noteName, studyPitches);
+      return pitch ? [pitch] : [];
+    }
+
+    function startListeningSelfCheck(inputId: string): void {
+      const current = listeningSelfCheckRef.current;
+      const needsTarget =
+        !current.target ||
+        current.target.mode !== playbackMode ||
+        shouldRerollListeningTarget(current.attempt);
+      const target = needsTarget
+        ? selectListeningSelfCheckTarget(
+            playbackMode,
+            studyPitches,
+            current.target?.mode === playbackMode ? current.target : undefined,
+          )
+        : current.target;
+      if (!target) {
+        return;
+      }
+      if (needsTarget) {
+        listeningSelfCheckRef.current = { attempt: "untouched", target };
+      }
+      setListeningSelfCheckStarted(true);
+      const notes =
+        target.mode === "single"
+          ? [target.pitch]
+          : studyPitches.filter((pitch) => pitch.noteName === target.noteName);
+      startHeldNotes(inputId, notes, "prompt");
+    }
+
+    function answerListeningSelfCheck(noteName: NoteName): boolean {
+      const current = listeningSelfCheckRef.current;
+      if (!current.target) {
+        return false;
+      }
+      const correct = noteName === getListeningTargetNoteName(current.target);
+      listeningSelfCheckRef.current = {
+        ...current,
+        attempt: recordListeningAttempt(current.attempt, correct),
+      };
+      return correct;
+    }
+
+    function releaseHeldPrompts(): Promise<void> {
+      const releases = Array.from(heldKeysRef.current)
+        .filter(([, held]) => held.kind === "prompt")
+        .map(([inputId]) => releaseHeldKey(inputId));
+      return Promise.all(releases).then(() => undefined);
+    }
+
     function handleKeyDown(event: KeyboardEvent): void {
       if (isFormControlTarget(event.target)) {
+        return;
+      }
+      const inputId = getInputId(event);
+      if (event.key === "0") {
+        if (event.altKey || event.ctrlKey || event.metaKey) {
+          return;
+        }
+        event.preventDefault();
+        if (!event.repeat) {
+          startListeningSelfCheck(inputId);
+        }
         return;
       }
       const column = NOTE_NAME_COLUMNS.find((candidate) => candidate.answerNumber === event.key);
       if (column) {
         event.preventDefault();
         if (!event.repeat) {
-          startHeldColumn(event.key, column.noteName);
+          const notes = getAnswerPlaybackNotes(column.noteName);
+          if (notes.length > 0) {
+            const beforeStart = answerListeningSelfCheck(column.noteName)
+              ? releaseHeldPrompts()
+              : Promise.resolve();
+            startHeldNotes(inputId, notes, "answer", column.noteName, beforeStart);
+          }
         }
       }
     }
 
     function handleKeyUp(event: KeyboardEvent): void {
-      const column = NOTE_NAME_COLUMNS.find((candidate) => candidate.answerNumber === event.key);
-      if (column) {
+      const inputId = getInputId(event);
+      if (heldKeysRef.current.has(inputId)) {
         event.preventDefault();
-        releaseHeldColumn(event.key);
+        releaseHeldKey(inputId);
       }
     }
 
@@ -780,19 +909,51 @@ function StudyMapContent({ settings }: StudyMapContentProps): JSX.Element {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [releaseHeldColumn, startHeldColumn]);
+  }, [playbackMode, releaseHeldKey, startHeldNotes, studyPitches]);
 
   return (
     <>
       <StudyDisplayControls
         columnOrderId={columnOrderId}
         isColumnOrderReversed={isColumnOrderReversed}
-        label="学习页显示设置"
+        label="学习页设置"
         onColumnOrderChange={setColumnOrderId}
         onColumnOrderReversedChange={setIsColumnOrderReversed}
         onShowLabelsChange={setShowLabels}
         showLabels={showLabels}
       />
+      <div className="study-playback-row">
+        <div className="study-control-block">
+          <span className="control-label">按键播放</span>
+          <div className="segmented study-playback-options">
+            <button
+              className={playbackMode === "single" ? "active" : ""}
+              onClick={() => setPlaybackMode("single")}
+              type="button"
+            >
+              单音
+            </button>
+            <button
+              className={playbackMode === "octaves" ? "active" : ""}
+              onClick={() => setPlaybackMode("octaves")}
+              type="button"
+            >
+              八度
+            </button>
+          </div>
+        </div>
+        <p aria-live="polite" className="study-listening-hint">
+          {listeningSelfCheckStarted ? (
+            <>
+              按<kbd>0</kbd>听音，按其它键作答。未作答/答对后会换音
+            </>
+          ) : (
+            <>
+              按 <kbd>0</kbd> 开始听音自测
+            </>
+          )}
+        </p>
+      </div>
       <div className="study-map-frame" aria-label="学习页音位图">
         <figure className="study-figure">
           {studyNotes.length > 0 ? (

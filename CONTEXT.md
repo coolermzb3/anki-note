@@ -171,6 +171,14 @@ _Avoid_: Computer-keyboard input, MIDI shortcut, chord answer
 The piano sound played for a target note or answer input. Automatic target-note cues play for a new prompt and each resume, while an answer cue uses the submitted MIDI octave when supported or the target octave for an octave-less input.
 _Avoid_: Ear-training prompt, sound effect
 
+**Listening self-check**:
+A non-persistent study activity in which the learner hears a target randomly selected from the current study range and freely plays the existing fixed-do number keys to identify its note name. `单音` draws unique pitches and uses the nearest available answer pitch, while `八度` draws note names and plays every available pitch of that name; an untouched target may be rerolled, but one wrong attempt locks it until solved or discarded, and the activity never creates a review or practice history.
+_Avoid_: Practice session, review, audio cue, formal ear training
+
+**Study playback mode**:
+The study-page audio choice labeled `按键播放`: `单音` plays one available pitch, while `八度` plays every available pitch of the selected note name across the current study range. The choice is a local study-page preference rather than learning history.
+_Avoid_: Chord mode, practice condition
+
 **Review**:
 One complete attempt at a card, from the moment the prompt appears until the learner submits the correct answer. A review may contain multiple wrong answers before the final correct answer.
 _Avoid_: Click attempt, answer event

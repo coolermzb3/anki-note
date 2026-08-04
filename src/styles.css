@@ -531,6 +531,25 @@ main {
   min-width: 64px;
 }
 
+.study-playback-options button {
+  min-width: 64px;
+}
+
+.study-playback-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: -8px 0 16px;
+}
+
+.study-listening-hint {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .study-map-frame {
   min-width: 0;
 }
