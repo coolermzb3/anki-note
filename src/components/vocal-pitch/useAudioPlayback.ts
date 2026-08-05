@@ -1,17 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VocalAudioMaterial } from "../../domain/vocalPitch";
+import { decodeAudioBlob } from "../../vocal-pitch/pitchAnalysis";
+import { peakNormalizationGain } from "../../vocal-pitch/playbackGain";
 
-export function useAudioPlayback(material: VocalAudioMaterial | null) {
+export function useAudioPlayback(material: VocalAudioMaterial | null, volume: number) {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const normalizationGainRef = useRef(1);
+  const volumeRef = useRef(volume);
   const animationRef = useRef<number | null>(null);
+  volumeRef.current = volume;
+
+  const applyGain = useCallback(() => {
+    const gainNode = gainNodeRef.current;
+    if (gainNode) {
+      gainNode.gain.value = normalizationGainRef.current * volumeRef.current;
+    }
+  }, []);
 
   useEffect(() => {
     const audio = new Audio();
     audio.preload = "metadata";
     audioRef.current = audio;
+    const context = new AudioContext();
+    const source = context.createMediaElementSource(audio);
+    const gainNode = context.createGain();
+    source.connect(gainNode);
+    gainNode.connect(context.destination);
+    audioContextRef.current = context;
+    gainNodeRef.current = gainNode;
     const onEnded = () => {
       setIsPlaying(false);
       setCurrentTime(audio.duration || 0);
@@ -27,8 +48,15 @@ export function useAudioPlayback(material: VocalAudioMaterial | null) {
       audio.removeEventListener("pause", onPause);
       audio.removeEventListener("play", onPlay);
       audioRef.current = null;
+      gainNodeRef.current = null;
+      audioContextRef.current = null;
+      void context.close().catch(() => undefined);
     };
   }, []);
+
+  useEffect(() => {
+    applyGain();
+  }, [applyGain, volume]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -37,17 +65,30 @@ export function useAudioPlayback(material: VocalAudioMaterial | null) {
     setIsPlaying(false);
     setCurrentTime(0);
     if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
-    if (material) {
-      const url = URL.createObjectURL(material.audioBlob);
-      audioUrlRef.current = url;
-      audio.src = url;
-      audio.load();
-    } else {
+    normalizationGainRef.current = 1;
+    applyGain();
+    if (!material) {
       audioUrlRef.current = null;
       audio.removeAttribute("src");
       audio.load();
+      return undefined;
     }
-  }, [material?.audioBlob, material?.id]);
+    const url = URL.createObjectURL(material.audioBlob);
+    audioUrlRef.current = url;
+    audio.src = url;
+    audio.load();
+    let cancelled = false;
+    void decodeAudioBlob(material.audioBlob)
+      .then((decoded) => {
+        if (cancelled) return;
+        normalizationGainRef.current = peakNormalizationGain(decoded.samples);
+        applyGain();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [applyGain, material?.audioBlob, material?.id]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -81,6 +122,7 @@ export function useAudioPlayback(material: VocalAudioMaterial | null) {
       audio.pause();
       return;
     }
+    await audioContextRef.current?.resume();
     if (audio.currentTime >= material.durationSeconds - 0.02) {
       audio.currentTime = 0;
       setCurrentTime(0);

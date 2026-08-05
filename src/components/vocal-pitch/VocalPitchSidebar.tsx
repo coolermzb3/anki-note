@@ -14,19 +14,23 @@ interface VocalPitchSidebarProps {
   allowBackgroundRecording: boolean;
   backupStatus: "backed-up" | "browser-only" | "failed" | "out-of-sync";
   config: VocalPitchAnalysisConfig;
+  currentMaterialId: string | null;
   disabled: boolean;
   inputLevel: number;
   materials: readonly VocalAudioMaterial[];
   microphones: readonly MicrophoneChoice[];
+  playbackVolume: number;
   onCollapse: () => void;
   onAllowBackgroundRecordingChange: (allow: boolean) => void;
   onConfigChange: (next: VocalPitchAnalysisConfig) => void;
   onDelete: (material: VocalAudioMaterial) => void;
   onDownload: (material: VocalAudioMaterial) => void;
   onOpen: (material: VocalAudioMaterial) => void;
+  onPlaybackVolumeChange: (volume: number) => void;
   onRefreshMicrophones: () => void;
   onRename: (material: VocalAudioMaterial, name: string) => void;
   onSelectMicrophone: (deviceId: string) => void;
+  renameRequest: { id: string; name: string; token: number } | null;
   selectedMicrophoneId: string;
 }
 
@@ -46,19 +50,23 @@ export function VocalPitchSidebar({
   allowBackgroundRecording,
   backupStatus,
   config,
+  currentMaterialId,
   disabled,
   inputLevel,
   materials,
   microphones,
+  playbackVolume,
   onCollapse,
   onAllowBackgroundRecordingChange,
   onConfigChange,
   onDelete,
   onDownload,
   onOpen,
+  onPlaybackVolumeChange,
   onRefreshMicrophones,
   onRename,
   onSelectMicrophone,
+  renameRequest,
   selectedMicrophoneId,
 }: VocalPitchSidebarProps): JSX.Element {
   const [parametersOpen, setParametersOpen] = useLocalStorageState("anki-note.vocalPitch.parametersOpen", true);
@@ -74,6 +82,13 @@ export function VocalPitchSidebar({
     renameInputRef.current?.focus();
     renameInputRef.current?.select();
   }, [renamingId]);
+
+  useEffect(() => {
+    if (!renameRequest) return;
+    setContextMenu(null);
+    setRenamingId(renameRequest.id);
+    setRenameValue(renameRequest.name);
+  }, [renameRequest]);
 
   useEffect(() => {
     setReferencePitchDraft(String(config.referencePitchHz));
@@ -167,6 +182,18 @@ export function VocalPitchSidebar({
                 <span>切换标签页或最小化时继续录音</span>
               </label>
               <label>
+                <span>回放音量 <small>{Math.round(playbackVolume * 100)}%</small></span>
+                <input
+                  disabled={disabled}
+                  max={1}
+                  min={0}
+                  step={0.01}
+                  type="range"
+                  value={playbackVolume}
+                  onChange={(event) => onPlaybackVolumeChange(Number(event.target.value))}
+                />
+              </label>
+              <label>
                 <span>A4 参考频率</span>
                 <span className="vocal-number-with-unit">
                   <input
@@ -253,7 +280,7 @@ export function VocalPitchSidebar({
               {materials.map((material) => (
                 <div
                   key={material.id}
-                  className="vocal-material-row"
+                  className={material.id === currentMaterialId ? "vocal-material-row current" : "vocal-material-row"}
                   title={`${new Date(material.createdAt).toLocaleString()} · ${material.source === "recording" ? "录音" : "上传"} · ${material.mimeType || "未知格式"} · ${(material.size / 1024 / 1024).toFixed(2)} MB · ${material.analysis ? `${material.analysis.detectorId} v${material.analysis.detectorVersion}` : "未分析"}`}
                   onContextMenu={(event) => {
                     event.preventDefault();

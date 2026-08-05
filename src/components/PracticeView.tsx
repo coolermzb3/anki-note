@@ -1703,7 +1703,7 @@ export function PracticeView({
               <div className="practice-setup-heading-meta">
                 <div className="practice-midi-heading-status">
                   <span title={midi.selectedInput?.name}>
-                    {midi.isConnected ? `MIDI 已连接：${midi.selectedInput?.name}` : "MIDI 未连接 · 当前只认音名"}
+                    {midi.isConnected ? `MIDI 已连接：${midi.selectedInput?.name}` : "MIDI 未连接"}
                   </span>
                   <button onClick={onOpenSettings}>设备设置</button>
                 </div>

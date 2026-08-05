@@ -20,6 +20,13 @@ export function useVocalAudioLibrary({
   const [materials, setMaterials] = useState<VocalAudioMaterial[]>([]);
   const [backupStatus, setBackupStatus] = useState<VocalAudioBackupStatus>(backupDirectory ? "out-of-sync" : "browser-only");
   const mountedRef = useRef(false);
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const enqueue = useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
+    const run = queueRef.current.then(task, task);
+    queueRef.current = run.then(() => undefined, () => undefined);
+    return run;
+  }, []);
 
   const refresh = useCallback(async (): Promise<VocalAudioMaterial[]> => {
     const nextMaterials = await listVocalAudioMaterials();
@@ -60,11 +67,20 @@ export function useVocalAudioLibrary({
     }
   }, [backupDirectory, onBackupStateChanged, onMessage]);
 
-  const save = useCallback(async (material: VocalAudioMaterial) => {
-    await saveVocalAudioMaterial(material);
-    await refresh();
-    await sync();
-  }, [refresh, sync]);
+  const saveLocal = useCallback((material: VocalAudioMaterial): Promise<void> =>
+    enqueue(async () => {
+      await saveVocalAudioMaterial(material);
+      await refresh();
+    }), [enqueue, refresh]);
+
+  const syncBackup = useCallback((): Promise<void> => enqueue(sync), [enqueue, sync]);
+
+  const save = useCallback((material: VocalAudioMaterial): Promise<void> =>
+    enqueue(async () => {
+      await saveVocalAudioMaterial(material);
+      await refresh();
+      await sync();
+    }), [enqueue, refresh, sync]);
 
   const rename = useCallback(async (material: VocalAudioMaterial, name: string): Promise<VocalAudioMaterial> => {
     const updated = { ...material, name, updatedAt: new Date().toISOString() };
@@ -72,11 +88,12 @@ export function useVocalAudioLibrary({
     return updated;
   }, [save]);
 
-  const remove = useCallback(async (id: string) => {
-    await deleteVocalAudioMaterial(id);
-    await refresh();
-    await sync();
-  }, [refresh, sync]);
+  const remove = useCallback((id: string): Promise<void> =>
+    enqueue(async () => {
+      await deleteVocalAudioMaterial(id);
+      await refresh();
+      await sync();
+    }), [enqueue, refresh, sync]);
 
-  return { backupStatus, materials, refresh, remove, rename, save };
+  return { backupStatus, materials, refresh, remove, rename, save, saveLocal, syncBackup };
 }

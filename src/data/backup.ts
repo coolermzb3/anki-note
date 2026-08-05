@@ -1126,7 +1126,11 @@ export function supportsFileBackups(): boolean {
   return typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
 }
 
-export async function chooseBackupDirectory(): Promise<BackupDirectorySelectionResult> {
+export function chooseBackupDirectory(): Promise<BackupDirectorySelectionResult> {
+  return enqueueBackupWrite(chooseBackupDirectoryInner);
+}
+
+async function chooseBackupDirectoryInner(): Promise<BackupDirectorySelectionResult> {
   if (!window.showDirectoryPicker) {
     throw new Error(backupText.errors.unsupportedDirectoryPicker);
   }
@@ -1155,7 +1159,13 @@ export async function chooseBackupDirectory(): Promise<BackupDirectorySelectionR
   return "ready";
 }
 
-export async function syncBackupBeforeActivity({
+export function syncBackupBeforeActivity(options: {
+  requestPermission?: boolean;
+} = {}): Promise<BackupPreflightOutcome> {
+  return enqueueBackupWrite(() => syncBackupBeforeActivityInner(options));
+}
+
+async function syncBackupBeforeActivityInner({
   requestPermission = false,
 }: {
   requestPermission?: boolean;
@@ -1285,7 +1295,15 @@ async function writeCurrentBrowserDataToBackup(
   return false;
 }
 
-export async function writeBackupNow(): Promise<void> {
+let backupWriteQueue: Promise<void> = Promise.resolve();
+
+function enqueueBackupWrite<T>(task: () => Promise<T>): Promise<T> {
+  const run = backupWriteQueue.then(task, task);
+  backupWriteQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function writeBackupNowInner(): Promise<void> {
   const state = await getBackupState();
   if (!state.directoryHandle) {
     return;
@@ -1319,7 +1337,11 @@ export async function writeBackupNow(): Promise<void> {
   }
 }
 
-export async function writeBackupIfSafe(): Promise<void> {
+export function writeBackupNow(): Promise<void> {
+  return enqueueBackupWrite(writeBackupNowInner);
+}
+
+async function writeBackupIfSafeInner(): Promise<void> {
   const state = await getBackupState();
   if (!state.directoryHandle || explicitDataConflict(state)) {
     return;
@@ -1338,7 +1360,15 @@ export async function writeBackupIfSafe(): Promise<void> {
   }
 }
 
-export async function resolveBackupConflict(resolution: BackupConflictResolution): Promise<void> {
+export function writeBackupIfSafe(): Promise<void> {
+  return enqueueBackupWrite(writeBackupIfSafeInner);
+}
+
+export function resolveBackupConflict(resolution: BackupConflictResolution): Promise<void> {
+  return enqueueBackupWrite(() => resolveBackupConflictInner(resolution));
+}
+
+async function resolveBackupConflictInner(resolution: BackupConflictResolution): Promise<void> {
   const state = await getBackupState();
   if (!state.directoryHandle) {
     return;

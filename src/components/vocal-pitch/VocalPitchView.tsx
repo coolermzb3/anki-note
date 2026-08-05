@@ -107,12 +107,17 @@ export function VocalPitchView({
     "anki-note.vocalPitch.allowBackgroundRecording",
     false,
   );
+  const [playbackVolume, setPlaybackVolume] = useLocalStorageState(
+    "anki-note.vocalPitch.playbackVolume",
+    1,
+  );
   const [microphones, setMicrophones] = useState<MicrophoneChoice[]>([]);
   const [followResetKey, setFollowResetKey] = useState(0);
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
   const [backupPreflightPending, setBackupPreflightPending] = useState(false);
   const [materialLibraryOutdated, setMaterialLibraryOutdated] = useState(false);
   const [recordingResultPending, setRecordingResultPending] = useState(false);
+  const [renameRequest, setRenameRequest] = useState<{ id: string; name: string; token: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const analysisRequestGenerationRef = useRef(0);
   const lastNavigationRequestIdRef = useRef(0);
@@ -122,7 +127,7 @@ export function VocalPitchView({
   const preflightGenerationRef = useRef(0);
   const recordingResultPendingRef = useRef(false);
   const recordingEndedRef = useRef<(result: VocalRecordingResult, reason: VocalRecordingEndReason) => void>(() => undefined);
-  const playback = useAudioPlayback(material);
+  const playback = useAudioPlayback(material, playbackVolume);
   const {
     beginMouseResize,
     beginTouchResize,
@@ -146,6 +151,8 @@ export function VocalPitchView({
     remove: removeLibraryMaterial,
     rename: renameLibraryMaterial,
     save: saveLibraryMaterial,
+    saveLocal: saveLibraryMaterialLocal,
+    syncBackup: syncLibraryBackup,
   } = useVocalAudioLibrary({
     backupDirectory,
     libraryRevision,
@@ -389,7 +396,7 @@ export function VocalPitchView({
     loadRecordingResult(result, reason);
   };
 
-  const saveCurrentMaterial = useCallback(async (): Promise<VocalAudioMaterial | null> => {
+  const saveCurrentMaterial = useCallback(async (promptRename = false): Promise<VocalAudioMaterial | null> => {
     if (!material) return null;
     if (!(await runLibraryMutationPreflight())) return null;
     if (
@@ -399,13 +406,15 @@ export function VocalPitchView({
       return null;
     }
     const next = { ...material, config, updatedAt: new Date().toISOString() };
-    await saveLibraryMaterial(next);
+    await saveLibraryMaterialLocal(next);
     materialBaseUpdatedAtRef.current = next.updatedAt;
     setMaterialLibraryOutdated(false);
     setMaterial(next);
     setDirty(false);
+    if (promptRename) setRenameRequest({ id: next.id, name: next.name, token: Date.now() });
+    void syncLibraryBackup().catch(() => undefined);
     return next;
-  }, [config, material, materialLibraryOutdated, runLibraryMutationPreflight, saveLibraryMaterial]);
+  }, [config, material, materialLibraryOutdated, runLibraryMutationPreflight, saveLibraryMaterialLocal, syncLibraryBackup]);
 
   const runWithReplacementGuard = useCallback((after: () => void | Promise<void>) => {
     if (dirty && material) {
@@ -723,7 +732,7 @@ export function VocalPitchView({
           >
             {playback.isPlaying ? <Pause size={17} /> : <Play size={17} />}
             {playback.isPlaying ? "暂停" : "播放"}
-            <kbd>Space</kbd>
+            {recordingActive ? null : <kbd>Space</kbd>}
           </button>
           <i className="vocal-control-divider" />
           <button disabled={mutationBusy || !material} onClick={reanalyze}>
@@ -733,7 +742,7 @@ export function VocalPitchView({
           <button disabled={mutationBusy} onClick={openUploadPicker}>
             <FolderUp size={17} /> 上传文件
           </button>
-          <button disabled={mutationBusy || analysisProgress !== null || !material || !dirty} onClick={() => void saveCurrentMaterial()}>
+          <button disabled={mutationBusy || analysisProgress !== null || !material || !dirty} onClick={() => void saveCurrentMaterial(true)}>
             <Save size={17} /> 保存
           </button>
           {controlStatusMessage || analysisProgress !== null ? (
@@ -774,19 +783,23 @@ export function VocalPitchView({
             allowBackgroundRecording={allowBackgroundRecording}
             backupStatus={backupStatus}
             config={config}
+            currentMaterialId={material?.id ?? null}
             disabled={mutationBusy}
             inputLevel={recorder.inputLevel}
             materials={materials}
             microphones={microphones}
+            playbackVolume={playbackVolume}
             onCollapse={() => setSidebarOpen(false)}
             onAllowBackgroundRecordingChange={setAllowBackgroundRecording}
             onConfigChange={changeConfig}
             onDelete={(target) => setDialog({ kind: "delete", material: target })}
             onDownload={downloadMaterial}
             onOpen={openMaterial}
+            onPlaybackVolumeChange={setPlaybackVolume}
             onRefreshMicrophones={() => void refreshMicrophones()}
             onRename={(target, name) => void renameMaterial(target, name)}
             onSelectMicrophone={setSelectedMicrophoneId}
+            renameRequest={renameRequest}
             selectedMicrophoneId={selectedMicrophoneId}
           />
         </>

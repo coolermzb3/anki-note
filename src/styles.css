@@ -3903,6 +3903,13 @@ button.danger:hover:not(:disabled) {
   box-shadow: none;
 }
 
+.vocal-material-row.current > button,
+.vocal-material-row.current > button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
 .vocal-material-row button span {
   min-width: 0;
   overflow: hidden;
