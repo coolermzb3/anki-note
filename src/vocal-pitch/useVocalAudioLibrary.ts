@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { writeBackupIfSafe } from "../data/backup";
+import { digestBlob } from "../data/blobDigest";
 import { deleteVocalAudioMaterial, listVocalAudioMaterials, saveVocalAudioMaterial } from "../data/db";
 import { getVocalAudioBackupStatus, type VocalAudioBackupStatus } from "../data/vocalAudioBackup";
 import type { VocalAudioMaterial } from "../domain/vocalPitch";
+import { decodeAudioBlob } from "./pitchAnalysis";
+import { encodeMonoWavPcm16 } from "./wavEncode";
 
 interface UseVocalAudioLibraryOptions {
   backupDirectory?: FileSystemDirectoryHandle;
@@ -81,6 +84,36 @@ export function useVocalAudioLibrary({
       await refresh();
       await sync();
     }), [enqueue, refresh, sync]);
+
+  const migrateVideoMaterials = useCallback((): Promise<void> =>
+    enqueue(async () => {
+      const videos = (await listVocalAudioMaterials()).filter((material) => material.mimeType.startsWith("video/"));
+      if (videos.length === 0) return;
+      let failed = 0;
+      for (const material of videos) {
+        try {
+          const decoded = await decodeAudioBlob(material.audioBlob);
+          const audioBlob = encodeMonoWavPcm16(decoded.samples, decoded.sampleRate);
+          await saveVocalAudioMaterial({
+            ...material,
+            audioBlob,
+            mimeType: audioBlob.type,
+            size: audioBlob.size,
+            contentDigest: await digestBlob(audioBlob),
+            updatedAt: new Date().toISOString(),
+          });
+        } catch {
+          failed += 1;
+        }
+      }
+      await refresh();
+      await sync();
+      if (failed > 0) onMessage(`${failed} 个视频素材转换为音频失败，仍保留原始文件`);
+    }), [enqueue, onMessage, refresh, sync]);
+
+  useEffect(() => {
+    void migrateVideoMaterials().catch(() => undefined);
+  }, [migrateVideoMaterials]);
 
   const rename = useCallback(async (material: VocalAudioMaterial, name: string): Promise<VocalAudioMaterial> => {
     const updated = { ...material, name, updatedAt: new Date().toISOString() };

@@ -4,6 +4,7 @@ import type {
   VocalPitchAnalysis,
   VocalPitchAnalysisConfig,
 } from "../domain/vocalPitch";
+import { vocalAudioFileExtension } from "../domain/vocalPitch";
 import type { BackupDayFileMetadata } from "../domain/types";
 import { digestBlob } from "./blobDigest";
 import { getBackupState, listVocalAudioMaterials, replaceVocalAudioMaterials } from "./db";
@@ -48,18 +49,6 @@ function countEntries(entries: readonly VocalAudioBackupEntry[]): VocalAudioCoun
     recordingCount: entries.filter((entry) => entry.source === "recording").length,
     uploadCount: entries.filter((entry) => entry.source === "upload").length,
   };
-}
-
-function extensionFor(material: VocalAudioMaterial): string {
-  const originalExtension = material.originalFileName?.match(/\.([a-z0-9]{1,8})$/i)?.[1];
-  if (originalExtension) {
-    return originalExtension.toLowerCase();
-  }
-  if (material.mimeType.includes("wav")) return "wav";
-  if (material.mimeType.includes("mpeg")) return "mp3";
-  if (material.mimeType.includes("mp4")) return "m4a";
-  if (material.mimeType.includes("ogg")) return "ogg";
-  return "webm";
 }
 
 async function writeFile(directory: FileSystemDirectoryHandle, filename: string, data: Blob | string): Promise<void> {
@@ -125,7 +114,7 @@ async function toEntry(material: VocalAudioMaterial): Promise<VocalAudioBackupEn
     contentDigest: material.contentDigest,
     config: material.config,
     originalFileName: material.originalFileName,
-    audioFileName: `${material.id}.${extensionFor(material)}`,
+    audioFileName: `${material.id}.${vocalAudioFileExtension(material)}`,
     analysisDigest: material.analysis ? await digestText(JSON.stringify(material.analysis)) : undefined,
     analysisFileName: material.analysis ? `${material.id}.analysis.json` : undefined,
   };

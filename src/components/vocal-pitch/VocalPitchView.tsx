@@ -19,6 +19,7 @@ import {
   getLatestVoicedPitchFrame,
   getPitchFrameAtTime,
   normalizeVocalPitchConfig,
+  vocalAudioFileExtension,
   type VocalAudioMaterial,
   type VocalPitchAnalysisConfig,
   type VocalPitchFrame,
@@ -37,6 +38,7 @@ import {
   type DecodedAudio,
 } from "../../vocal-pitch/pitchAnalysis";
 import { digestBlob } from "../../data/blobDigest";
+import { encodeMonoWavPcm16 } from "../../vocal-pitch/wavEncode";
 import {
   useVocalRecorder,
   type VocalRecordingEndReason,
@@ -70,9 +72,12 @@ function isAbortError(error: unknown): boolean {
 }
 
 function fileDownloadName(material: VocalAudioMaterial): string {
-  const extension = material.originalFileName?.match(/\.([a-z0-9]{1,8})$/i)?.[1]
-    ?? (material.mimeType.includes("wav") ? "wav" : material.mimeType.includes("mpeg") ? "mp3" : "webm");
-  return material.name.toLowerCase().endsWith(`.${extension.toLowerCase()}`) ? material.name : `${material.name}.${extension}`;
+  const extension = vocalAudioFileExtension(material);
+  const originalExtension = material.originalFileName?.match(/\.([a-z0-9]{1,8})$/i)?.[1];
+  const baseName = originalExtension && material.name.toLowerCase().endsWith(`.${originalExtension.toLowerCase()}`)
+    ? material.name.slice(0, material.name.length - originalExtension.length - 1)
+    : material.name;
+  return `${baseName}.${extension}`;
 }
 
 function recordingEndMessage(reason: VocalRecordingEndReason): string | null {
@@ -470,7 +475,10 @@ export function VocalPitchView({
       if (decoded.durationSeconds > MAX_AUDIO_SECONDS + 0.1) {
         throw new Error("文件超过 10 分钟，未导入");
       }
-      const contentDigest = await digestBlob(file);
+      const audioBlob = file.type.startsWith("video/")
+        ? encodeMonoWavPcm16(decoded.samples, decoded.sampleRate)
+        : file;
+      const contentDigest = await digestBlob(audioBlob);
       if (analysisRequestGenerationRef.current !== generation) return;
       const now = new Date().toISOString();
       const next: VocalAudioMaterial = {
@@ -479,13 +487,13 @@ export function VocalPitchView({
         name: file.name,
         originalFileName: file.name,
         source: "upload",
-        mimeType: file.type || "application/octet-stream",
-        size: file.size,
+        mimeType: audioBlob.type || "application/octet-stream",
+        size: audioBlob.size,
         durationSeconds: decoded.durationSeconds,
         createdAt: now,
         updatedAt: now,
         contentDigest,
-        audioBlob: file,
+        audioBlob,
         config,
       };
       materialBaseUpdatedAtRef.current = null;
@@ -704,7 +712,7 @@ export function VocalPitchView({
                   <Mic size={18} /> 录一段清唱
                 </button>
                 <button disabled={backupPreflightPending} onClick={openUploadPicker}>
-                  <FolderUp size={17} /> 上传音频
+                  <FolderUp size={17} /> 上传音视频
                 </button>
               </div>
               <span>支持最长 10 分钟的单声部人声</span>
@@ -740,7 +748,7 @@ export function VocalPitchView({
             {analysisProgress !== null ? "取消分析" : "重新分析"}
           </button>
           <button disabled={mutationBusy} onClick={openUploadPicker}>
-            <FolderUp size={17} /> 上传文件
+            <FolderUp size={17} /> 上传音视频
           </button>
           <button disabled={mutationBusy || analysisProgress !== null || !material || !dirty} onClick={() => void saveCurrentMaterial(true)}>
             <Save size={17} /> 保存
@@ -757,7 +765,7 @@ export function VocalPitchView({
           <input
             ref={fileInputRef}
             className="sr-only"
-            accept="audio/*"
+            accept="audio/*,video/*"
             type="file"
             onChange={(event) => {
               const file = event.target.files?.[0];

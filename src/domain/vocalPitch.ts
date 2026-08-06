@@ -48,6 +48,18 @@ export interface VocalAudioMaterial {
   updatedAt: string;
 }
 
+export function vocalAudioFileExtension(material: Pick<VocalAudioMaterial, "mimeType" | "originalFileName">): string {
+  if (material.mimeType.startsWith("audio/")) {
+    if (material.mimeType.includes("wav")) return "wav";
+    if (material.mimeType.includes("mpeg")) return "mp3";
+    if (material.mimeType.includes("mp4")) return "m4a";
+    if (material.mimeType.includes("ogg")) return "ogg";
+    if (material.mimeType.includes("webm")) return "webm";
+  }
+  const originalExtension = material.originalFileName?.match(/\.([a-z0-9]{1,8})$/i)?.[1];
+  return originalExtension ? originalExtension.toLowerCase() : "webm";
+}
+
 export const DEFAULT_VOCAL_PITCH_CONFIG: VocalPitchAnalysisConfig = {
   referencePitchHz: 440,
   minFrequencyHz: 65.406,
