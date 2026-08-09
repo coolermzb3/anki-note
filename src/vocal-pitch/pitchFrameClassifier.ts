@@ -1,10 +1,14 @@
 import type { VocalPitchAnalysisConfig, VocalPitchFrame } from "../domain/vocalPitch";
-import type { PitchFrameDetector } from "./pitchFrameDetector";
+import type { PitchFrameCandidate, PitchFrameDetector } from "./pitchFrameDetector";
 
 export interface ClassifiedPitchFrame {
+  alternativeCandidate?: PitchFrameCandidate;
+  candidate: PitchFrameCandidate;
   frame: VocalPitchFrame;
   rms: number;
 }
+
+export const MIN_VOICED_RMS = 0.0018;
 
 function calculateRms(samples: Float32Array): number {
   let energy = 0;
@@ -21,14 +25,18 @@ export function classifyPitchFrame(
   config: VocalPitchAnalysisConfig,
   timeSeconds: number,
 ): ClassifiedPitchFrame {
-  const { clarity, frequencyHz } = detector.detect(samples, sampleRate);
+  const { fallback, primary } = detector.detect(samples, sampleRate);
+  const candidate = fallback;
+  const { clarity, frequencyHz } = candidate;
   const rms = calculateRms(samples);
   const voiced =
-    rms >= 0.0018 &&
+    rms >= MIN_VOICED_RMS &&
     clarity >= config.voicingThreshold &&
     frequencyHz >= config.minFrequencyHz &&
     frequencyHz <= config.maxFrequencyHz;
   return {
+    alternativeCandidate: primary,
+    candidate,
     frame: {
       confidence: Math.min(1, Math.max(0, clarity)),
       frequencyHz: voiced ? frequencyHz : null,

@@ -1,15 +1,23 @@
 import { PitchDetector } from "pitchy";
 
 export const VOCAL_PITCH_DETECTOR_ID = "pitchy-mpm";
-export const VOCAL_PITCH_DETECTOR_VERSION = 1;
+export const VOCAL_PITCH_DETECTOR_VERSION = 2;
+
+const FALLBACK_PEAK_THRESHOLD = 0.9;
+const PRIMARY_PEAK_THRESHOLD = 0.95;
 
 export interface PitchFrameCandidate {
   clarity: number;
   frequencyHz: number;
 }
 
+export interface PitchFrameDetection {
+  fallback: PitchFrameCandidate;
+  primary: PitchFrameCandidate;
+}
+
 export interface PitchFrameDetector {
-  detect: (samples: Float32Array, sampleRate: number) => PitchFrameCandidate;
+  detect: (samples: Float32Array, sampleRate: number) => PitchFrameDetection;
 }
 
 function nextPowerOfTwo(value: number): number {
@@ -21,11 +29,18 @@ export function getPitchFrameSize(sampleRate: number, minFrequencyHz: number): n
 }
 
 export function createPitchFrameDetector(frameSize: number): PitchFrameDetector {
-  const detector = PitchDetector.forFloat32Array(frameSize);
+  const primaryDetector = PitchDetector.forFloat32Array(frameSize);
+  const fallbackDetector = PitchDetector.forFloat32Array(frameSize);
+  primaryDetector.clarityThreshold = PRIMARY_PEAK_THRESHOLD;
+  fallbackDetector.clarityThreshold = FALLBACK_PEAK_THRESHOLD;
   return {
     detect: (samples, sampleRate) => {
-      const [frequencyHz, clarity] = detector.findPitch(samples, sampleRate);
-      return { clarity, frequencyHz };
+      const [frequencyHz, clarity] = primaryDetector.findPitch(samples, sampleRate);
+      const [fallbackFrequencyHz, fallbackClarity] = fallbackDetector.findPitch(samples, sampleRate);
+      return {
+        primary: { clarity, frequencyHz },
+        fallback: { clarity: fallbackClarity, frequencyHz: fallbackFrequencyHz },
+      };
     },
   };
 }

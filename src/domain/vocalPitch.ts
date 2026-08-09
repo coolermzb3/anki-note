@@ -16,7 +16,7 @@ export interface VocalPitchAnalysis {
   analyzedAt: string;
   config: VocalPitchAnalysisConfig;
   detectorId: "pitchy-mpm";
-  detectorVersion: 1;
+  detectorVersion: 1 | 2;
   frames: VocalPitchFrame[];
   hopSeconds: number;
   sampleRate: number;
