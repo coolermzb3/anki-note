@@ -1,7 +1,8 @@
 import { PitchDetector } from "pitchy";
+import { VOCAL_PITCH_MIN_FREQUENCY_HZ } from "../domain/vocalPitch";
 
-export const VOCAL_PITCH_DETECTOR_ID = "pitchy-mpm";
-export const VOCAL_PITCH_DETECTOR_VERSION = 2;
+export const VOCAL_PITCH_DETECTOR_ID = "mpm-c";
+export const VOCAL_PITCH_DETECTOR_VERSION = 4;
 
 const FALLBACK_PEAK_THRESHOLD = 0.9;
 const PRIMARY_PEAK_THRESHOLD = 0.95;
@@ -24,8 +25,8 @@ function nextPowerOfTwo(value: number): number {
   return 2 ** Math.ceil(Math.log2(value));
 }
 
-export function getPitchFrameSize(sampleRate: number, minFrequencyHz: number): number {
-  return Math.min(16384, Math.max(2048, nextPowerOfTwo((sampleRate / minFrequencyHz) * 3)));
+export function getPitchFrameSize(sampleRate: number): number {
+  return Math.min(16384, Math.max(2048, nextPowerOfTwo((sampleRate / VOCAL_PITCH_MIN_FREQUENCY_HZ) * 3)));
 }
 
 export function createPitchFrameDetector(frameSize: number): PitchFrameDetector {

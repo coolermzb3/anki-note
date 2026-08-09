@@ -2,8 +2,6 @@ import { ChevronDown, ChevronRight, Download, Mic, PanelRightClose, RotateCcw, T
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   formatDuration,
-  formatMidiNote,
-  midiToFrequency,
   type VocalAudioMaterial,
   type VocalPitchAnalysisConfig,
 } from "../../domain/vocalPitch";
@@ -33,11 +31,6 @@ interface VocalPitchSidebarProps {
   renameRequest: { id: string; name: string; token: number } | null;
   selectedMicrophoneId: string;
 }
-
-const PITCH_OPTIONS = Array.from({ length: 85 }, (_, index) => {
-  const midi = 24 + index;
-  return { frequencyHz: midiToFrequency(midi), label: formatMidiNote(midi), midi };
-});
 
 const BACKUP_LABELS = {
   "backed-up": "已备份",
@@ -218,30 +211,6 @@ export function VocalPitchSidebar({
                 </span>
               </label>
               <label>
-                <span>最低检测音高</span>
-                <select
-                  disabled={disabled}
-                  value={PITCH_OPTIONS.reduce((best, option) =>
-                    Math.abs(option.frequencyHz - config.minFrequencyHz) < Math.abs(best.frequencyHz - config.minFrequencyHz) ? option : best,
-                  ).midi}
-                  onChange={(event) => onConfigChange({ ...config, minFrequencyHz: midiToFrequency(Number(event.target.value)) })}
-                >
-                  {PITCH_OPTIONS.slice(0, -12).map((option) => <option key={option.midi} value={option.midi}>{option.label}</option>)}
-                </select>
-              </label>
-              <label>
-                <span>最高检测音高</span>
-                <select
-                  disabled={disabled}
-                  value={PITCH_OPTIONS.reduce((best, option) =>
-                    Math.abs(option.frequencyHz - config.maxFrequencyHz) < Math.abs(best.frequencyHz - config.maxFrequencyHz) ? option : best,
-                  ).midi}
-                  onChange={(event) => onConfigChange({ ...config, maxFrequencyHz: midiToFrequency(Number(event.target.value)) })}
-                >
-                  {PITCH_OPTIONS.slice(12).map((option) => <option key={option.midi} value={option.midi}>{option.label}</option>)}
-                </select>
-              </label>
-              <label>
                 <span>有声判断 <small>{Math.round(config.voicingThreshold * 100)}%</small></span>
                 <input
                   disabled={disabled}
@@ -251,18 +220,6 @@ export function VocalPitchSidebar({
                   type="range"
                   value={config.voicingThreshold}
                   onChange={(event) => onConfigChange({ ...config, voicingThreshold: Number(event.target.value) })}
-                />
-              </label>
-              <label>
-                <span>平滑程度 <small>{Math.round(config.smoothing * 100)}%</small></span>
-                <input
-                  disabled={disabled}
-                  max={1}
-                  min={0}
-                  step={0.05}
-                  type="range"
-                  value={config.smoothing}
-                  onChange={(event) => onConfigChange({ ...config, smoothing: Number(event.target.value) })}
                 />
               </label>
             </div>

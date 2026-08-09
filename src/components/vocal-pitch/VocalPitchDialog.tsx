@@ -5,6 +5,7 @@ import { useEffect } from "react";
 
 export type VocalDialogState =
   | { kind: "delete"; material: VocalAudioMaterial }
+  | { kind: "enhanced-analysis"; targetId: string }
   | {
     kind: "recording-leave";
     reason: VocalRecordingEndReason;
@@ -19,7 +20,10 @@ interface VocalPitchDialogProps {
   onCancel: () => void;
   onDelete: () => void;
   onDiscardUnsaved: () => void;
+  onDownloadEnhanced: () => void;
+  onPostponeEnhanced: () => void;
   onSaveUnsaved: () => void;
+  onSuppressEnhancedToday: () => void;
   onResolveRecordingLeave: (save: boolean) => void | Promise<void>;
 }
 
@@ -28,7 +32,10 @@ export function VocalPitchDialog({
   onCancel,
   onDelete,
   onDiscardUnsaved,
+  onDownloadEnhanced,
+  onPostponeEnhanced,
   onSaveUnsaved,
+  onSuppressEnhancedToday,
   onResolveRecordingLeave,
 }: VocalPitchDialogProps): JSX.Element {
   useEffect(() => {
@@ -50,6 +57,9 @@ export function VocalPitchDialog({
   } else if (dialog.kind === "unsaved") {
     title = "保存当前修改？";
     detail = "继续后会替换当前工作区内容。";
+  } else if (dialog.kind === "enhanced-analysis") {
+    title = "下载增强音高分析模型？";
+    detail = "建议下载以改善八度跳变和连续性。模型约 42 MB，推理组件约 6 MB，首次合计约 48 MB；下载后缓存在此浏览器，之后自动使用，无需额外权限。";
   } else {
     title = "删除音频素材？";
     detail = `将删除“${dialog.material.name}”，此操作无法撤销。`;
@@ -78,6 +88,13 @@ export function VocalPitchDialog({
             <>
               <button className="danger" onClick={onDelete}>删除</button>
               <button autoFocus onClick={onCancel}>取消</button>
+            </>
+          ) : null}
+          {dialog.kind === "enhanced-analysis" ? (
+            <>
+              <button className="primary" onClick={onDownloadEnhanced}>下载并增强分析</button>
+              <button onClick={onSuppressEnhancedToday}>今日不再提醒</button>
+              <button autoFocus onClick={onPostponeEnhanced}>稍后</button>
             </>
           ) : null}
         </div>

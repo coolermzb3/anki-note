@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_VOCAL_PITCH_CONFIG,
   describeFrequency,
   detectorConfigChanged,
   formatDuration,
@@ -9,6 +10,8 @@ import {
   getPitchFrameAtTime,
   midiToFrequency,
   normalizeVocalPitchConfig,
+  VOCAL_PITCH_MAX_FREQUENCY_HZ,
+  VOCAL_PITCH_MIN_FREQUENCY_HZ,
   type VocalPitchFrame,
 } from "./vocalPitch";
 
@@ -33,7 +36,7 @@ describe("vocal pitch helpers", () => {
     expect(getLatestVoicedPitchFrame([frames[2]])).toBeNull();
   });
 
-  it("normalizes unsafe configuration without inverting the range", () => {
+  it("normalizes editable settings and replaces legacy detector bounds", () => {
     expect(
       normalizeVocalPitchConfig({
         referencePitchHz: 900,
@@ -44,23 +47,24 @@ describe("vocal pitch helpers", () => {
       }),
     ).toEqual({
       referencePitchHz: 460,
-      minFrequencyHz: 30,
-      maxFrequencyHz: 31,
+      minFrequencyHz: VOCAL_PITCH_MIN_FREQUENCY_HZ,
+      maxFrequencyHz: VOCAL_PITCH_MAX_FREQUENCY_HZ,
       voicingThreshold: 0.99,
-      smoothing: 0,
     });
   });
 
-  it("does not require redetection for a reference-pitch-only change", () => {
+  it("requires redetection only for an editable detector setting", () => {
     const config = normalizeVocalPitchConfig({
       referencePitchHz: 440,
       minFrequencyHz: 65,
       maxFrequencyHz: 1047,
       voicingThreshold: 0.85,
-      smoothing: 0.4,
     });
     expect(detectorConfigChanged(config, { ...config, referencePitchHz: 442 })).toBe(false);
-    expect(detectorConfigChanged(config, { ...config, smoothing: 0.6 })).toBe(true);
+    expect(detectorConfigChanged(config, { ...config, smoothing: 0.6 })).toBe(false);
+    expect(detectorConfigChanged(config, { ...config, minFrequencyHz: 30, maxFrequencyHz: 4000 })).toBe(false);
+    expect(detectorConfigChanged(config, { ...config, voicingThreshold: 0.9 })).toBe(true);
+    expect(DEFAULT_VOCAL_PITCH_CONFIG.maxFrequencyHz).toBe(VOCAL_PITCH_MAX_FREQUENCY_HZ);
     expect(formatDuration(65.9)).toBe("1:05");
   });
 });

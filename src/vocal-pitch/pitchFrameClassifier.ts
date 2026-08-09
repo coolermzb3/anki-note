@@ -1,4 +1,9 @@
-import type { VocalPitchAnalysisConfig, VocalPitchFrame } from "../domain/vocalPitch";
+import {
+  VOCAL_PITCH_MAX_FREQUENCY_HZ,
+  VOCAL_PITCH_MIN_FREQUENCY_HZ,
+  type VocalPitchAnalysisConfig,
+  type VocalPitchFrame,
+} from "../domain/vocalPitch";
 import type { PitchFrameCandidate, PitchFrameDetector } from "./pitchFrameDetector";
 
 export interface ClassifiedPitchFrame {
@@ -32,8 +37,8 @@ export function classifyPitchFrame(
   const voiced =
     rms >= MIN_VOICED_RMS &&
     clarity >= config.voicingThreshold &&
-    frequencyHz >= config.minFrequencyHz &&
-    frequencyHz <= config.maxFrequencyHz;
+    frequencyHz >= VOCAL_PITCH_MIN_FREQUENCY_HZ &&
+    frequencyHz <= VOCAL_PITCH_MAX_FREQUENCY_HZ;
   return {
     alternativeCandidate: primary,
     candidate,

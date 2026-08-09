@@ -34,6 +34,7 @@ import {
 } from "./components/vocal-pitch/VocalPitchView";
 import { useBlurButtonAfterPointerClick } from "./components/useBlurButtonAfterPointerClick";
 import { useMidiInput } from "./midi/useMidiInput";
+import { ENHANCED_PITCH_MODEL_CACHE } from "./vocal-pitch/enhancedPitchModels";
 
 type View = PracticeNavigationExitTarget;
 
@@ -522,7 +523,11 @@ export function App(): JSX.Element {
       .getRegistrations()
       .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
       .then(() => ("caches" in window ? caches.keys() : []))
-      .then((keys) => Promise.all(keys.filter((key) => key.startsWith("anki-note-")).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(
+        keys
+          .filter((key) => key.startsWith("anki-note-") && key !== ENHANCED_PITCH_MODEL_CACHE)
+          .map((key) => caches.delete(key)),
+      ))
       .catch(() => undefined);
   }, []);
 

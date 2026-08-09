@@ -1,37 +1,27 @@
 import type { VocalPitchAnalysis, VocalPitchAnalysisConfig, VocalPitchFrame } from "../domain/vocalPitch";
+import type { PitchAnalysisMode, PitchWorkerAnalyzeRequest, PitchWorkerResponse } from "./pitchWorkerProtocol";
 
-interface AnalyzeRequest {
-  config: VocalPitchAnalysisConfig;
-  id: number;
-  sampleRate: number;
-  samples: ArrayBuffer;
-  type: "analyze";
-}
-
-interface AnalyzeProgress {
-  id: number;
-  progress: number;
-  type: "progress";
-}
-
-interface AnalyzeComplete {
-  analysis: VocalPitchAnalysis;
-  id: number;
-  type: "complete";
-}
-
-interface AnalyzeFailure {
-  error: string;
-  id: number;
-  type: "error";
-}
-
-type WorkerResponse = AnalyzeProgress | AnalyzeComplete | AnalyzeFailure;
+export type { PitchAnalysisMode } from "./pitchWorkerProtocol";
 
 export interface DecodedAudio {
   durationSeconds: number;
+  modelSamples?: Float32Array;
   sampleRate: number;
   samples: Float32Array;
+}
+
+export async function prepareEnhancedPitchAudio(decoded: DecodedAudio): Promise<DecodedAudio> {
+  if (decoded.sampleRate === 16_000 || typeof OfflineAudioContext === "undefined") return decoded;
+  const outputLength = Math.max(1, Math.round(decoded.samples.length * 16_000 / decoded.sampleRate));
+  const context = new OfflineAudioContext(1, outputLength, 16_000);
+  const buffer = context.createBuffer(1, decoded.samples.length, decoded.sampleRate);
+  buffer.getChannelData(0).set(decoded.samples);
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.connect(context.destination);
+  source.start();
+  const rendered = await context.startRendering();
+  return { ...decoded, modelSamples: rendered.getChannelData(0).slice() };
 }
 
 export interface PitchAnalysisTask {
@@ -63,6 +53,8 @@ export function startPitchAnalysis(
   sampleRate: number,
   config: VocalPitchAnalysisConfig,
   onProgress: (progress: number) => void,
+  mode: PitchAnalysisMode = "mpm-c",
+  modelSamples?: Float32Array,
 ): PitchAnalysisTask {
   const worker = new Worker(new URL("./pitch.worker.ts", import.meta.url), { type: "module" });
   const id = nextAnalysisId;
@@ -72,7 +64,7 @@ export function startPitchAnalysis(
 
   const result = new Promise<VocalPitchAnalysis>((resolve, reject) => {
     rejectTask = reject;
-    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+    worker.onmessage = (event: MessageEvent<PitchWorkerResponse>) => {
       if (event.data.id !== id) {
         return;
       }
@@ -94,8 +86,19 @@ export function startPitchAnalysis(
       reject(new Error(event.message || "分析线程发生错误"));
     };
     const sampleBuffer = samples.buffer instanceof ArrayBuffer ? samples.buffer : samples.slice().buffer;
-    const request: AnalyzeRequest = { type: "analyze", id, samples: sampleBuffer, sampleRate, config };
-    worker.postMessage(request, [sampleBuffer]);
+    const modelSampleBuffer = modelSamples
+      ? modelSamples.buffer instanceof ArrayBuffer ? modelSamples.buffer : modelSamples.slice().buffer
+      : undefined;
+    const request: PitchWorkerAnalyzeRequest = {
+      type: "analyze",
+      id,
+      samples: sampleBuffer,
+      sampleRate,
+      config,
+      mode,
+      modelSamples: modelSampleBuffer,
+    };
+    worker.postMessage(request, modelSampleBuffer ? [sampleBuffer, modelSampleBuffer] : [sampleBuffer]);
   });
 
   return {

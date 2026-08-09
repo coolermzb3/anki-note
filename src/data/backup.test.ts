@@ -14,7 +14,13 @@ import type {
   StaffRecallRunRecordV1,
 } from "../domain/types";
 import { backupText } from "../domain/backupText";
-import { DEFAULT_VOCAL_PITCH_CONFIG, type VocalAudioMaterial, type VocalAudioSource } from "../domain/vocalPitch";
+import {
+  DEFAULT_VOCAL_PITCH_CONFIG,
+  VOCAL_PITCH_MAX_FREQUENCY_HZ,
+  VOCAL_PITCH_MIN_FREQUENCY_HZ,
+  type VocalAudioMaterial,
+  type VocalAudioSource,
+} from "../domain/vocalPitch";
 import { digestBlob } from "./blobDigest";
 import { db, makeDefaultSettings } from "./db";
 import {
@@ -781,7 +787,10 @@ describe("file backup side effects", () => {
     await writeBackupNow();
     const localBackupState = await db.backupStates.get("default");
 
-    const remoteMaterial = await makeBackedVocalAudioMaterial("vocal-remote");
+    const remoteMaterial = {
+      ...(await makeBackedVocalAudioMaterial("vocal-remote")),
+      config: { ...DEFAULT_VOCAL_PITCH_CONFIG, minFrequencyHz: 30, maxFrequencyHz: 300, smoothing: 0.8 },
+    };
     await db.vocalAudioMaterials.clear();
     await db.vocalAudioMaterials.put(remoteMaterial);
     await writeBackupNow();
@@ -793,7 +802,13 @@ describe("file backup side effects", () => {
     const outcome = await syncBackupBeforeActivity({ requestPermission: true });
 
     expect(outcome.result).toBe("synced-up");
-    await expect(db.vocalAudioMaterials.toArray()).resolves.toMatchObject([{ id: "vocal-remote" }]);
+    await expect(db.vocalAudioMaterials.toArray()).resolves.toMatchObject([{
+      id: "vocal-remote",
+      config: {
+        minFrequencyHz: VOCAL_PITCH_MIN_FREQUENCY_HZ,
+        maxFrequencyHz: VOCAL_PITCH_MAX_FREQUENCY_HZ,
+      },
+    }]);
   });
 
   it("merges newer backup practice data with a local vocal audio change", async () => {

@@ -204,7 +204,7 @@ export function useVocalRecorder({ allowBackgroundRecording, config, onEnded, on
     }
     const source = context.createMediaStreamSource(stream);
     const analyser = context.createAnalyser();
-    const frameSize = getPitchFrameSize(context.sampleRate, callbacksRef.current.config.minFrequencyHz);
+    const frameSize = getPitchFrameSize(context.sampleRate);
     analyser.fftSize = frameSize;
     analyser.smoothingTimeConstant = 0;
     source.connect(analyser);

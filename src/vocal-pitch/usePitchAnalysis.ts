@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VocalPitchAnalysis, VocalPitchAnalysisConfig } from "../domain/vocalPitch";
-import { startPitchAnalysis, type DecodedAudio, type PitchAnalysisTask } from "./pitchAnalysis";
+import {
+  startPitchAnalysis,
+  type DecodedAudio,
+  type PitchAnalysisMode,
+  type PitchAnalysisTask,
+} from "./pitchAnalysis";
 
 export function usePitchAnalysis() {
   const [progress, setProgress] = useState<number | null>(null);
@@ -21,13 +26,14 @@ export function usePitchAnalysis() {
   const run = useCallback(async (
     decoded: DecodedAudio,
     config: VocalPitchAnalysisConfig,
+    mode: PitchAnalysisMode = "mpm-c",
   ): Promise<VocalPitchAnalysis> => {
     cancel();
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     setProgress(0);
-    setMessage("正在分析音高…");
-    const task = startPitchAnalysis(decoded.samples, decoded.sampleRate, config, setProgress);
+    setMessage(mode === "enhanced" ? "正在进行增强音高分析…" : "正在使用 MPM-C 分析音高…");
+    const task = startPitchAnalysis(decoded.samples, decoded.sampleRate, config, setProgress, mode, decoded.modelSamples);
     taskRef.current = task;
     try {
       const analysis = await task.result;

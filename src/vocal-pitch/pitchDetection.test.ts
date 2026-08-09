@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_VOCAL_PITCH_CONFIG } from "../domain/vocalPitch";
+import {
+  DEFAULT_VOCAL_PITCH_CONFIG,
+  VOCAL_PITCH_MAX_FREQUENCY_HZ,
+  VOCAL_PITCH_MIN_FREQUENCY_HZ,
+} from "../domain/vocalPitch";
 import type { ClassifiedPitchFrame } from "./pitchFrameClassifier";
 import { createPitchFrameDetector } from "./pitchFrameDetector";
 import { analyzePitchSamples, postProcessPitchFrames } from "./pitchDetection";
@@ -67,7 +71,8 @@ describe("MPM pitch detection baseline", () => {
     expect(analysis.hopSeconds).toBeCloseTo(0.01);
     expect(analysis.frames[0].timeSeconds).toBeCloseTo(0.064);
     expect(analysis.frames[1].timeSeconds - analysis.frames[0].timeSeconds).toBeCloseTo(analysis.hopSeconds);
-    expect(analysis.detectorVersion).toBe(2);
+    expect(analysis.detectorId).toBe("mpm-c");
+    expect(analysis.detectorVersion).toBe(4);
   });
 
   it("tracks a synthetic sweep and a tone with light noise", () => {
@@ -97,7 +102,7 @@ describe("MPM pitch detection baseline", () => {
   });
 
   it("repairs only short octave excursions and evidence-backed gaps", () => {
-    const config = { ...DEFAULT_VOCAL_PITCH_CONFIG, smoothing: 0 };
+    const config = DEFAULT_VOCAL_PITCH_CONFIG;
     const repaired = postProcessPitchFrames(
       [
         classifiedFrame(220, 220, 0.99, 0),
@@ -148,9 +153,11 @@ describe("MPM pitch detection baseline", () => {
     expect(analyzePitchSamples(noise, 16_000, DEFAULT_VOCAL_PITCH_CONFIG).frames.every((frame) => frame.frequencyHz === null)).toBe(true);
   });
 
-  it("rejects detected frequencies outside the configured range", () => {
-    const config = { ...DEFAULT_VOCAL_PITCH_CONFIG, minFrequencyHz: 230, maxFrequencyHz: 300, smoothing: 0 };
+  it("replaces legacy configured ranges with the fixed detector range", () => {
+    const config = { ...DEFAULT_VOCAL_PITCH_CONFIG, minFrequencyHz: 230, maxFrequencyHz: 300 };
     const analysis = analyzePitchSamples(sineWave(220, 1, 16_000), 16_000, config);
-    expect(analysis.frames.every((frame) => frame.frequencyHz === null)).toBe(true);
+    expect(analysis.frames.filter((frame) => frame.frequencyHz !== null).length).toBeGreaterThan(70);
+    expect(analysis.config.minFrequencyHz).toBe(VOCAL_PITCH_MIN_FREQUENCY_HZ);
+    expect(analysis.config.maxFrequencyHz).toBe(VOCAL_PITCH_MAX_FREQUENCY_HZ);
   });
 });

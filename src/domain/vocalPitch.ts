@@ -5,18 +5,21 @@ export interface VocalPitchFrame {
 }
 
 export interface VocalPitchAnalysisConfig {
+  /** Fixed detector bound, retained in saved analysis metadata and legacy backups. */
   maxFrequencyHz: number;
+  /** Fixed detector bound, retained in saved analysis metadata and legacy backups. */
   minFrequencyHz: number;
   referencePitchHz: number;
-  smoothing: number;
+  /** Kept only while reading legacy saved materials. It no longer changes analysis. */
+  smoothing?: number;
   voicingThreshold: number;
 }
 
 export interface VocalPitchAnalysis {
   analyzedAt: string;
   config: VocalPitchAnalysisConfig;
-  detectorId: "pitchy-mpm";
-  detectorVersion: 1 | 2;
+  detectorId: "mpm-c" | "mpm-c-swiftf0-fcpe" | "pitchy-mpm";
+  detectorVersion: number;
   frames: VocalPitchFrame[];
   hopSeconds: number;
   sampleRate: number;
@@ -60,12 +63,14 @@ export function vocalAudioFileExtension(material: Pick<VocalAudioMaterial, "mime
   return originalExtension ? originalExtension.toLowerCase() : "webm";
 }
 
+export const VOCAL_PITCH_MIN_FREQUENCY_HZ = 65.406;
+export const VOCAL_PITCH_MAX_FREQUENCY_HZ = 1975.5;
+
 export const DEFAULT_VOCAL_PITCH_CONFIG: VocalPitchAnalysisConfig = {
   referencePitchHz: 440,
-  minFrequencyHz: 65.406,
-  maxFrequencyHz: 1046.502,
+  minFrequencyHz: VOCAL_PITCH_MIN_FREQUENCY_HZ,
+  maxFrequencyHz: VOCAL_PITCH_MAX_FREQUENCY_HZ,
   voicingThreshold: 0.85,
-  smoothing: 0.35,
 };
 
 const SHARP_NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"] as const;
@@ -133,13 +138,11 @@ export function getLatestVoicedPitchFrame(frames: readonly VocalPitchFrame[]): V
 }
 
 export function normalizeVocalPitchConfig(config: VocalPitchAnalysisConfig): VocalPitchAnalysisConfig {
-  const minFrequencyHz = Math.min(2000, Math.max(30, config.minFrequencyHz));
   return {
     referencePitchHz: Math.min(460, Math.max(420, config.referencePitchHz)),
-    minFrequencyHz,
-    maxFrequencyHz: Math.min(4000, Math.max(minFrequencyHz + 1, config.maxFrequencyHz)),
+    minFrequencyHz: VOCAL_PITCH_MIN_FREQUENCY_HZ,
+    maxFrequencyHz: VOCAL_PITCH_MAX_FREQUENCY_HZ,
     voicingThreshold: Math.min(0.99, Math.max(0.2, config.voicingThreshold)),
-    smoothing: Math.min(1, Math.max(0, config.smoothing)),
   };
 }
 
@@ -147,12 +150,7 @@ export function detectorConfigChanged(
   previous: VocalPitchAnalysisConfig,
   next: VocalPitchAnalysisConfig,
 ): boolean {
-  return (
-    previous.minFrequencyHz !== next.minFrequencyHz ||
-    previous.maxFrequencyHz !== next.maxFrequencyHz ||
-    previous.voicingThreshold !== next.voicingThreshold ||
-    previous.smoothing !== next.smoothing
-  );
+  return previous.voicingThreshold !== next.voicingThreshold;
 }
 
 export function formatDuration(seconds: number): string {

@@ -1,4 +1,11 @@
-import type { VocalPitchAnalysis, VocalPitchAnalysisConfig, VocalPitchFrame } from "../domain/vocalPitch";
+import {
+  normalizeVocalPitchConfig,
+  VOCAL_PITCH_MAX_FREQUENCY_HZ,
+  VOCAL_PITCH_MIN_FREQUENCY_HZ,
+  type VocalPitchAnalysis,
+  type VocalPitchAnalysisConfig,
+  type VocalPitchFrame,
+} from "../domain/vocalPitch";
 import {
   createPitchFrameDetector,
   getPitchFrameSize,
@@ -18,31 +25,6 @@ const ALTERNATIVE_CANDIDATE_COST = 0.1;
 const FREE_TRANSITION_SEMITONES = 1.5;
 const TRANSITION_COST_PER_SEMITONE = 0.5;
 
-function median(values: number[]): number {
-  values.sort((left, right) => left - right);
-  return values[Math.floor(values.length / 2)];
-}
-
-function smoothFrames(frames: VocalPitchFrame[], smoothing: number): VocalPitchFrame[] {
-  const radius = Math.round(smoothing * 4);
-  if (radius === 0) {
-    return frames;
-  }
-  return frames.map((frame, index) => {
-    if (frame.frequencyHz === null) {
-      return frame;
-    }
-    const nearby: number[] = [];
-    for (let offset = -radius; offset <= radius; offset += 1) {
-      const candidate = frames[index + offset];
-      if (candidate?.frequencyHz != null && Math.abs(candidate.timeSeconds - frame.timeSeconds) <= 0.08) {
-        nearby.push(Math.log2(candidate.frequencyHz));
-      }
-    }
-    return nearby.length < 2 ? frame : { ...frame, frequencyHz: 2 ** median(nearby) };
-  });
-}
-
 function semitonesApart(left: number, right: number): number {
   return Math.abs(12 * Math.log2(left / right));
 }
@@ -55,8 +37,8 @@ function isVoicedCandidate(
   return (
     rms >= MIN_VOICED_RMS &&
     candidate.clarity >= config.voicingThreshold &&
-    candidate.frequencyHz >= config.minFrequencyHz &&
-    candidate.frequencyHz <= config.maxFrequencyHz
+    candidate.frequencyHz >= VOCAL_PITCH_MIN_FREQUENCY_HZ &&
+    candidate.frequencyHz <= VOCAL_PITCH_MAX_FREQUENCY_HZ
   );
 }
 
@@ -207,10 +189,9 @@ function suppressShortOctaveExcursions(frames: VocalPitchFrame[]): VocalPitchFra
 function nearestOctave(
   frequencyHz: number,
   expectedFrequencyHz: number,
-  config: VocalPitchAnalysisConfig,
 ): number | null {
   const options = [frequencyHz / 2, frequencyHz, frequencyHz * 2].filter(
-    (candidate) => candidate >= config.minFrequencyHz && candidate <= config.maxFrequencyHz,
+    (candidate) => candidate >= VOCAL_PITCH_MIN_FREQUENCY_HZ && candidate <= VOCAL_PITCH_MAX_FREQUENCY_HZ,
   );
   if (options.length === 0) {
     return null;
@@ -262,7 +243,7 @@ function bridgeReliableShortGaps(
           (candidate): candidate is PitchFrameCandidate =>
             candidate !== undefined && candidate.clarity >= relaxedThreshold && candidate.frequencyHz > 0,
         )
-        .map((candidate) => nearestOctave(candidate.frequencyHz, expectedFrequencyHz, config))
+        .map((candidate) => nearestOctave(candidate.frequencyHz, expectedFrequencyHz))
         .filter((candidate): candidate is number => candidate !== null)
         .reduce<number | null>(
           (best, candidate) =>
@@ -290,13 +271,10 @@ export function postProcessPitchFrames(
   classifications: ClassifiedPitchFrame[],
   config: VocalPitchAnalysisConfig,
 ): VocalPitchFrame[] {
-  return smoothFrames(
-    bridgeReliableShortGaps(
-      classifications,
-      suppressShortOctaveExcursions(selectContinuousCandidates(classifications, config)),
-      config,
-    ),
-    config.smoothing,
+  return bridgeReliableShortGaps(
+    classifications,
+    suppressShortOctaveExcursions(selectContinuousCandidates(classifications, config)),
+    config,
   );
 }
 
@@ -306,7 +284,8 @@ export function analyzePitchSamples(
   config: VocalPitchAnalysisConfig,
   onProgress: (progress: number) => void = () => undefined,
 ): VocalPitchAnalysis {
-  const frameSize = getPitchFrameSize(sampleRate, config.minFrequencyHz);
+  const normalizedConfig = normalizeVocalPitchConfig(config);
+  const frameSize = getPitchFrameSize(sampleRate);
   const hopSize = Math.max(1, Math.round(sampleRate / 100));
   const detector = createPitchFrameDetector(frameSize);
   const frame = new Float32Array(frameSize);
@@ -317,7 +296,7 @@ export function analyzePitchSamples(
     const offset = frameIndex * hopSize;
     frame.fill(0);
     frame.set(samples.subarray(offset, Math.min(samples.length, offset + frameSize)));
-    classifications.push(classifyPitchFrame(detector, frame, sampleRate, config, (offset + frameSize / 2) / sampleRate));
+    classifications.push(classifyPitchFrame(detector, frame, sampleRate, normalizedConfig, (offset + frameSize / 2) / sampleRate));
     if (frameIndex % 500 === 0) {
       onProgress(frameIndex / frameCount);
     }
@@ -328,8 +307,8 @@ export function analyzePitchSamples(
     analyzedAt: new Date().toISOString(),
     detectorId: VOCAL_PITCH_DETECTOR_ID,
     detectorVersion: VOCAL_PITCH_DETECTOR_VERSION,
-    config,
-    frames: postProcessPitchFrames(classifications, config),
+    config: normalizedConfig,
+    frames: postProcessPitchFrames(classifications, normalizedConfig),
     hopSeconds: hopSize / sampleRate,
     sampleRate,
   };

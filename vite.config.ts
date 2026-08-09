@@ -7,6 +7,9 @@ const tailscaleAllowedHosts = process.env.TAILSCALE_HOSTNAME ? [process.env.TAIL
 export default defineConfig({
   base: process.env.GITHUB_PAGES && pagesRepoName ? `/${pagesRepoName}/` : "/",
   plugins: [react()],
+  worker: {
+    format: "es",
+  },
   server: {
     allowedHosts: tailscaleAllowedHosts,
   },

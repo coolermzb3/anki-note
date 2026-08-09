@@ -4,7 +4,7 @@ import type {
   VocalPitchAnalysis,
   VocalPitchAnalysisConfig,
 } from "../domain/vocalPitch";
-import { vocalAudioFileExtension } from "../domain/vocalPitch";
+import { normalizeVocalPitchConfig, vocalAudioFileExtension } from "../domain/vocalPitch";
 import type { BackupDayFileMetadata } from "../domain/types";
 import { digestBlob } from "./blobDigest";
 import { getBackupState, listVocalAudioMaterials, replaceVocalAudioMaterials } from "./db";
@@ -129,7 +129,6 @@ function canonicalEntry(entry: VocalAudioBackupEntry): VocalAudioBackupEntry {
       maxFrequencyHz: entry.config.maxFrequencyHz,
       minFrequencyHz: entry.config.minFrequencyHz,
       referencePitchHz: entry.config.referencePitchHz,
-      smoothing: entry.config.smoothing,
       voicingThreshold: entry.config.voicingThreshold,
     },
     contentDigest: entry.contentDigest,
@@ -370,7 +369,7 @@ export async function readVocalAudioLibrary(
       updatedAt: entry.updatedAt,
       contentDigest: entry.contentDigest,
       originalFileName: entry.originalFileName,
-      config: entry.config,
+      config: normalizeVocalPitchConfig(entry.config),
       analysis: await readOptionalAnalysis(audioDirectory, entry.analysisFileName, entry.analysisDigest),
       audioBlob,
     });

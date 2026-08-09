@@ -1,4 +1,5 @@
 const CACHE_NAME = "anki-note-v2";
+const RETAINED_CACHE_NAMES = new Set([CACHE_NAME, "anki-note-vocal-pitch-models-v1"]);
 const scopeUrl = new URL(self.registration.scope);
 const indexUrl = new URL("index.html", scopeUrl).toString();
 const APP_SHELL = ["", "index.html", "manifest.webmanifest", "icons/icon.svg"].map((path) =>
@@ -13,7 +14,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => !RETAINED_CACHE_NAMES.has(key)).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
 });
@@ -30,7 +31,8 @@ function canHandle(request) {
 }
 
 function cacheResponse(request, response) {
-  if (!response.ok || response.type !== "basic") {
+  const url = new URL(request.url);
+  if (!response.ok || response.type !== "basic" || url.pathname.includes("/models/vocal-pitch/")) {
     return response;
   }
   const clone = response.clone();

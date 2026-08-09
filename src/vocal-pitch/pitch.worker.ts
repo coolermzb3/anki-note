@@ -1,27 +1,26 @@
 /// <reference lib="webworker" />
 
-import type { VocalPitchAnalysisConfig } from "../domain/vocalPitch";
 import { analyzePitchSamples } from "./pitchDetection";
+import type { PitchWorkerAnalyzeRequest, PitchWorkerResponse } from "./pitchWorkerProtocol";
 
-interface AnalyzeRequest {
-  config: VocalPitchAnalysisConfig;
-  id: number;
-  sampleRate: number;
-  samples: ArrayBuffer;
-  type: "analyze";
-}
+const postResponse = (response: PitchWorkerResponse) => self.postMessage(response);
 
-self.onmessage = (event: MessageEvent<AnalyzeRequest>) => {
+self.onmessage = async (event: MessageEvent<PitchWorkerAnalyzeRequest>) => {
   try {
-    const analysis = analyzePitchSamples(
-      new Float32Array(event.data.samples),
-      event.data.sampleRate,
-      event.data.config,
-      (progress) => self.postMessage({ type: "progress", id: event.data.id, progress }),
-    );
-    self.postMessage({ type: "complete", id: event.data.id, analysis });
+    const samples = new Float32Array(event.data.samples);
+    const reportProgress = (progress: number) => postResponse({ type: "progress", id: event.data.id, progress });
+    const analysis = event.data.mode === "enhanced"
+      ? await (await import("./enhancedPitchDetection")).analyzeEnhancedPitchSamples(
+        samples,
+        event.data.sampleRate,
+        event.data.config,
+        reportProgress,
+        event.data.modelSamples ? new Float32Array(event.data.modelSamples) : undefined,
+      )
+      : analyzePitchSamples(samples, event.data.sampleRate, event.data.config, reportProgress);
+    postResponse({ type: "complete", id: event.data.id, analysis });
   } catch (error) {
-    self.postMessage({
+    postResponse({
       type: "error",
       id: event.data.id,
       error: error instanceof Error ? error.message : String(error),
