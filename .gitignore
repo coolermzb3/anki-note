@@ -10,6 +10,7 @@ dist/
 /backup/
 /analysis/output/
 /analysis/.venv/
+/analysis/pitch/.venv/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
