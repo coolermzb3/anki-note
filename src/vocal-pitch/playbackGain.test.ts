@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { peakNormalizationGain, PLAYBACK_MAX_BOOST } from "./playbackGain";
+import { peakNormalizationGain, playbackGainIsPreparing, PLAYBACK_MAX_BOOST } from "./playbackGain";
+
+describe("playbackGainIsPreparing", () => {
+  const first = new Blob(["first"]);
+  const second = new Blob(["second"]);
+
+  it("waits until the current blob gain is prepared", () => {
+    expect(playbackGainIsPreparing(first, null)).toBe(true);
+    expect(playbackGainIsPreparing(first, second)).toBe(true);
+    expect(playbackGainIsPreparing(first, first)).toBe(false);
+  });
+
+  it("does not prepare when no material is loaded", () => {
+    expect(playbackGainIsPreparing(null, first)).toBe(false);
+  });
+});
 
 describe("peakNormalizationGain", () => {
   const targetPeak = 10 ** (-3 / 20);

@@ -3,10 +3,11 @@ export const PLAYBACK_TARGET_PEAK_DB = -3;
 // 放大上限，避免把近乎无声的录音连同本底噪声一起推满
 export const PLAYBACK_MAX_BOOST = 4;
 
-export function peakNormalizationGain(
-  samples: Float32Array,
-  targetPeakDb: number = PLAYBACK_TARGET_PEAK_DB,
-): number {
+export function playbackGainIsPreparing(audioBlob: Blob | null, gainPreparedForBlob: Blob | null): boolean {
+  return audioBlob !== null && gainPreparedForBlob !== audioBlob;
+}
+
+export function peakNormalizationGain(samples: Float32Array): number {
   let peak = 0;
   for (let index = 0; index < samples.length; index += 1) {
     const magnitude = Math.abs(samples[index]);
@@ -17,6 +18,6 @@ export function peakNormalizationGain(
   if (peak <= 0) {
     return 1;
   }
-  const gain = 10 ** (targetPeakDb / 20) / peak;
+  const gain = 10 ** (PLAYBACK_TARGET_PEAK_DB / 20) / peak;
   return Math.min(PLAYBACK_MAX_BOOST, gain);
 }

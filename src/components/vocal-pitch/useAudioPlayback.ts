@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VocalAudioMaterial } from "../../domain/vocalPitch";
 import { decodeAudioBlob } from "../../vocal-pitch/pitchAnalysis";
-import { peakNormalizationGain } from "../../vocal-pitch/playbackGain";
+import { peakNormalizationGain, playbackGainIsPreparing } from "../../vocal-pitch/playbackGain";
 
 export function useAudioPlayback(material: VocalAudioMaterial | null, volume: number) {
   const [currentTime, setCurrentTime] = useState(0);
@@ -13,7 +13,9 @@ export function useAudioPlayback(material: VocalAudioMaterial | null, volume: nu
   const normalizationGainRef = useRef(1);
   const volumeRef = useRef(volume);
   const animationRef = useRef<number | null>(null);
+  const [gainPreparedForBlob, setGainPreparedForBlob] = useState<Blob | null>(null);
   volumeRef.current = volume;
+  const isPreparing = playbackGainIsPreparing(material?.audioBlob ?? null, gainPreparedForBlob);
 
   const applyGain = useCallback(() => {
     const gainNode = gainNodeRef.current;
@@ -68,6 +70,7 @@ export function useAudioPlayback(material: VocalAudioMaterial | null, volume: nu
     normalizationGainRef.current = 1;
     applyGain();
     if (!material) {
+      setGainPreparedForBlob(null);
       audioUrlRef.current = null;
       audio.removeAttribute("src");
       audio.load();
@@ -84,7 +87,10 @@ export function useAudioPlayback(material: VocalAudioMaterial | null, volume: nu
         normalizationGainRef.current = peakNormalizationGain(decoded.samples);
         applyGain();
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setGainPreparedForBlob(material.audioBlob);
+      });
     return () => {
       cancelled = true;
     };
@@ -117,7 +123,7 @@ export function useAudioPlayback(material: VocalAudioMaterial | null, volume: nu
 
   const toggle = useCallback(async () => {
     const audio = audioRef.current;
-    if (!audio || !material) return;
+    if (!audio || !material || isPreparing) return;
     if (!audio.paused) {
       audio.pause();
       return;
@@ -128,7 +134,7 @@ export function useAudioPlayback(material: VocalAudioMaterial | null, volume: nu
       setCurrentTime(0);
     }
     await audio.play();
-  }, [material]);
+  }, [isPreparing, material]);
 
-  return { currentTime, isPlaying, pause, seek, toggle };
+  return { currentTime, isPlaying, isPreparing, pause, seek, toggle };
 }

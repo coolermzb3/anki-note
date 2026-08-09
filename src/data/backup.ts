@@ -20,6 +20,7 @@ import type {
   StaffRecallRunRecord,
 } from "../domain/types";
 import type { VocalAudioCounts, VocalAudioMaterial } from "../domain/vocalPitch";
+import { createSerialTaskQueue } from "../serialTaskQueue";
 import {
   applyBackupDataChanges,
   db,
@@ -1295,13 +1296,7 @@ async function writeCurrentBrowserDataToBackup(
   return false;
 }
 
-let backupWriteQueue: Promise<void> = Promise.resolve();
-
-function enqueueBackupWrite<T>(task: () => Promise<T>): Promise<T> {
-  const run = backupWriteQueue.then(task, task);
-  backupWriteQueue = run.then(() => undefined, () => undefined);
-  return run;
-}
+const enqueueBackupWrite = createSerialTaskQueue();
 
 async function writeBackupNowInner(): Promise<void> {
   const state = await getBackupState();

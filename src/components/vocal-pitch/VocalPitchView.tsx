@@ -48,6 +48,7 @@ import {
   type VocalRecordingResult,
 } from "../../vocal-pitch/useVocalRecorder";
 import { getVocalRecordingSpaceAction } from "../../vocal-pitch/recordingPolicy";
+import { consumeVocalRenameRequest, type VocalRenameRequest } from "../../vocal-pitch/renameRequest";
 import { listMicrophoneChoices, type MicrophoneChoice } from "../../vocal-pitch/microphones";
 import { usePitchAnalysis } from "../../vocal-pitch/usePitchAnalysis";
 import { useVocalAudioLibrary } from "../../vocal-pitch/useVocalAudioLibrary";
@@ -132,7 +133,7 @@ export function VocalPitchView({
   const [materialLibraryOutdated, setMaterialLibraryOutdated] = useState(false);
   const [recordingResultPending, setRecordingResultPending] = useState(false);
   const [modelDownloadProgress, setModelDownloadProgress] = useState<number | null>(null);
-  const [renameRequest, setRenameRequest] = useState<{ id: string; name: string; token: number } | null>(null);
+  const [renameRequest, setRenameRequest] = useState<VocalRenameRequest | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const analysisRequestGenerationRef = useRef(0);
   const lastNavigationRequestIdRef = useRef(0);
@@ -181,6 +182,9 @@ export function VocalPitchView({
     analysisRequestGenerationRef.current += 1;
     cancelPitchAnalysis();
   }, [cancelPitchAnalysis]);
+  const consumeRenameRequest = useCallback((token: number) => {
+    setRenameRequest((current) => consumeVocalRenameRequest(current, token));
+  }, []);
 
   const selectAnalysisMode = useCallback(async (
     target: VocalAudioMaterial,
@@ -477,10 +481,13 @@ export function VocalPitchView({
     setMaterialLibraryOutdated(false);
     setMaterial(next);
     setDirty(false);
-    if (promptRename) setRenameRequest({ id: next.id, name: next.name, token: Date.now() });
+    if (promptRename) {
+      setSidebarOpen(true);
+      setRenameRequest({ id: next.id, name: next.name, token: Date.now() });
+    }
     void syncLibraryBackup().catch(() => undefined);
     return next;
-  }, [config, material, materialLibraryOutdated, runLibraryMutationPreflight, saveLibraryMaterialLocal, syncLibraryBackup]);
+  }, [config, material, materialLibraryOutdated, runLibraryMutationPreflight, saveLibraryMaterialLocal, setSidebarOpen, syncLibraryBackup]);
 
   const runWithReplacementGuard = useCallback((after: () => void | Promise<void>) => {
     if (dirty && material) {
@@ -735,6 +742,7 @@ export function VocalPitchView({
     : (backupPreflightPending ? "正在检查备份状态…" : inlineMessage)
     ?? analysisMessage
     ?? recorder.captureNotice
+    ?? (playback.isPreparing ? "正在准备回放音量…" : null)
     ?? (analysisStale ? "参数已更改，请重新分析" : null);
   return (
     <div ref={workspaceRef} className="vocal-workspace">
@@ -802,7 +810,7 @@ export function VocalPitchView({
             {recordingActive ? <kbd>Space</kbd> : null}
           </button>
           <button
-            disabled={mutationBusy || !material}
+            disabled={mutationBusy || playback.isPreparing || !material}
             onClick={() => void togglePlayback()}
           >
             {playback.isPlaying ? <Pause size={17} /> : <Play size={17} />}
@@ -873,6 +881,7 @@ export function VocalPitchView({
             onPlaybackVolumeChange={setPlaybackVolume}
             onRefreshMicrophones={() => void refreshMicrophones()}
             onRename={(target, name) => void renameMaterial(target, name)}
+            onRenameRequestConsumed={consumeRenameRequest}
             onSelectMicrophone={setSelectedMicrophoneId}
             renameRequest={renameRequest}
             selectedMicrophoneId={selectedMicrophoneId}

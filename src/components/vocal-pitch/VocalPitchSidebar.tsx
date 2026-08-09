@@ -6,6 +6,7 @@ import {
   type VocalPitchAnalysisConfig,
 } from "../../domain/vocalPitch";
 import type { MicrophoneChoice } from "../../vocal-pitch/microphones";
+import type { VocalRenameRequest } from "../../vocal-pitch/renameRequest";
 import { useLocalStorageState } from "../useLocalStorageState";
 
 interface VocalPitchSidebarProps {
@@ -27,8 +28,9 @@ interface VocalPitchSidebarProps {
   onPlaybackVolumeChange: (volume: number) => void;
   onRefreshMicrophones: () => void;
   onRename: (material: VocalAudioMaterial, name: string) => void;
+  onRenameRequestConsumed: (token: number) => void;
   onSelectMicrophone: (deviceId: string) => void;
-  renameRequest: { id: string; name: string; token: number } | null;
+  renameRequest: VocalRenameRequest | null;
   selectedMicrophoneId: string;
 }
 
@@ -58,6 +60,7 @@ export function VocalPitchSidebar({
   onPlaybackVolumeChange,
   onRefreshMicrophones,
   onRename,
+  onRenameRequestConsumed,
   onSelectMicrophone,
   renameRequest,
   selectedMicrophoneId,
@@ -79,9 +82,11 @@ export function VocalPitchSidebar({
   useEffect(() => {
     if (!renameRequest) return;
     setContextMenu(null);
+    setMaterialsOpen(true);
     setRenamingId(renameRequest.id);
     setRenameValue(renameRequest.name);
-  }, [renameRequest]);
+    onRenameRequestConsumed(renameRequest.token);
+  }, [onRenameRequestConsumed, renameRequest, setMaterialsOpen]);
 
   useEffect(() => {
     setReferencePitchDraft(String(config.referencePitchHz));
