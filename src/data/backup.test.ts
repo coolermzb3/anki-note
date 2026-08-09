@@ -597,9 +597,9 @@ describe("file backup side effects", () => {
         id: "review-next-day",
         sessionId: "session-browser",
         targetNoteId: "D4",
-        startedAt: "2026-07-05T00:00:01.000+08:00",
-        answeredAt: "2026-07-05T00:00:02.000+08:00",
-        endedAt: "2026-07-05T00:00:02.000+08:00",
+        startedAt: "2026-07-05T10:00:01.000+08:00",
+        answeredAt: "2026-07-05T10:00:02.000+08:00",
+        endedAt: "2026-07-05T10:00:02.000+08:00",
       }),
     );
     directory.resetReadCounts();
