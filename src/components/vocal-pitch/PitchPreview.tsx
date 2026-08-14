@@ -27,6 +27,7 @@ const MAX_KEYBOARD_WIDTH = DEFAULT_KEYBOARD_WIDTH * 4;
 const DEFAULT_MIDI_SPAN = 49;
 const MIN_TIME_SPAN = 1;
 const MIN_MIDI_SPAN = 6;
+const WHEEL_FOLLOW_RESUME_DELAY_MS = 120;
 const PIANO_MIDI_MIN = 24;
 const PIANO_MIDI_MAX = 108;
 const PIANO_VIEW_MIN = PIANO_MIDI_MIN - 0.5;
@@ -49,6 +50,17 @@ function nearestWhiteKey(midi: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+export function getPitchPreviewMidi(
+  clientY: number,
+  boundsTop: number,
+  boundsHeight: number,
+  midiMin: number,
+  midiSpan: number,
+): number {
+  const pitchAtPointer = midiMin + ((boundsTop + boundsHeight - clientY) / Math.max(1, boundsHeight)) * midiSpan;
+  return clamp(Math.round(pitchAtPointer), PIANO_MIDI_MIN, PIANO_MIDI_MAX);
 }
 
 function initialTimeSpan(duration: number): number {
@@ -132,6 +144,24 @@ export function PitchPreview({
   const touchPointersRef = useRef(new Map<number, { x: number; y: number }>());
   const heldPianoNotesRef = useRef(new Map<number, { cancelled: boolean; release?: () => void }>());
   const manualFollowSuspendedRef = useRef(false);
+  const followResumeTimerRef = useRef<number | null>(null);
+
+  const resumeFollow = useCallback(() => {
+    if (followResumeTimerRef.current !== null) window.clearTimeout(followResumeTimerRef.current);
+    followResumeTimerRef.current = null;
+    manualFollowSuspendedRef.current = false;
+  }, []);
+
+  const suspendFollow = useCallback(() => {
+    if (followResumeTimerRef.current !== null) window.clearTimeout(followResumeTimerRef.current);
+    followResumeTimerRef.current = null;
+    manualFollowSuspendedRef.current = true;
+  }, []);
+
+  const resumeFollowAfterWheel = useCallback(() => {
+    suspendFollow();
+    followResumeTimerRef.current = window.setTimeout(resumeFollow, WHEEL_FOLLOW_RESUME_DELAY_MS);
+  }, [resumeFollow, suspendFollow]);
 
   const releasePianoPointer = useCallback((pointerId: number) => {
     const heldNote = heldPianoNotesRef.current.get(pointerId);
@@ -140,6 +170,22 @@ export function PitchPreview({
     heldNote.release?.();
     heldPianoNotesRef.current.delete(pointerId);
   }, []);
+
+  const startPianoPointer = useCallback((pointerId: number, midi: number) => {
+    releasePianoPointer(pointerId);
+    const heldNote: { cancelled: boolean; release?: () => void } = { cancelled: false };
+    heldPianoNotesRef.current.set(pointerId, heldNote);
+    void startPianoMidi(midi)
+      .then(({ release }) => {
+        if (heldNote.cancelled) release();
+        else heldNote.release = release;
+      })
+      .catch(() => {
+        if (heldPianoNotesRef.current.get(pointerId) === heldNote) {
+          heldPianoNotesRef.current.delete(pointerId);
+        }
+      });
+  }, [releasePianoPointer]);
 
   const releaseAllPianoNotes = useCallback(() => {
     for (const heldNote of heldPianoNotesRef.current.values()) {
@@ -163,8 +209,10 @@ export function PitchPreview({
   }, [releaseAllPianoNotes]);
 
   useEffect(() => {
-    manualFollowSuspendedRef.current = false;
-  }, [followResetKey]);
+    resumeFollow();
+  }, [followResetKey, resumeFollow]);
+
+  useEffect(() => () => resumeFollow(), [resumeFollow]);
 
   useEffect(() => {
     if (!isRecording || dragRef.current) {
@@ -179,7 +227,7 @@ export function PitchPreview({
   }, [duration, isRecording]);
 
   useEffect(() => {
-    if (dragRef.current) {
+    if (!followEnabled || dragRef.current) {
       return;
     }
     if (manualFollowSuspendedRef.current) {
@@ -190,17 +238,17 @@ export function PitchPreview({
       let midiMin = current.midiMin;
       const relativeTime = (currentTime - current.timeStart) / current.timeSpan;
       if (relativeTime > 0.82) {
-        timeStart = currentTime - current.timeSpan * 0.72;
+        timeStart = currentTime - current.timeSpan * 0.82;
       } else if (relativeTime < 0.12 && currentTime >= 0) {
-        timeStart = currentTime - current.timeSpan * 0.2;
+        timeStart = currentTime - current.timeSpan * 0.12;
       }
       if (currentPitchHz !== null) {
         const midi = frequencyToMidi(currentPitchHz, referencePitchHz);
         const relativePitch = (midi - current.midiMin) / current.midiSpan;
         if (relativePitch > 0.86) {
-          midiMin = midi - current.midiSpan * 0.72;
+          midiMin = midi - current.midiSpan * 0.86;
         } else if (relativePitch < 0.14) {
-          midiMin = midi - current.midiSpan * 0.28;
+          midiMin = midi - current.midiSpan * 0.14;
         }
       }
       if (timeStart === current.timeStart && midiMin === current.midiMin) {
@@ -399,19 +447,7 @@ export function PitchPreview({
         x <= keyboardWidth * 0.72 && isBlackKey(roundedMidi) && Math.abs(pitchAtPointer - roundedMidi) <= 0.42
           ? roundedMidi
           : nearestWhiteKey(pitchAtPointer);
-      const pointerId = event.pointerId;
-      const heldNote: { cancelled: boolean; release?: () => void } = { cancelled: false };
-      heldPianoNotesRef.current.set(pointerId, heldNote);
-      void startPianoMidi(midi)
-        .then(({ release }) => {
-          if (heldNote.cancelled) release();
-          else heldNote.release = release;
-        })
-        .catch(() => {
-          if (heldPianoNotesRef.current.get(pointerId) === heldNote) {
-            heldPianoNotesRef.current.delete(pointerId);
-          }
-        });
+      startPianoPointer(event.pointerId, midi);
       dragRef.current = { mode: "keyboard-pan", pointerY: event.clientY, viewport };
       event.currentTarget.style.cursor = "ns-resize";
       return;
@@ -432,6 +468,10 @@ export function PitchPreview({
       }
     }
     if (event.pointerType !== "touch" && event.button === 0) {
+      startPianoPointer(
+        event.pointerId,
+        getPitchPreviewMidi(event.clientY, bounds.top, bounds.height, viewport.midiMin, viewport.midiSpan),
+      );
       dragRef.current = { mode: "playhead", pointerY: event.clientY, viewport };
       event.currentTarget.style.cursor = "ew-resize";
       seekFromPointer(event.clientX);
@@ -531,6 +571,7 @@ export function PitchPreview({
     touchPointersRef.current.delete(event.pointerId);
     releasePianoPointer(event.pointerId);
     dragRef.current = null;
+    resumeFollow();
     const bounds = event.currentTarget.getBoundingClientRect();
     event.currentTarget.style.cursor = event.clientX - bounds.left <= keyboardWidth ? "ns-resize" : "crosshair";
   };
@@ -541,7 +582,7 @@ export function PitchPreview({
     const x = event.clientX - bounds.left;
     const y = event.clientY - bounds.top;
     const factor = Math.exp(event.deltaY * 0.0015);
-    manualFollowSuspendedRef.current = true;
+    resumeFollowAfterWheel();
     if (x <= keyboardWidth) {
       const anchor = viewport.midiMin + ((bounds.height - y) / Math.max(1, bounds.height)) * viewport.midiSpan;
       const midiSpan = clamp(viewport.midiSpan * factor, MIN_MIDI_SPAN, MAX_MIDI_SPAN);
@@ -565,7 +606,7 @@ export function PitchPreview({
       <div ref={shellRef} className="pitch-preview-main">
         <canvas
           ref={canvasRef}
-          aria-label="基频预览图；琴键宽度随音高缩放变化，琴键区可上下拖动，左键定位播放头并纵向滚动音高，右键拖动平移"
+          aria-label="基频预览图；琴键宽度随音高缩放变化，琴键区可上下拖动，左键播放对应音高、定位播放头并纵向滚动音高，右键拖动平移"
           onAuxClick={(event) => {
             if (event.button !== 2) return;
             event.preventDefault();
@@ -581,7 +622,7 @@ export function PitchPreview({
           onPointerMove={handlePointerMove}
           onPointerUp={endPointerGesture}
           onPointerCancel={endPointerGesture}
-          onLostPointerCapture={(event) => releasePianoPointer(event.pointerId)}
+          onLostPointerCapture={endPointerGesture}
           onPointerLeave={(event) => {
             if (!dragRef.current) event.currentTarget.style.cursor = "crosshair";
             setHoveredPitch(null);
@@ -601,6 +642,8 @@ export function PitchPreview({
         currentTime={currentTime}
         duration={Math.max(duration, currentTime, 0.01)}
         frames={frames}
+        onInteractionEnd={resumeFollow}
+        onInteractionStart={suspendFollow}
         onViewportChange={(timeStart, timeSpan) => {
           manualFollowSuspendedRef.current = true;
           setViewport((current) => ({
@@ -608,6 +651,7 @@ export function PitchPreview({
             ...clampTimeViewport(timeStart, timeSpan, duration, currentTime),
           }));
         }}
+        onWheelInteraction={resumeFollowAfterWheel}
         referencePitchHz={referencePitchHz}
         viewport={viewport}
       />
@@ -619,12 +663,25 @@ interface PitchNavigatorProps {
   currentTime: number;
   duration: number;
   frames: readonly VocalPitchFrame[];
+  onInteractionEnd: () => void;
+  onInteractionStart: () => void;
   onViewportChange: (timeStart: number, timeSpan: number) => void;
+  onWheelInteraction: () => void;
   referencePitchHz: number;
   viewport: PitchViewport;
 }
 
-function PitchNavigator({ currentTime, duration, frames, onViewportChange, referencePitchHz, viewport }: PitchNavigatorProps) {
+function PitchNavigator({
+  currentTime,
+  duration,
+  frames,
+  onInteractionEnd,
+  onInteractionStart,
+  onViewportChange,
+  onWheelInteraction,
+  referencePitchHz,
+  viewport,
+}: PitchNavigatorProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ mode: "left" | "right" | "window"; startX: number; start: number; end: number } | null>(null);
   const visibleStart = clamp(viewport.timeStart / duration, 0, 1);
@@ -697,6 +754,7 @@ function PitchNavigator({ currentTime, duration, frames, onViewportChange, refer
     const timeSpan = clamp(viewport.timeSpan * Math.exp(event.deltaY * 0.0015), minimumSpan, duration);
     const timeStart = clamp(pointerTime - timeSpan / 2, 0, Math.max(0, duration - timeSpan));
     onViewportChange(timeStart, timeSpan);
+    if (!dragRef.current) onWheelInteraction();
   };
 
   return (
@@ -708,9 +766,11 @@ function PitchNavigator({ currentTime, duration, frames, onViewportChange, refer
       onPointerUp={(event) => {
         event.currentTarget.releasePointerCapture(event.pointerId);
         dragRef.current = null;
+        onInteractionEnd();
       }}
       onPointerCancel={() => {
         dragRef.current = null;
+        onInteractionEnd();
       }}
     >
       <svg aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 1000 40">
@@ -721,6 +781,7 @@ function PitchNavigator({ currentTime, duration, frames, onViewportChange, refer
         className="pitch-navigator-window"
         style={{ left: `${visibleStart * 100}%`, width: `${Math.max(0.5, (visibleEnd - visibleStart) * 100)}%` }}
         onPointerDown={(event) => {
+          onInteractionStart();
           event.currentTarget.parentElement?.setPointerCapture(event.pointerId);
           dragRef.current = { mode: "window", startX: event.clientX, start: visibleStart, end: visibleEnd };
         }}
@@ -728,6 +789,7 @@ function PitchNavigator({ currentTime, duration, frames, onViewportChange, refer
         <span
           onPointerDown={(event) => {
             event.stopPropagation();
+            onInteractionStart();
             event.currentTarget.parentElement?.parentElement?.setPointerCapture(event.pointerId);
             dragRef.current = { mode: "left", startX: event.clientX, start: visibleStart, end: visibleEnd };
           }}
@@ -735,6 +797,7 @@ function PitchNavigator({ currentTime, duration, frames, onViewportChange, refer
         <span
           onPointerDown={(event) => {
             event.stopPropagation();
+            onInteractionStart();
             event.currentTarget.parentElement?.parentElement?.setPointerCapture(event.pointerId);
             dragRef.current = { mode: "right", startX: event.clientX, start: visibleStart, end: visibleEnd };
           }}
