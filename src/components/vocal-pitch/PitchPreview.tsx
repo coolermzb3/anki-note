@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { startPianoMidi } from "../../audio/piano";
-import { frequencyToMidi, formatMidiNote, midiToFrequency, type VocalPitchFrame } from "../../domain/vocalPitch";
+import { frequencyToMidi, formatDuration, formatMidiNote, midiToFrequency, type VocalPitchFrame } from "../../domain/vocalPitch";
 
 interface PitchViewport {
   midiMin: number;
@@ -24,6 +24,7 @@ interface PitchPreviewProps {
 
 const DEFAULT_KEYBOARD_WIDTH = 68;
 const MAX_KEYBOARD_WIDTH = DEFAULT_KEYBOARD_WIDTH * 4;
+const TIME_GRID_MIN_SPACING_PX = 64;
 const DEFAULT_MIDI_SPAN = 49;
 const MIN_TIME_SPAN = 1;
 const MIN_MIDI_SPAN = 6;
@@ -65,6 +66,19 @@ export function getPitchPreviewMidi(
 
 function initialTimeSpan(duration: number): number {
   return Math.min(30, Math.max(0.01, duration || 10));
+}
+
+function chooseTimeGridStep(timeSpanSeconds: number, plotWidthPx: number): number {
+  const pxPerSecond = plotWidthPx / Math.max(0.01, timeSpanSeconds);
+  for (let base = 1; base <= 3600; base *= 10) {
+    for (const multiplier of [1, 2, 5]) {
+      const step = base * multiplier;
+      if (step * pxPerSecond >= TIME_GRID_MIN_SPACING_PX) {
+        return step;
+      }
+    }
+  }
+  return 5000;
 }
 
 function clampPitchViewport(midiMin: number, midiSpan: number): Pick<PitchViewport, "midiMin" | "midiSpan"> {
@@ -359,6 +373,30 @@ export function PitchPreview({
     context.beginPath();
     context.rect(keyboardWidth, 0, Math.max(0, size.width - keyboardWidth), size.height);
     context.clip();
+
+    const gridStep = chooseTimeGridStep(viewport.timeSpan, size.width - keyboardWidth);
+    context.strokeStyle = "rgba(188, 174, 154, 0.32)";
+    context.lineWidth = 1;
+    context.fillStyle = "#675d53";
+    context.font = "11px Inter, sans-serif";
+    context.textAlign = "left";
+    context.textBaseline = "top";
+    for (
+      let index = Math.ceil(viewport.timeStart / gridStep);
+      index * gridStep <= viewport.timeStart + viewport.timeSpan;
+      index += 1
+    ) {
+      const tickSeconds = index * gridStep;
+      const x = xForTime(tickSeconds);
+      context.beginPath();
+      context.moveTo(x, 0);
+      context.lineTo(x, size.height);
+      context.stroke();
+      const labelText = formatDuration(tickSeconds);
+      if (x + 3 + context.measureText(labelText).width <= size.width) {
+        context.fillText(labelText, x + 3, 4);
+      }
+    }
 
     context.strokeStyle = variant === "realtime" ? "rgba(37, 111, 103, 0.62)" : "#256f67";
     context.lineWidth = 2;
