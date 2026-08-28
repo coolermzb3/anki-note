@@ -64,11 +64,34 @@ export function getPitchPreviewMidi(
   return clamp(Math.round(pitchAtPointer), PIANO_MIDI_MIN, PIANO_MIDI_MAX);
 }
 
+export function getPitchRowHighlight(
+  midi: number,
+  currentMidi: number | null,
+  auditionedPointers: ReadonlyMap<number, number>,
+): "auditioned" | "current" | null {
+  for (const auditionedMidi of auditionedPointers.values()) {
+    if (auditionedMidi === midi) return "auditioned";
+  }
+  if (currentMidi !== null && Math.round(currentMidi) === midi) return "current";
+  return null;
+}
+
+export function updateAuditionedPointers(
+  current: ReadonlyMap<number, number>,
+  pointerId: number,
+  midi: number | null,
+): ReadonlyMap<number, number> {
+  const next = new Map(current);
+  if (midi === null) next.delete(pointerId);
+  else next.set(pointerId, midi);
+  return next;
+}
+
 function initialTimeSpan(duration: number): number {
   return Math.min(30, Math.max(0.01, duration || 10));
 }
 
-function chooseTimeGridStep(timeSpanSeconds: number, plotWidthPx: number): number {
+export function chooseTimeGridStep(timeSpanSeconds: number, plotWidthPx: number): number {
   const pxPerSecond = plotWidthPx / Math.max(0.01, timeSpanSeconds);
   for (let base = 1; base <= 3600; base *= 10) {
     for (const multiplier of [1, 2, 5]) {
@@ -148,6 +171,7 @@ export function PitchPreview({
       1,
     ) * (MAX_KEYBOARD_WIDTH - DEFAULT_KEYBOARD_WIDTH);
   const [hoveredPitch, setHoveredPitch] = useState<{ frequencyHz: number; note: string; x: number; y: number } | null>(null);
+  const [auditionedPointers, setAuditionedPointers] = useState<ReadonlyMap<number, number>>(() => new Map());
   const dragRef = useRef<
     | { mode: "keyboard-pan"; pointerY: number; viewport: PitchViewport }
     | { mode: "pan"; pointerX: number; pointerY: number; viewport: PitchViewport }
@@ -183,12 +207,14 @@ export function PitchPreview({
     heldNote.cancelled = true;
     heldNote.release?.();
     heldPianoNotesRef.current.delete(pointerId);
+    setAuditionedPointers((current) => updateAuditionedPointers(current, pointerId, null));
   }, []);
 
   const startPianoPointer = useCallback((pointerId: number, midi: number) => {
     releasePianoPointer(pointerId);
     const heldNote: { cancelled: boolean; release?: () => void } = { cancelled: false };
     heldPianoNotesRef.current.set(pointerId, heldNote);
+    setAuditionedPointers((current) => updateAuditionedPointers(current, pointerId, midi));
     void startPianoMidi(midi)
       .then(({ release }) => {
         if (heldNote.cancelled) release();
@@ -197,6 +223,7 @@ export function PitchPreview({
       .catch(() => {
         if (heldPianoNotesRef.current.get(pointerId) === heldNote) {
           heldPianoNotesRef.current.delete(pointerId);
+          setAuditionedPointers((current) => updateAuditionedPointers(current, pointerId, null));
         }
       });
   }, [releasePianoPointer]);
@@ -207,6 +234,7 @@ export function PitchPreview({
       heldNote.release?.();
     }
     heldPianoNotesRef.current.clear();
+    setAuditionedPointers(new Map());
   }, []);
 
   useEffect(() => {
@@ -319,8 +347,10 @@ export function PitchPreview({
       const top = yForMidi(midi + 0.5);
       const bottom = yForMidi(midi - 0.5);
       const rowHeight = bottom - top;
-      const active = currentMidi !== null && Math.round(currentMidi) === midi;
-      context.fillStyle = active ? "rgba(216, 140, 36, 0.16)" : isBlackKey(midi) ? "#f2ece3" : "#fffdfa";
+      const highlight = getPitchRowHighlight(midi, currentMidi, auditionedPointers);
+      context.fillStyle = highlight === "auditioned"
+        ? "rgba(47, 143, 95, 0.18)"
+        : highlight === "current" ? "rgba(216, 140, 36, 0.16)" : isBlackKey(midi) ? "#f2ece3" : "#fffdfa";
       context.fillRect(keyboardWidth, top, size.width - keyboardWidth, rowHeight);
       context.strokeStyle = "rgba(188, 174, 154, 0.38)";
       context.beginPath();
@@ -340,9 +370,9 @@ export function PitchPreview({
       if (bottom < 0 || top > size.height) {
         continue;
       }
-      const active = currentMidi !== null && Math.round(currentMidi) === midi;
-      context.fillStyle = active ? "#f6cf83" : "#fffdf9";
-      context.strokeStyle = active ? "#c68a2f" : "#bcae9a";
+      const highlight = getPitchRowHighlight(midi, currentMidi, auditionedPointers);
+      context.fillStyle = highlight === "auditioned" ? "#cfe9d8" : highlight === "current" ? "#f6cf83" : "#fffdf9";
+      context.strokeStyle = highlight === "auditioned" ? "#69a982" : highlight === "current" ? "#c68a2f" : "#bcae9a";
       context.fillRect(0, top, keyboardWidth, bottom - top);
       context.strokeRect(0, top, keyboardWidth, bottom - top);
       if (midi % 12 === 0 && bottom - top >= 12) {
@@ -363,9 +393,9 @@ export function PitchPreview({
       if (bottom < 0 || top > size.height) {
         continue;
       }
-      const active = currentMidi !== null && Math.round(currentMidi) === midi;
-      context.fillStyle = active ? "#a96116" : "#332e2a";
-      context.strokeStyle = active ? "#7c4710" : "#171411";
+      const highlight = getPitchRowHighlight(midi, currentMidi, auditionedPointers);
+      context.fillStyle = highlight === "auditioned" ? "#86c7a0" : highlight === "current" ? "#a96116" : "#332e2a";
+      context.strokeStyle = highlight === "auditioned" ? "#4c9b6c" : highlight === "current" ? "#7c4710" : "#171411";
       context.fillRect(0, top, keyboardWidth * 0.72, bottom - top);
       context.strokeRect(0, top, keyboardWidth * 0.72, bottom - top);
     }
@@ -453,7 +483,7 @@ export function PitchPreview({
     context.moveTo(keyboardWidth, 0);
     context.lineTo(keyboardWidth, size.height);
     context.stroke();
-  }, [currentPitchHz, currentTime, frames, keyboardWidth, referencePitchHz, size, variant, viewport, xForTime, yForMidi]);
+  }, [auditionedPointers, currentPitchHz, currentTime, frames, keyboardWidth, referencePitchHz, size, variant, viewport, xForTime, yForMidi]);
 
   const seekFromPointer = useCallback((clientX: number) => {
     const bounds = shellRef.current?.getBoundingClientRect();

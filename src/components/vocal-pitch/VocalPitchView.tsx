@@ -9,7 +9,7 @@ import {
   Save,
   Square,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { createUuid } from "../../domain/id";
 import {
   DEFAULT_VOCAL_PITCH_CONFIG,
@@ -71,6 +71,28 @@ interface VocalPitchViewProps {
 export type VocalLibraryMutationPreflightResult = "backup-updated" | "blocked" | "proceed";
 
 const MAX_AUDIO_SECONDS = 10 * 60;
+
+export function hasDraggedFiles(types: readonly string[]): boolean {
+  return types.includes("Files");
+}
+
+interface DroppedFileImportActions {
+  importFile: (file: File) => Promise<void>;
+  runLibraryMutationPreflight: () => Promise<boolean>;
+  runWithReplacementGuard: (after: () => void | Promise<void>) => void;
+}
+
+export function requestDroppedFileImport(
+  file: File | null,
+  mutationBusy: boolean,
+  actions: DroppedFileImportActions,
+): void {
+  if (!file || mutationBusy) return;
+  actions.runWithReplacementGuard(async () => {
+    if (!(await actions.runLibraryMutationPreflight())) return;
+    await actions.importFile(file);
+  });
+}
 
 function recordingName(now = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -134,7 +156,9 @@ export function VocalPitchView({
   const [recordingResultPending, setRecordingResultPending] = useState(false);
   const [modelDownloadProgress, setModelDownloadProgress] = useState<number | null>(null);
   const [renameRequest, setRenameRequest] = useState<VocalRenameRequest | null>(null);
+  const [fileDragActive, setFileDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileDragDepthRef = useRef(0);
   const analysisRequestGenerationRef = useRef(0);
   const lastNavigationRequestIdRef = useRef(0);
   const materialBaseUpdatedAtRef = useRef<string | null>(null);
@@ -580,6 +604,40 @@ export function VocalPitchView({
     }
   }, [analyzeDecoded, cancelAnalysis, config, selectAnalysisMode]);
 
+  const beginFileDrag = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer.types)) return;
+    event.preventDefault();
+    fileDragDepthRef.current += 1;
+    if (mutationBusy) return;
+    event.dataTransfer.dropEffect = "copy";
+    setFileDragActive(true);
+  }, [mutationBusy]);
+
+  const continueFileDrag = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer.types)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = mutationBusy ? "none" : "copy";
+  }, [mutationBusy]);
+
+  const endFileDrag = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer.types)) return;
+    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+    if (fileDragDepthRef.current === 0) setFileDragActive(false);
+  }, []);
+
+  const dropFile = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    if (!hasDraggedFiles(event.dataTransfer.types)) return;
+    event.preventDefault();
+    fileDragDepthRef.current = 0;
+    setFileDragActive(false);
+    const file = event.dataTransfer.files.item(0);
+    requestDroppedFileImport(file, mutationBusy, {
+      importFile,
+      runLibraryMutationPreflight,
+      runWithReplacementGuard,
+    });
+  }, [importFile, mutationBusy, runLibraryMutationPreflight, runWithReplacementGuard]);
+
   const openMaterial = useCallback((target: VocalAudioMaterial) => {
     runWithReplacementGuard(() => {
       const normalizedTarget = { ...target, config: normalizeVocalPitchConfig(target.config) };
@@ -767,7 +825,13 @@ export function VocalPitchView({
           ) : null}
         </header>
 
-        <div className="vocal-preview-stage">
+        <div
+          className="vocal-preview-stage"
+          onDragEnter={beginFileDrag}
+          onDragLeave={endFileDrag}
+          onDragOver={continueFileDrag}
+          onDrop={dropFile}
+        >
           <PitchPreview
             currentPitchHz={currentFrame?.frequencyHz ?? null}
             currentTime={effectiveTime}
@@ -791,6 +855,12 @@ export function VocalPitchView({
                 </button>
               </div>
               <span>支持最长 10 分钟的单声部人声</span>
+            </div>
+          ) : null}
+          {fileDragActive ? (
+            <div className="vocal-file-drop-overlay" role="status">
+              <FolderUp size={28} />
+              <strong>松开以上传音视频</strong>
             </div>
           ) : null}
         </div>

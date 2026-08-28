@@ -3452,6 +3452,20 @@ button.danger:hover:not(:disabled) {
   position: relative;
 }
 
+.vocal-file-drop-overlay {
+  align-items: center;
+  background: rgba(231, 242, 239, 0.72);
+  color: var(--accent-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  inset: 0;
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+  z-index: 6;
+}
+
 .pitch-preview {
   background: var(--surface);
   display: grid;
