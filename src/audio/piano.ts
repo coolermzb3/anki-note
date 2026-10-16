@@ -95,7 +95,7 @@ function getSampler({ retryFailed = false }: GetSamplerOptions = {}): Tone.Sampl
     };
 
     try {
-      // Salamander Grand Piano samples by Alexander Holm, CC BY 3.0. See THIRD_PARTY_AUDIO.md.
+      // Salamander Grand Piano samples by Alexander Holm, CC BY 3.0. See THIRD_PARTY_NOTICES.md.
       sampler = new Tone.Sampler({
         urls: PIANO_SAMPLE_URLS,
         baseUrl: PIANO_SAMPLE_BASE_URL,

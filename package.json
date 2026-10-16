@@ -1,13 +1,16 @@
 {
   "name": "scoretone",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "version": "0.1.0",
   "type": "module",
   "packageManager": "pnpm@11.10.0",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 6136 --strictPort",
-    "dev:open": "vite --host 127.0.0.1 --port 6136 --strictPort --open http://127.0.0.1:6136/",
-    "build": "tsc -b && vite build",
+    "licenses": "node scripts/generate-licenses.mjs",
+    "test:licenses": "node --test scripts/generate-licenses.node-test.mjs",
+    "dev": "pnpm run licenses && vite --host 127.0.0.1 --port 6136 --strictPort",
+    "dev:open": "pnpm run licenses && vite --host 127.0.0.1 --port 6136 --strictPort --open http://127.0.0.1:6136/",
+    "build": "pnpm run licenses && tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 6136 --strictPort --open http://127.0.0.1:6136/",
     "test": "vitest run"
   },

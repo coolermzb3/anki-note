@@ -1,5 +1,7 @@
 node_modules/
 dist/
+/public/legal/
+/.codex-temp/
 .vite-dev.*.log
 *.local
 *.tsbuildinfo

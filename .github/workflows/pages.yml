@@ -29,9 +29,11 @@ jobs:
       - uses: actions/configure-pages@v6
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      - run: pnpm run test:licenses
       - run: pnpm run build
         env:
           GITHUB_PAGES: "true"
+          VITE_SOURCE_URL: https://github.com/${{ github.repository }}/tree/${{ github.sha }}
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
