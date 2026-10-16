@@ -34,6 +34,7 @@ export class AppDatabase extends Dexie {
   vocalAudioMaterials!: Table<VocalAudioMaterial, string>;
 
   constructor() {
+    // "anki-note" is ScoreTone's former name; keep this database name to preserve existing user data.
     super("anki-note");
     this.version(1).stores({
       settings: "id",

@@ -2,15 +2,15 @@ import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 
-import anki_note_analysis.backtest as backtest
-from anki_note_analysis.backtest import (
+import scoretone_analysis.backtest as backtest
+from scoretone_analysis.backtest import (
     audit_adaptive_v2_maintenance,
     historical_queue_replay,
     observed_unseen_gaps,
     queue_replay_at_state,
     simulate_queue,
 )
-from anki_note_analysis.policies import CurrentWeightParameters
+from scoretone_analysis.policies import CurrentWeightParameters
 
 
 def _performance() -> pd.DataFrame:

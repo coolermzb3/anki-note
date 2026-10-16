@@ -58,7 +58,7 @@ def _default_paths() -> tuple[Path, Path]:
 
 def parse_args() -> argparse.Namespace:
     backup_default, output_default = _default_paths()
-    parser = argparse.ArgumentParser(description="Read-only analysis of anki-note backup data")
+    parser = argparse.ArgumentParser(description="Read-only analysis of ScoreTone backup data")
     parser.add_argument("--backup-dir", type=Path, default=backup_default)
     parser.add_argument("--output-dir", type=Path, default=output_default)
     parser.add_argument("--bootstrap-iterations", type=int, default=500)

@@ -2,8 +2,10 @@
 
 ## Verification
 
+- `anki-note` is ScoreTone's former name. Preserve existing browser database names, storage keys, cache identifiers, directory-picker IDs, and legacy cache cleanup references; renaming them requires a separate compatibility migration.
+
 - Always run `pnpm` commands with the Windows-side pnpm installation, including when the agent shell is running in WSL. Do not invoke WSL-side `pnpm` or `npm` for this project.
-- From WSL, launch PowerShell explicitly and set the Windows working directory instead of relying on the inherited cwd: `pwsh.exe -NoProfile -Command "Set-Location 'E:\codex\anki-note'; cmd.exe /d /c 'call C:\Dev\autostart.bat && call pnpm test'"`.
+- From WSL, launch PowerShell explicitly and set the Windows working directory instead of relying on the inherited cwd: `pwsh.exe -NoProfile -Command "Set-Location 'E:\codex\scoretone'; cmd.exe /d /c 'call C:\Dev\autostart.bat && call pnpm test'"`.
 - Leave production builds to the repository's pre-commit hook; do not run them during ordinary implementation or incremental tweaks unless investigating a build-only failure.
 - Browser/UI verification is not required by default. Use tests and the pre-commit build unless the user explicitly asks for browser verification or a browser-only failure needs reproduction.
 - The user's long-running `127.0.0.1:6136` dev server may be reused for navigation, inspection, performance measurement, and other verification that does not create persisted practice/review/recall records or write test data into the backup.

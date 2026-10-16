@@ -1,14 +1,14 @@
 import numpy as np
 import pandas as pd
 
-from anki_note_analysis.metrics import (
+from scoretone_analysis.metrics import (
     _tier_codes_by_row,
     daily_speed_metrics,
     medium_or_higher_active_days,
     recent_per_note_window,
     rolling_equal_note_metrics,
 )
-from anki_note_analysis.policies import tier_labels
+from scoretone_analysis.policies import tier_labels
 
 
 def test_vectorized_tier_codes_match_policy_tiers() -> None:

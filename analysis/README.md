@@ -7,15 +7,15 @@ From the repository root:
 
 ```powershell
 uv sync --project analysis
-uv run --project analysis anki-note-analysis
-uv run --project analysis anki-note-analysis --full
-uv run --project analysis pytest
+uv run --project analysis scoretone-analysis
+uv run --project analysis scoretone-analysis --full
+uv run --project analysis pytest -c analysis/pyproject.toml analysis/tests
 ```
 
 Optional paths can be supplied explicitly:
 
 ```powershell
-uv run --project analysis anki-note-analysis --backup-dir backup --output-dir analysis/output
+uv run --project analysis scoretone-analysis --backup-dir backup --output-dir analysis/output
 ```
 
 The default command is the routine audit: it replays the production `adaptive_v2` policy and reports the observed queue

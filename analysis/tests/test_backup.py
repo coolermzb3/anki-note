@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from anki_note_analysis.backup import (
+from scoretone_analysis.backup import (
     BackupSnapshot,
     backup_content_fingerprint,
     load_backup,

@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from anki_note_analysis.policies import (
+from scoretone_analysis.policies import (
     CurrentWeightParameters,
     adaptive_distribution,
     adaptive_v2_scores,
