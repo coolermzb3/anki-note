@@ -1,8 +1,8 @@
-# 谱音 · ScoreTone
+<h1 align="center">谱音 · ScoreTone</h1>
 
-**见谱于眼，触键于指，知音于耳，合律于声。**
+<p align="center"><strong>见谱于眼，触键于指，知音于耳，合律于声。</strong></p>
 
-*See the Score. Touch the Key. Hear the Tone. Sing in Tune.*
+<p align="center"><em>See the Score. Touch the Key. Hear the Tone. Sing in Tune.</em></p>
 
 谱音 ScoreTone 是一个以五线谱识读为起点的纯前端音乐训练工具，支持单音与连续读谱、MIDI／电脑键盘交互、听音自测和清唱音准分析。练习记录与音频素材保存在本地。
 
@@ -66,7 +66,7 @@ MIDI、麦克风和目录备份需要浏览器支持相应接口，并在首次�
 
 ## 许可证
 
-Copyright © 2026 coolermzb3 及贡献者。除另有说明的第三方内容外，谱音 · ScoreTone 按 [GNU AGPL v3 或更新版本](LICENSE)（`AGPL-3.0-or-later`）提供，不附带担保。允许商业使用；分发或提供修改后的网络版本时，应遵守许可中的源码提供等要求。
+Copyright © 2026 [coolermzb3](https://github.com/coolermzb3) 及贡献者。除另有说明的第三方内容外，谱音 · ScoreTone 按 [GNU AGPL v3 或更新版本](LICENSE)（`AGPL-3.0-or-later`）提供。
 
 依赖、模型、字体及钢琴采样保留各自许可，见 [第三方声明](THIRD_PARTY_NOTICES.md)。网站「设置 → 源码与许可证」提供源码、完整许可和第三方声明入口。用户录音、备份及练习记录不会仅因使用本软件而采用 AGPL。
 

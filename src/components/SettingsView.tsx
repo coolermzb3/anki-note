@@ -422,7 +422,7 @@ export function SettingsView({
       </div>
       <div className="panel settings-panel">
         <h2>源码与许可证</h2>
-        <p>谱音 · ScoreTone © 2026 coolermzb3 及贡献者。按 AGPL-3.0-or-later 许可提供，不附带担保；可按许可条款使用、修改和再分发。</p>
+        <p>谱音 · ScoreTone © 2026 coolermzb3 及贡献者。按 AGPL-3.0-or-later 许可提供，不附带担保，可按许可再分发。</p>
         <div className="action-row">
           <a href={import.meta.env.VITE_SOURCE_URL || "https://github.com/coolermzb3/scoretone"} target="_blank" rel="noopener noreferrer">本版本源码</a>
           <a href={`${import.meta.env.BASE_URL}legal/AGPL-3.0.txt`} target="_blank" rel="noopener noreferrer">AGPL 许可证</a>
