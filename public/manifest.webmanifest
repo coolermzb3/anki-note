@@ -1,7 +1,8 @@
 {
-  "name": "单音识谱",
-  "short_name": "识谱",
-  "description": "钢琴五线谱单音识谱练习",
+  "name": "谱音 · ScoreTone",
+  "short_name": "谱音",
+  "description": "识谱 · 触键 · 听音 · 合律。支持五线谱识读、听音自测和清唱音准分析。",
+  "id": ".",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#f7f3eb",

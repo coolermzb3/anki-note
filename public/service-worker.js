@@ -14,7 +14,11 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => !RETAINED_CACHE_NAMES.has(key)).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(
+        keys
+          .filter((key) => /^anki-note-v\d+$/.test(key) && !RETAINED_CACHE_NAMES.has(key))
+          .map((key) => caches.delete(key)),
+      ))
       .then(() => self.clients.claim()),
   );
 });
@@ -27,7 +31,10 @@ self.addEventListener("message", (event) => {
 
 function canHandle(request) {
   const url = new URL(request.url);
-  return request.method === "GET" && url.origin === self.location.origin && (url.protocol === "http:" || url.protocol === "https:");
+  return request.method === "GET"
+    && url.origin === self.location.origin
+    && url.pathname.startsWith(scopeUrl.pathname)
+    && (url.protocol === "http:" || url.protocol === "https:");
 }
 
 function cacheResponse(request, response) {

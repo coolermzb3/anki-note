@@ -1699,7 +1699,7 @@ export function PracticeView({
         <div className="setup-grid">
           <div className="panel setup-panel">
             <div className="panel-heading">
-              <h1>单音识谱</h1>
+              <h1>谱音 · ScoreTone</h1>
               <div className="practice-setup-heading-meta">
                 <div className="practice-midi-heading-status">
                   <span title={midi.selectedInput?.name}>
