@@ -12,6 +12,18 @@ export default defineConfig({
   },
   server: {
     allowedHosts: tailscaleAllowedHosts,
+    watch: {
+      ignored: [
+        "**/analysis/**",
+        "**/backup/**",
+        "**/.venv/**",
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/.ruff_cache/**",
+        "**/.codex-temp/**",
+        "**/.codegraph/**",
+      ],
+    },
   },
   preview: {
     allowedHosts: tailscaleAllowedHosts,
